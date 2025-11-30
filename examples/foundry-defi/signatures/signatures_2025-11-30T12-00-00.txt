@@ -1,0 +1,84 @@
+# Contract Signatures - DeFi Protocol
+# Generated: 2025-11-30T12:00:00.000Z
+# Project: Foundry DeFi Example
+
+## LiquidityPool (src/LiquidityPool.sol)
+
+### Functions
+addLiquidity(uint256,uint256,uint256,uint256,address) -> 0x4515cef3
+removeLiquidity(uint256,uint256,uint256,address) -> 0xbaa2abde
+swap(uint256,uint256,address) -> 0x022c0d9f
+getReserves() -> 0x0902f1ac
+getAmountOut(uint256,uint256,uint256) -> 0x054d50d4
+transfer(address,uint256) -> 0xa9059cbb
+approve(address,uint256) -> 0x095ea7b3
+transferFrom(address,address,uint256) -> 0x23b872dd
+balanceOf(address) -> 0x70a08231
+allowance(address,address) -> 0xdd62ed3e
+name() -> 0x06fdde03
+symbol() -> 0x95d89b41
+decimals() -> 0x313ce567
+totalSupply() -> 0x18160ddd
+token0() -> 0x0dfe1681
+token1() -> 0xd21220a7
+reserve0() -> 0x443cb4bc
+reserve1() -> 0x5a76f25e
+
+### Events
+Mint(address,uint256,uint256) -> 0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f
+Burn(address,uint256,uint256,address) -> 0xdccd412f0b1252819cb1fd330b93224ca42612892bb3f4f789976e6d81936496
+Swap(address,uint256,uint256,uint256,uint256,address) -> 0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822
+Sync(uint256,uint256) -> 0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1
+Transfer(address,address,uint256) -> 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+Approval(address,address,uint256) -> 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
+
+### Errors
+InsufficientLiquidity() -> 0xbb55fd27
+InvalidAmount() -> 0x2c5211c6
+InsufficientOutputAmount() -> 0x42301c23
+TransferFailed() -> 0x90b8ec18
+
+## StakingRewards (src/StakingRewards.sol)
+
+### Functions
+stake(uint256) -> 0xa694fc3a
+withdraw(uint256) -> 0x2e1a7d4d
+claimReward() -> 0xb88a802f
+exit() -> 0xe9fad8ee
+setRewardRate(uint256) -> 0x8c52dc41
+rewardPerToken() -> 0xcd3daf9d
+earned(address) -> 0x008cc262
+getStakedBalance(address) -> 0x5befec47
+getTotalStaked() -> 0x4b1f7d9d
+owner() -> 0x8da5cb5b
+rewardsToken() -> 0xd1af0c1d
+stakingToken() -> 0x72f702f3
+rewardRate() -> 0x7b0a47ee
+lastUpdateTime() -> 0xc8f33c91
+rewardPerTokenStored() -> 0xdf136d65
+totalStaked() -> 0x817b1cd2
+stakedBalance(address) -> 0xa3054c04
+rewards(address) -> 0x0700037d
+userRewardPerTokenPaid(address) -> 0x8b876347
+
+### Events
+Staked(address,uint256) -> 0x9e71bc8eea02a63969f509818f2dafb9254532904319f9dbda79b67bd34a5f3d
+Withdrawn(address,uint256) -> 0x7084f5476618d8e60b11ef0d7d3f06914655adb8793e28ff7f018d4c76d505d5
+RewardPaid(address,uint256) -> 0xe2403640ba68fed3a2f88b7557551d1993f84b99bb10ff833f0cf8db0c5e0486
+RewardRateUpdated(uint256) -> 0x3c6881f5e88b0c59c6afbb7c3a7bca2e1787a32fcfd24393f5e61cca6673e4f7
+
+### Errors
+Unauthorized() -> 0x82b42900
+InvalidAmount() -> 0x2c5211c6
+InsufficientBalance() -> 0xf4d678b8
+
+## SafeMath (lib/SafeMath.sol)
+
+### Functions
+add(uint256,uint256) -> 0x771602f7
+sub(uint256,uint256) -> 0xb67d77c5
+mul(uint256,uint256) -> 0xc8a4ac9c
+div(uint256,uint256) -> 0xa391c15b
+sqrt(uint256) -> 0x677342ce
+min(uint256,uint256) -> 0x7ae2b5c7
+max(uint256,uint256) -> 0x6d5433e6

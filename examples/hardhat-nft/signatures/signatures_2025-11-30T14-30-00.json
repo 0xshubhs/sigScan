@@ -1,0 +1,303 @@
+{
+  "metadata": {
+    "generatedAt": "2025-11-30T14:30:00.000Z",
+    "projectType": "hardhat",
+    "totalContracts": 2,
+    "totalFunctions": 42,
+    "totalEvents": 11,
+    "totalErrors": 10
+  },
+  "contracts": {
+    "ERC721A": {
+      "path": "contracts/ERC721A.sol",
+      "category": "contracts",
+      "functions": [
+        {
+          "name": "mint",
+          "signature": "mint(uint256)",
+          "selector": "0xa0712d68",
+          "visibility": "external"
+        },
+        {
+          "name": "batchMint",
+          "signature": "batchMint(address[],uint256[])",
+          "selector": "0xf896f0a4",
+          "visibility": "external"
+        },
+        {
+          "name": "transferFrom",
+          "signature": "transferFrom(address,address,uint256)",
+          "selector": "0x23b872dd",
+          "visibility": "external"
+        },
+        {
+          "name": "safeTransferFrom",
+          "signature": "safeTransferFrom(address,address,uint256)",
+          "selector": "0x42842e0e",
+          "visibility": "external"
+        },
+        {
+          "name": "safeTransferFrom",
+          "signature": "safeTransferFrom(address,address,uint256,bytes)",
+          "selector": "0xb88d4fde",
+          "visibility": "public"
+        },
+        {
+          "name": "approve",
+          "signature": "approve(address,uint256)",
+          "selector": "0x095ea7b3",
+          "visibility": "external"
+        },
+        {
+          "name": "setApprovalForAll",
+          "signature": "setApprovalForAll(address,bool)",
+          "selector": "0xa22cb465",
+          "visibility": "external"
+        },
+        {
+          "name": "setBaseURI",
+          "signature": "setBaseURI(string)",
+          "selector": "0x55f804b3",
+          "visibility": "external"
+        },
+        {
+          "name": "setMintPrice",
+          "signature": "setMintPrice(uint256)",
+          "selector": "0xf4a0a528",
+          "visibility": "external"
+        },
+        {
+          "name": "withdraw",
+          "signature": "withdraw()",
+          "selector": "0x3ccfd60b",
+          "visibility": "external"
+        },
+        {
+          "name": "ownerOf",
+          "signature": "ownerOf(uint256)",
+          "selector": "0x6352211e",
+          "visibility": "public"
+        },
+        {
+          "name": "balanceOf",
+          "signature": "balanceOf(address)",
+          "selector": "0x70a08231",
+          "visibility": "public"
+        },
+        {
+          "name": "getApproved",
+          "signature": "getApproved(uint256)",
+          "selector": "0x081812fc",
+          "visibility": "public"
+        },
+        {
+          "name": "isApprovedForAll",
+          "signature": "isApprovedForAll(address,address)",
+          "selector": "0xe985e9c5",
+          "visibility": "public"
+        },
+        {
+          "name": "tokenURI",
+          "signature": "tokenURI(uint256)",
+          "selector": "0xc87b56dd",
+          "visibility": "public"
+        },
+        {
+          "name": "supportsInterface",
+          "signature": "supportsInterface(bytes4)",
+          "selector": "0x01ffc9a7",
+          "visibility": "public"
+        }
+      ],
+      "events": [
+        {
+          "name": "Transfer",
+          "signature": "Transfer(address,address,uint256)",
+          "hash": "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+        },
+        {
+          "name": "Approval",
+          "signature": "Approval(address,address,uint256)",
+          "hash": "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+        },
+        {
+          "name": "ApprovalForAll",
+          "signature": "ApprovalForAll(address,address,bool)",
+          "hash": "0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31"
+        },
+        {
+          "name": "Minted",
+          "signature": "Minted(address,uint256,uint256)",
+          "hash": "0x30385c845b448a36257a6a1716e6ad2e1bc2cbe333cde1e69fe849ad6511adfe"
+        },
+        {
+          "name": "BaseURIUpdated",
+          "signature": "BaseURIUpdated(string)",
+          "hash": "0x5411e8ebf1636d9e83d5fc4900bf80cbac82e8790da2a4c94db4895e889eedf6"
+        }
+      ],
+      "errors": [
+        {
+          "name": "NotOwner",
+          "signature": "NotOwner()",
+          "selector": "0x30cd7471"
+        },
+        {
+          "name": "InvalidQuantity",
+          "signature": "InvalidQuantity()",
+          "selector": "0xee0aef7a"
+        },
+        {
+          "name": "MaxSupplyExceeded",
+          "signature": "MaxSupplyExceeded()",
+          "selector": "0xd05cb609"
+        },
+        {
+          "name": "InsufficientPayment",
+          "signature": "InsufficientPayment()",
+          "selector": "0x4dc14f07"
+        },
+        {
+          "name": "NonexistentToken",
+          "signature": "NonexistentToken()",
+          "selector": "0xceea21b6"
+        },
+        {
+          "name": "NotAuthorized",
+          "signature": "NotAuthorized()",
+          "selector": "0xea8e4eb5"
+        }
+      ]
+    },
+    "NFTMarketplace": {
+      "path": "contracts/NFTMarketplace.sol",
+      "category": "contracts",
+      "functions": [
+        {
+          "name": "createListing",
+          "signature": "createListing(address,uint256,uint256)",
+          "selector": "0x07e0db17",
+          "visibility": "external"
+        },
+        {
+          "name": "buyListing",
+          "signature": "buyListing(uint256)",
+          "selector": "0x2d006fbb",
+          "visibility": "external"
+        },
+        {
+          "name": "cancelListing",
+          "signature": "cancelListing(uint256)",
+          "selector": "0x9a9746f0",
+          "visibility": "external"
+        },
+        {
+          "name": "createAuction",
+          "signature": "createAuction(address,uint256,uint256,uint256)",
+          "selector": "0x2fbad683",
+          "visibility": "external"
+        },
+        {
+          "name": "placeBid",
+          "signature": "placeBid(uint256)",
+          "selector": "0xecfc7ecc",
+          "visibility": "external"
+        },
+        {
+          "name": "endAuction",
+          "signature": "endAuction(uint256)",
+          "selector": "0x2a24f46c",
+          "visibility": "external"
+        },
+        {
+          "name": "withdrawBid",
+          "signature": "withdrawBid(uint256)",
+          "selector": "0x2e4f6c7f",
+          "visibility": "external"
+        },
+        {
+          "name": "getListing",
+          "signature": "getListing(uint256)",
+          "selector": "0x2e71d0fb",
+          "visibility": "external"
+        },
+        {
+          "name": "getAuction",
+          "signature": "getAuction(uint256)",
+          "selector": "0x78bd7935",
+          "visibility": "external"
+        },
+        {
+          "name": "setFeePercentage",
+          "signature": "setFeePercentage(uint256)",
+          "selector": "0x9d76ea58",
+          "visibility": "external"
+        }
+      ],
+      "events": [
+        {
+          "name": "Listed",
+          "signature": "Listed(uint256,address,address,uint256,uint256)",
+          "hash": "0x18b3e48a1b8c62ac38c5f3a89e5b88c1f09f8d7eb7fc65a0e0aa1f7c0c4e8c1a"
+        },
+        {
+          "name": "Sold",
+          "signature": "Sold(uint256,address,uint256)",
+          "hash": "0x5764dbcef91eb6f946584f4ea671217c686fa7e858ce4f9f42d08422b86556a9"
+        },
+        {
+          "name": "ListingCancelled",
+          "signature": "ListingCancelled(uint256)",
+          "hash": "0x8d1b5c9c80e62e41db9f8fd9e0bc8cdc9e6e1e4d5c7de8c7c1d3b3a8e5f7c9d1"
+        },
+        {
+          "name": "AuctionCreated",
+          "signature": "AuctionCreated(uint256,address,uint256,uint256,uint256)",
+          "hash": "0x8d1b5c9c80e62e41db9f8fd9e0bc8cdc9e6e1e4d5c7de8c7c1d3b3a8e5f7c9d2"
+        },
+        {
+          "name": "BidPlaced",
+          "signature": "BidPlaced(uint256,address,uint256)",
+          "hash": "0x8d1b5c9c80e62e41db9f8fd9e0bc8cdc9e6e1e4d5c7de8c7c1d3b3a8e5f7c9d3"
+        },
+        {
+          "name": "AuctionEnded",
+          "signature": "AuctionEnded(uint256,address,uint256)",
+          "hash": "0x8d1b5c9c80e62e41db9f8fd9e0bc8cdc9e6e1e4d5c7de8c7c1d3b3a8e5f7c9d4"
+        }
+      ],
+      "errors": [
+        {
+          "name": "NotSeller",
+          "signature": "NotSeller()",
+          "selector": "0x07eb5e94"
+        },
+        {
+          "name": "ListingNotActive",
+          "signature": "ListingNotActive()",
+          "selector": "0x1eb2e385"
+        },
+        {
+          "name": "InsufficientPayment",
+          "signature": "InsufficientPayment()",
+          "selector": "0x4dc14f07"
+        },
+        {
+          "name": "BidTooLow",
+          "signature": "BidTooLow()",
+          "selector": "0x7b5669b7"
+        },
+        {
+          "name": "AuctionEnded",
+          "signature": "AuctionEnded()",
+          "selector": "0xd3f7c106"
+        },
+        {
+          "name": "AuctionNotEnded",
+          "signature": "AuctionNotEnded()",
+          "selector": "0x8f9daa97"
+        }
+      ]
+    }
+  }
+}

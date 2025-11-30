@@ -171,6 +171,73 @@ signatures/
 └── signatures-contracts.json (latest symlink)
 ```
 
+## Example Projects
+
+The `examples/` directory contains complete sample projects demonstrating best practices and folder structure conventions:
+
+### Foundry Projects
+
+**foundry-defi/** - DeFi Protocol Example
+```
+foundry-defi/
+├── foundry.toml
+├── src/
+│   ├── LiquidityPool.sol      # AMM liquidity pool implementation
+│   └── StakingRewards.sol     # Token staking with rewards
+├── lib/
+│   └── SafeMath.sol            # Math utility library
+├── test/
+│   └── LiquidityPool.t.sol    # Contract tests
+└── signatures/
+    ├── signatures_2025-11-30T12-00-00.json
+    └── signatures_2025-11-30T12-00-00.txt
+```
+
+Features demonstrated:
+- AMM liquidity pool with swap functionality
+- Staking rewards distribution system
+- Library usage and organization
+- Comprehensive function signatures
+- Event and error definitions
+
+### Hardhat Projects
+
+**hardhat-nft/** - NFT Marketplace Example
+```
+hardhat-nft/
+├── hardhat.config.js
+├── contracts/
+│   ├── ERC721A.sol             # Optimized NFT implementation
+│   └── NFTMarketplace.sol      # Marketplace with auctions
+├── test/
+│   └── ERC721A.test.js         # Contract tests
+└── signatures/
+    ├── signatures_2025-11-30T14-30-00.json
+    └── signatures_2025-11-30T14-30-00.txt
+```
+
+Features demonstrated:
+- ERC721A batch minting optimization
+- NFT marketplace with listing and auction support
+- Complex contract interactions
+- Structured event emissions
+- Custom error handling
+
+### Running Examples
+
+```bash
+# Scan the DeFi example
+cd examples/foundry-defi
+sigscan scan
+
+# Scan the NFT example
+cd examples/hardhat-nft
+sigscan scan
+
+# Watch mode for development
+sigscan watch
+```
+
 ### JSON Format
 
 ```json
