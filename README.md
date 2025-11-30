@@ -173,7 +173,7 @@ signatures/
 
 ## Example Projects
 
-The `examples/` directory contains complete sample projects demonstrating best practices and folder structure conventions:
+The `examples/` directory contains complete sample projects demonstrating best practices and folder structure conventions with production-grade contracts:
 
 ### Foundry Projects
 
@@ -200,6 +200,32 @@ Features demonstrated:
 - Comprehensive function signatures
 - Event and error definitions
 
+**foundry-dao/** - Advanced DAO Governance System
+```
+foundry-dao/
+├── foundry.toml
+├── src/
+│   ├── GovernanceToken.sol     # ERC20 with delegation & checkpoints
+│   ├── GovernorAlpha.sol       # On-chain governance
+│   ├── Timelock.sol            # Delayed execution
+│   └── Treasury.sol            # DAO fund management
+├── test/
+│   └── Governance.t.sol        # Governance tests
+└── signatures/
+    ├── signatures_2025-11-30T16-00-00.json
+    └── signatures_2025-11-30T16-00-00.txt
+```
+
+Features demonstrated:
+- Vote delegation with checkpoint system
+- Proposal lifecycle management (propose, vote, queue, execute)
+- Binary search for historical vote queries
+- EIP-712 signature support for gasless voting
+- Timelock with grace period and delay controls
+- Treasury with budget management and spending proposals
+- Complex state machine patterns
+- Advanced access control and security mechanisms
+
 ### Hardhat Projects
 
 **hardhat-nft/** - NFT Marketplace Example
@@ -223,6 +249,55 @@ Features demonstrated:
 - Structured event emissions
 - Custom error handling
 
+**hardhat-marketplace/** - Advanced Trading Platform
+```
+hardhat-marketplace/
+├── hardhat.config.js
+├── contracts/
+│   ├── OrderBook.sol           # Decentralized order book exchange
+│   └── LendingPool.sol         # Variable rate lending protocol
+├── test/
+│   └── OrderBook.test.js       # Exchange tests
+└── signatures/
+    ├── signatures_2025-11-30T18-00-00.json
+    └── signatures_2025-11-30T18-00-00.txt
+```
+
+Features demonstrated:
+- Limit and market order matching engine
+- Order book depth and best bid/ask queries
+- Variable interest rate calculations
+- Utilization-based rate curves
+- Liquidation mechanism for undercollateralized positions
+- Health factor calculations
+- Fee collection and distribution
+- Complex state management with multiple data structures
+
+**hardhat-bridge/** - Cross-Chain Bridge Infrastructure
+```
+hardhat-bridge/
+├── hardhat.config.js
+├── contracts/
+│   ├── CrossChainBridge.sol    # Multi-sig bridge with validation
+│   └── RelayerNetwork.sol      # Decentralized relayer system
+├── test/
+│   └── Bridge.test.js          # Bridge tests
+└── signatures/
+    ├── signatures_2025-11-30T19-00-00.json
+    └── signatures_2025-11-30T19-00-00.txt
+```
+
+Features demonstrated:
+- Multi-signature validation with weighted voting
+- Validator network with reputation system
+- Transfer lifecycle management (pending, validated, completed)
+- Timeout and cancellation mechanisms
+- Relayer staking and slashing
+- Message delivery with cryptographic proofs
+- Cross-chain communication patterns
+- Dispute resolution system
+- Dynamic threshold calculations
+
 ### Running Examples
 
 ```bash
@@ -230,8 +305,20 @@ Features demonstrated:
 cd examples/foundry-defi
 sigscan scan
 
-# Scan the NFT example
+# Scan the DAO governance example
+cd examples/foundry-dao
+sigscan scan
+
+# Scan the NFT marketplace example
 cd examples/hardhat-nft
+sigscan scan
+
+# Scan the trading platform example
+cd examples/hardhat-marketplace
+sigscan scan
+
+# Scan the bridge example
+cd examples/hardhat-bridge
 sigscan scan
 
 # Watch mode for development

@@ -1,0 +1,138 @@
+# Contract Signatures - DAO Governance System
+# Generated: 2025-11-30T16:00:00.000Z
+# Project: Foundry DAO Example
+
+## GovernanceToken (src/GovernanceToken.sol)
+
+### Functions
+balanceOf(address) -> 0x70a08231
+allowance(address,address) -> 0xdd62ed3e
+transfer(address,uint256) -> 0xa9059cbb
+approve(address,uint256) -> 0x095ea7b3
+transferFrom(address,address,uint256) -> 0x23b872dd
+delegate(address) -> 0x5c19a95c
+delegateBySig(address,uint256,uint256,uint8,bytes32,bytes32) -> 0xc3cda520
+getCurrentVotes(address) -> 0xb4b5ea57
+getPriorVotes(address,uint256) -> 0x782d6fe1
+delegates(address) -> 0x587cde1e
+name() -> 0x06fdde03
+symbol() -> 0x95d89b41
+decimals() -> 0x313ce567
+totalSupply() -> 0x18160ddd
+
+### Events
+Transfer(address,address,uint256) -> 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+Approval(address,address,uint256) -> 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
+DelegateChanged(address,address,address) -> 0x3134e8a2e6d97e929a7e54011ea5485d7d196dd5f0ba4d4ef95803e8e3fc257f
+DelegateVotesChanged(address,uint256,uint256) -> 0xdec2bacdd2f05b59de34da9b523dff8be42e5e38e818c82fdb0bae774387a724
+
+### Errors
+InsufficientBalance(uint256,uint256) -> 0xcf479181
+InsufficientAllowance(uint256,uint256) -> 0xf14a42b7
+InvalidAddress() -> 0xe6c4247b
+BlockNotYetMined() -> 0x5ec8b116
+
+## GovernorAlpha (src/GovernorAlpha.sol)
+
+### Functions
+propose(address[],uint256[],string[],bytes[],string) -> 0xda95691a
+queue(uint256) -> 0xddf0b009
+execute(uint256) -> 0xfe0d94c1
+cancel(uint256) -> 0x40e58ee5
+castVote(uint256,uint8) -> 0x56781388
+castVoteWithReason(uint256,uint8,string) -> 0x7b3c71d3
+castVoteBySig(uint256,uint8,uint8,bytes32,bytes32) -> 0x3bccf4fd
+getActions(uint256) -> 0x328dd982
+getReceipt(uint256,address) -> 0xe23a9a52
+state(uint256) -> 0x3e4f49e6
+name() -> 0x06fdde03
+governanceToken() -> 0x61461954
+guardian() -> 0x452a9320
+timelock() -> 0xd33219b4
+proposalCount() -> 0xda35c664
+latestProposalIds(address) -> 0x17977c61
+VOTING_DELAY() -> 0x3932abb1
+VOTING_PERIOD() -> 0x02a251a3
+PROPOSAL_THRESHOLD() -> 0xb58131b0
+QUORUM_VOTES() -> 0x24bc1a64
+
+### Events
+ProposalCreated(uint256,address,address[],uint256[],string[],bytes[],uint256,uint256,string) 
+VoteCast(address,uint256,uint8,uint256,string) -> 0xb8e138887d0aa13bab447e82de9d5c1777041ecd21ca36ba824ff1e6c07ddda4
+ProposalCanceled(uint256) -> 0x789cf55be980739dad1d0699b93b58e806b51c9d96619bfa8fe0a28abaa7b30c
+ProposalQueued(uint256,uint256) -> 0x9a2e42fd6722813d69113e7d0079d3d940171428df7373df9c7f7617cfda2892
+ProposalExecuted(uint256) -> 0x712ae1383f79ac853f8d882153778e0260ef8f03b504e2866e0593e04d2b291f
+
+### Errors
+BelowProposalThreshold(uint256,uint256) -> 0x3e4f9f08
+ProposalInfoArityMismatch() -> 0x3e0f946f
+NoActions() -> 0x88a21e4f
+TooManyActions() -> 0x2eea8b9f
+ProposerHasActiveProp() -> 0xc1a4b8d0
+InvalidProposalId() -> 0xb2e532de
+ProposalNotActive() -> 0xcfb89898
+AlreadyVoted() -> 0x56ce7894
+InvalidVoteType() -> 0xdb3277a5
+ProposalNotSucceeded() -> 0x8f9c7d2e
+ProposalNotQueued() -> 0x2d4a8d4e
+
+## Timelock (src/Timelock.sol)
+
+### Functions
+setDelay(uint256) -> 0xe177246e
+acceptAdmin() -> 0x0e18b681
+setPendingAdmin(address) -> 0x4dd18bf5
+queueTransaction(address,uint256,string,bytes,uint256) -> 0x3a66f901
+cancelTransaction(address,uint256,string,bytes,uint256) -> 0x591fcdfe
+executeTransaction(address,uint256,string,bytes,uint256) -> 0x0825f38f
+admin() -> 0xf851a440
+pendingAdmin() -> 0x26782247
+delay() -> 0x6a42b8f8
+queuedTransactions(bytes32) -> 0xf2b06537
+GRACE_PERIOD() -> 0xc1a287e2
+MINIMUM_DELAY() -> 0xb1b43ae5
+MAXIMUM_DELAY() -> 0x7d645fab
+
+### Events
+NewAdmin(address) -> 0xf9ffabca9c8276e99321725bcb43fb076a6c66a54b7f21c4e8146d8519b417dc
+NewPendingAdmin(address) -> 0xca4f2f25d0898edd99413412fb94012f9e54ec8142f9b093e7720646a95b16a9
+NewDelay(uint256) -> 0x948b1f6a42ee138b7e34058ba85a37f716d55ff25ff05a763f15bed1f08c47fc
+CancelTransaction(bytes32,address,uint256,string,bytes,uint256)
+ExecuteTransaction(bytes32,address,uint256,string,bytes,uint256)
+QueueTransaction(bytes32,address,uint256,string,bytes,uint256)
+
+### Errors
+Unauthorized() -> 0x82b42900
+DelayOutOfBounds() -> 0x95a14a62
+TransactionNotQueued() -> 0x304b6a9c
+TimelockNotMet() -> 0x4e881eee
+TransactionStale() -> 0xe7e4e8e6
+ExecutionReverted() -> 0xdc6e7b63
+
+## Treasury (src/Treasury.sol)
+
+### Functions
+proposeSpending(address,uint256,string) -> 0x8f0c5543
+executeSpending(uint256) -> 0x3e73ecb4
+setBudget(address,uint256) -> 0x8c52dc41
+spendFromBudget(address,uint256) -> 0x5d0aa550
+emergencyWithdraw(address,uint256) -> 0x5312ea8e
+getBalance() -> 0x12065fe0
+governance() -> 0x5aa6e675
+spendingCount() -> 0x6c4c0e68
+spendings(uint256) -> 0x8d71d81e
+budgets(address) -> 0x142bb4b0
+
+### Events
+FundsReceived(address,uint256) -> 0xa241b9ce3c8e72e5647f49c7e37c6f235b4a79b4cef4d3c6b8e9f0d7f5e9a3b8
+SpendingProposed(uint256,address,uint256,string)
+SpendingExecuted(uint256) -> 0x8d71d81e4c4e7f3a5a2f9e8d7c6b5a4e3d2c1b0a9f8e7d6c5b4a3e2d1c0b9a8
+BudgetSet(address,uint256) -> 0x8c52dc413e73ecb45d0aa5505312ea8e12065fe05aa6e6756c4c0e688d71d81e
+EmergencyWithdraw(address,uint256) -> 0x5312ea8e12065fe05aa6e6756c4c0e688d71d81e8c52dc413e73ecb45d0aa550
+
+### Errors
+OnlyGovernance() -> 0x0764a357
+InsufficientBalance() -> 0xf4d678b8
+BudgetExceeded() -> 0x83e4dac3
+AlreadyExecuted() -> 0x38a8c010
+InvalidAmount() -> 0x2c5211c6

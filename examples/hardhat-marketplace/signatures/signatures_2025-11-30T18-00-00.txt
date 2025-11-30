@@ -1,0 +1,75 @@
+# Contract Signatures - Advanced Marketplace
+# Generated: 2025-11-30T18:00:00.000Z
+# Project: Hardhat Advanced Marketplace Example
+
+## OrderBook (contracts/OrderBook.sol)
+
+### Functions
+placeOrder(uint8,address,uint256,uint256) -> 0x1a9a7d4c
+cancelOrder(uint256) -> 0x514fcac7
+matchOrders(uint256,uint256) -> 0x8256d3e5
+getBestBid(address) -> 0x7d8f5c8f
+getBestAsk(address) -> 0x9d5c2d1e
+getOrderBook(address,uint256) -> 0x8c5be1e5
+getUserOrders(address) -> 0x7b5b1a4e
+getOrder(uint256) -> 0x88d695b2
+orderIdCounter() -> 0x0b4e0db3
+tradeIdCounter() -> 0x5d0afb56
+feeRate() -> 0x978bbdb9
+feeCollector() -> 0x46904840
+orders(uint256) -> 0x9c70b512
+trades(uint256) -> 0x8d71d81e
+
+### Events
+OrderPlaced(uint256,address,uint8,address,uint256,uint256)
+OrderMatched(uint256,uint256,uint256,uint256)
+OrderCancelled(uint256)
+OrderPartiallyFilled(uint256,uint256,uint256)
+TradeExecuted(uint256,address,address,uint256,uint256)
+
+### Errors
+InvalidAmount() -> 0x2c5211c6
+InvalidPrice() -> 0x0b3a70dd
+OrderNotFound() -> 0x7d9a57d6
+Unauthorized() -> 0x82b42900
+OrderNotOpen() -> 0x5d4c5b74
+InsufficientBalance() -> 0xf4d678b8
+
+## LendingPool (contracts/LendingPool.sol)
+
+### Functions
+createMarket(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256) -> 0x3b3ec08f
+deposit(address,uint256) -> 0x47e7ef24
+withdraw(address,uint256) -> 0xf3fef3a3
+borrow(address,uint256) -> 0xc5ebeaec
+repay(address,uint256) -> 0x371fd8e6
+liquidate(address,address,uint256) -> 0x5305a2d0
+getUtilizationRate(address) -> 0x6d8ba29e
+getBorrowRate(address) -> 0x67df77ed
+getSupplyRate(address) -> 0xb7cd4598
+getAccountHealth(address) -> 0x51ff2f10
+getUserAccount(address,address) -> 0x0c340a24
+getMarket(address) -> 0xd69c2f4d
+accounts(address,address) -> 0x5e5c06e2
+markets(address) -> 0x6c8b3b6e
+collateralFactors(address) -> 0x8a7fc1e5
+liquidationThresholds(address) -> 0x9c85b7e5
+supportedTokens(uint256) -> 0x78a5ad56
+admin() -> 0xf851a440
+SECONDS_PER_YEAR() -> 0xc1a287e2
+
+### Events
+Deposit(address,address,uint256)
+Withdraw(address,address,uint256)
+Borrow(address,address,uint256)
+Repay(address,address,uint256)
+Liquidation(address,address,address,uint256)
+MarketCreated(address,uint256,uint256)
+
+### Errors
+MarketNotActive() -> 0x1d5f7a0e
+InsufficientLiquidity() -> 0xbb55fd27
+InsufficientCollateral() -> 0x30e8a5e9
+HealthyPosition() -> 0x8d5c2c8e
+Unauthorized() -> 0x82b42900
+InvalidAmount() -> 0x2c5211c6

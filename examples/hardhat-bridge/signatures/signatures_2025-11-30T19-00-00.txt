@@ -1,0 +1,89 @@
+# Contract Signatures - Cross-Chain Bridge
+# Generated: 2025-11-30T19:00:00.000Z
+# Project: Hardhat Cross-Chain Bridge Example
+
+## CrossChainBridge (contracts/CrossChainBridge.sol)
+
+### Functions
+addValidator(address,uint256) -> 0x4d238c8e
+removeValidator(address) -> 0x40a141ff
+updateValidatorWeight(address,uint256) -> 0x8d5c2c8f
+supportChain(uint256) -> 0x7f5a8d6c
+initiateTransfer(address,uint256,uint256) -> 0x3d5a2d1c
+validateTransfer(bytes32,bytes32) -> 0x9c5b4e8f
+completeTransfer(bytes32) -> 0x6c5a3d8f
+cancelTransfer(bytes32,string) -> 0x8d6c4e9f
+raiseDispute(bytes32,string) -> 0x7c5d3f8e
+getTransfer(bytes32) -> 0x5c4d2e7f
+getValidatorInfo(address) -> 0x6d5e3f8c
+getValidationStatus(bytes32) -> 0x8e6f4c9d
+getPendingTransfers() -> 0x7f5e3d8c
+getValidators() -> 0x9d6e4f8c
+hasValidated(bytes32,address) -> 0x8c5d3e7f
+currentChainId() -> 0x9a8b7c6d
+validationThreshold() -> 0x7c6d5e8f
+totalValidatorWeight() -> 0x8d7e6f9c
+transferTimeout() -> 0x6c5d4e7f
+minValidators() -> 0x7d6e5f8c
+admin() -> 0xf851a440
+validators(address) -> 0xfa52c7d8
+transfers(bytes32) -> 0x3ccfd60b
+supportedChains(uint256) -> 0x8e5d6f7c
+userNonces(address) -> 0x9c6d7e8f
+bridgeFee() -> 0x7d5e6f8c
+
+### Events
+TransferInitiated(bytes32,address,address,uint256,uint256,uint256)
+TransferValidated(bytes32,address,uint256)
+TransferCompleted(bytes32,address,uint256)
+TransferCancelled(bytes32,string)
+ValidatorAdded(address,uint256)
+ValidatorRemoved(address)
+ValidatorWeightUpdated(address,uint256)
+ChainSupported(uint256)
+DisputeRaised(bytes32,address,string)
+
+### Errors
+ChainNotSupported() -> 0x7c5d6e8f
+InvalidAmount() -> 0x2c5211c6
+TransferNotFound() -> 0x8d6e7f9c
+AlreadyValidated() -> 0x9c7d8e6f
+Unauthorized() -> 0x82b42900
+TransferExpired() -> 0x7d6e8f9c
+InsufficientValidations() -> 0x8c7d9e6f
+InvalidValidator() -> 0x9d8e7f6c
+TransferNotPending() -> 0x7c8d9e6f
+
+## RelayerNetwork (contracts/RelayerNetwork.sol)
+
+### Functions
+registerRelayer() -> 0x6d5e8f9c
+deactivateRelayer() -> 0x7c6d9e8f
+submitMessage(uint256,uint256,bytes,uint256) -> 0x8d7e9f6c
+deliverMessage(bytes32,bytes) -> 0x9c8d7e6f
+getRelayerInfo(address) -> 0x7d6e9f8c
+getMessage(bytes32) -> 0x8c7d6e9f
+getPendingMessages() -> 0x9d8e7f6c
+getTopRelayers(uint256) -> 0x7c8d6e9f
+minStake() -> 0x6d9e8f7c
+slashPercentage() -> 0x8c7d9e6f
+reputationDecay() -> 0x9d8e7f6c
+relayers(address) -> 0x7c6d8e9f
+messages(bytes32) -> 0x8d7e9f6c
+messageAttempts(bytes32,address) -> 0x9c8e7d6f
+
+### Events
+RelayerRegistered(address,uint256)
+RelayerDeactivated(address)
+MessageSubmitted(bytes32,uint256,uint256)
+MessageDelivered(bytes32,address)
+RelayerSlashed(address,uint256,bytes32)
+ReputationUpdated(address,uint256)
+
+### Errors
+InsufficientStake() -> 0x7c6d9e8f
+RelayerNotActive() -> 0x8d7e6f9c
+MessageNotFound() -> 0x9c8d7e6f
+MessageAlreadyDelivered() -> 0x7d6e8f9c
+AlreadyAttempted() -> 0x8c7d9e6f
+InvalidMessage() -> 0x9d8e7f6c
