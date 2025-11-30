@@ -106,6 +106,78 @@ export class RealtimeAnalyzer {
       }
     });
 
+    // Analyze modifiers
+    const modifierRegex = /modifier\s+(\w+)\s*\([^)]*\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}/gs;
+    let modifierMatch;
+    while ((modifierMatch = modifierRegex.exec(content)) !== null) {
+      const [fullMatch, modifierName, modifierBody] = modifierMatch;
+      const modifierStart = content.indexOf(fullMatch);
+      const lines = content.substring(0, modifierStart).split('\n').length - 1;
+
+      // Gas estimation for modifier
+      const gasEstimate = this.gasEstimator.estimateGas(modifierBody, `modifier:${modifierName}`);
+      gasEstimates.set(`modifier:${modifierName}`, gasEstimate);
+
+      // Complexity for modifier
+      const complexity = this.complexityAnalyzer.analyzeFunction(modifierBody, modifierName);
+      complexityMetrics.set(`modifier:${modifierName}`, complexity);
+
+      // Add gas diagnostics for high-cost modifiers
+      if (gasEstimate.complexity === 'high' || gasEstimate.complexity === 'very-high') {
+        const diagnostic = new vscode.Diagnostic(
+          new vscode.Range(lines, 0, lines, 1000),
+          `Modifier '${modifierName}' has high gas cost: ${gasEstimate.estimatedGas.average.toLocaleString()} gas. ${gasEstimate.warning || ''}`,
+          vscode.DiagnosticSeverity.Warning
+        );
+        diagnostic.source = 'SigScan Gas';
+        diagnostics.push(diagnostic);
+      }
+    }
+
+    // Analyze events (emit statements)
+    contractInfo.events.forEach((event) => {
+      const eventPattern = new RegExp(`emit\\s+${event.name}\\s*\\([^)]*\\)`, 'g');
+      const matches = content.match(eventPattern);
+      if (matches && matches.length > 0) {
+        // Base gas cost for emitting an event: ~375 gas per log + ~375 per topic + ~8 per byte
+        const topicsCount = event.inputs.filter((i) => i.indexed).length;
+        const baseGas = 375 + topicsCount * 375;
+        const dataSize = event.inputs.filter((i) => !i.indexed).length * 32; // Estimate
+        const totalGas = baseGas + dataSize * 8;
+
+        gasEstimates.set(`event:${event.name}`, {
+          function: `event:${event.name}`,
+          estimatedGas: { min: totalGas, max: totalGas + 500, average: totalGas },
+          complexity: 'low',
+          factors: ['event emission', `${topicsCount} indexed topics`, `${matches.length} calls`],
+          warning: undefined,
+        });
+      }
+    });
+
+    // Analyze structs (storage operations)
+    const structRegex = /struct\s+(\w+)\s*{([^}]*)}/gs;
+    let structMatch;
+    while ((structMatch = structRegex.exec(content)) !== null) {
+      const [, structName, structBody] = structMatch;
+      // Count fields in struct
+      const fields = structBody.split(';').filter((f) => f.trim()).length;
+      // Storage write: ~20,000 gas for first write, ~5,000 for updates per slot
+      const storageGas = 20000 + (fields - 1) * 5000;
+
+      gasEstimates.set(`struct:${structName}`, {
+        function: `struct:${structName}`,
+        estimatedGas: {
+          min: storageGas,
+          max: storageGas * 2,
+          average: Math.floor(storageGas * 1.5),
+        },
+        complexity: fields > 5 ? 'high' : 'medium',
+        factors: ['struct storage', `${fields} fields`, 'cold storage access'],
+        warning: fields > 10 ? 'Large struct may be expensive to store' : undefined,
+      });
+    }
+
     // Contract size analysis
     const sizeInfo = this.sizeAnalyzer.analyzeContract(contractInfo.name, content);
 
@@ -157,38 +229,69 @@ export class RealtimeAnalyzer {
     const content = document.getText();
 
     analysis.gasEstimates.forEach((estimate, funcName) => {
-      // Match entire function/constructor including opening brace
+      // Handle different types: modifiers, events, structs, constructors, functions
+      const isModifier = funcName.startsWith('modifier:');
+      const isEvent = funcName.startsWith('event:');
+      const isStruct = funcName.startsWith('struct:');
       const isConstructor = funcName === 'constructor';
-      const pattern = isConstructor
-        ? new RegExp(`constructor\\s*\\([^)]*\\)[^{]*{`, 's')
-        : new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)[^{]*{`, 's');
+
+      let pattern: RegExp;
+      let displayName: string;
+
+      if (isModifier) {
+        const modName = funcName.replace('modifier:', '');
+        pattern = new RegExp(`modifier\\s+${modName}\\s*\\([^)]*\\)[^{]*{`, 's');
+        displayName = `modifier ${modName}`;
+      } else if (isEvent) {
+        const eventName = funcName.replace('event:', '');
+        // Show hint on first emit statement
+        pattern = new RegExp(`emit\\s+${eventName}\\s*\\(`, 's');
+        displayName = `event ${eventName}`;
+      } else if (isStruct) {
+        const structName = funcName.replace('struct:', '');
+        pattern = new RegExp(`struct\\s+${structName}\\s*{`, 's');
+        displayName = `struct ${structName}`;
+      } else if (isConstructor) {
+        pattern = new RegExp(`constructor\\s*\\([^)]*\\)[^{]*{`, 's');
+        displayName = 'constructor';
+      } else {
+        pattern = new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)[^{]*{`, 's');
+        displayName = `${funcName}()`;
+      }
+
       const match = pattern.exec(content);
 
       if (match) {
-        // Find position right after the opening brace
-        const braceIndex = match[0].lastIndexOf('{');
-        const afterBracePos = document.positionAt(match.index + braceIndex + 1);
+        // Find position right after the opening brace or relevant symbol
+        let hintPos: vscode.Position;
 
-        // Create inlay hint right after the opening brace
+        if (isEvent) {
+          // For events, show after 'emit EventName('
+          hintPos = document.positionAt(match.index + match[0].length);
+        } else {
+          // For functions, modifiers, structs, constructors - show after '{'
+          const braceIndex = match[0].lastIndexOf('{');
+          hintPos = document.positionAt(match.index + braceIndex + 1);
+        }
+
+        // Create inlay hint with colored gas amount
+        const gasAmount = estimate.estimatedGas.average;
+
         const hint = new vscode.InlayHint(
-          afterBracePos,
-          ` ⛽ ${estimate.estimatedGas.average.toLocaleString()} gas `,
+          hintPos,
+          ` ⛽ ${gasAmount.toLocaleString()} gas `,
           vscode.InlayHintKind.Parameter
         );
 
         // Add tooltip with detailed info
         hint.tooltip = new vscode.MarkdownString(
-          `**⛽ Gas Estimate for \`${funcName}${isConstructor ? '' : '()'}\`**\n\n` +
+          `**⛽ Gas Estimate for \`${displayName}\`**\n\n` +
             `**Range**: ${estimate.estimatedGas.min.toLocaleString()} - ${estimate.estimatedGas.max.toLocaleString()} gas\n\n` +
-            `**Average**: ${estimate.estimatedGas.average.toLocaleString()} gas\n\n` +
+            `**Average**: ${gasAmount.toLocaleString()} gas\n\n` +
             `**Complexity**: ${estimate.complexity}\n\n` +
             `**Factors**: ${estimate.factors.join(', ')}` +
             (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
         );
-
-        // Set color based on complexity (using padding to simulate badge)
-        hint.paddingLeft = true;
-        hint.paddingRight = true;
 
         hints.push(hint);
       }
@@ -198,14 +301,85 @@ export class RealtimeAnalyzer {
   }
 
   /**
-   * Legacy decoration method (kept for compatibility)
+   * Create gas decorations with gradient colors (green to red)
    */
   public createGasDecorations(
-    _analysis: LiveAnalysis,
-    _document: vscode.TextDocument
+    analysis: LiveAnalysis,
+    document: vscode.TextDocument
   ): vscode.DecorationOptions[] {
-    // Return empty array - we use inlay hints now
-    return [];
+    const decorations: vscode.DecorationOptions[] = [];
+    const content = document.getText();
+
+    analysis.gasEstimates.forEach((estimate, funcName) => {
+      // Handle different types: modifiers, events, structs, constructors, functions
+      const isModifier = funcName.startsWith('modifier:');
+      const isEvent = funcName.startsWith('event:');
+      const isStruct = funcName.startsWith('struct:');
+      const isConstructor = funcName === 'constructor';
+
+      let pattern: RegExp;
+      let displayName: string;
+
+      if (isModifier) {
+        const modName = funcName.replace('modifier:', '');
+        pattern = new RegExp(`modifier\\s+${modName}\\s*\\([^)]*\\)[^{]*{`, 's');
+        displayName = `modifier ${modName}`;
+      } else if (isEvent) {
+        const eventName = funcName.replace('event:', '');
+        pattern = new RegExp(`emit\\s+${eventName}\\s*\\(`, 's');
+        displayName = `event ${eventName}`;
+      } else if (isStruct) {
+        const structName = funcName.replace('struct:', '');
+        pattern = new RegExp(`struct\\s+${structName}\\s*{`, 's');
+        displayName = `struct ${structName}`;
+      } else if (isConstructor) {
+        pattern = new RegExp(`constructor\\s*\\([^)]*\\)[^{]*{`, 's');
+        displayName = 'constructor';
+      } else {
+        pattern = new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)[^{]*{`, 's');
+        displayName = `${funcName}()`;
+      }
+
+      const match = pattern.exec(content);
+
+      if (match) {
+        let hintPos: vscode.Position;
+
+        if (isEvent) {
+          hintPos = document.positionAt(match.index + match[0].length);
+        } else {
+          const braceIndex = match[0].lastIndexOf('{');
+          hintPos = document.positionAt(match.index + braceIndex + 1);
+        }
+
+        const gasAmount = estimate.estimatedGas.average;
+        const color = this.getGasGradientColor(gasAmount);
+
+        const decoration: vscode.DecorationOptions = {
+          range: new vscode.Range(hintPos, hintPos),
+          renderOptions: {
+            after: {
+              contentText: ` ⛽ ${gasAmount.toLocaleString()} gas`,
+              color: color,
+              fontStyle: 'normal',
+              margin: '0 0 0 0.5em',
+            },
+          },
+          hoverMessage: new vscode.MarkdownString(
+            `**⛽ Gas Estimate for \`${displayName}\`**\n\n` +
+              `**Range**: ${estimate.estimatedGas.min.toLocaleString()} - ${estimate.estimatedGas.max.toLocaleString()} gas\n\n` +
+              `**Average**: ${gasAmount.toLocaleString()} gas\n\n` +
+              `**Complexity**: ${estimate.complexity}\n\n` +
+              `**Factors**: ${estimate.factors.join(', ')}` +
+              (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
+          ),
+        };
+
+        decorations.push(decoration);
+      }
+    });
+
+    return decorations;
   }
 
   /**
@@ -333,6 +507,36 @@ export class RealtimeAnalyzer {
         return '#F44336'; // Red
       default:
         return '#9E9E9E'; // Gray
+    }
+  }
+
+  /**
+   * Get color gradient from green to red based on gas amount
+   */
+  private getGasGradientColor(gasAmount: number): string {
+    // Gas thresholds for color gradient
+    // 0-5K: Green
+    // 5K-20K: Yellow-Green
+    // 20K-50K: Yellow
+    // 50K-100K: Orange
+    // 100K+: Red
+
+    if (gasAmount < 5000) {
+      return '#00FF00'; // Bright Green
+    } else if (gasAmount < 10000) {
+      return '#7FFF00'; // Chartreuse
+    } else if (gasAmount < 20000) {
+      return '#BFFF00'; // Yellow-Green
+    } else if (gasAmount < 35000) {
+      return '#FFFF00'; // Yellow
+    } else if (gasAmount < 50000) {
+      return '#FFD700'; // Gold
+    } else if (gasAmount < 75000) {
+      return '#FFA500'; // Orange
+    } else if (gasAmount < 100000) {
+      return '#FF6347'; // Tomato
+    } else {
+      return '#FF0000'; // Red
     }
   }
 

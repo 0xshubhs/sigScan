@@ -8,6 +8,7 @@ let signatureTreeProvider: SignatureTreeProvider;
 import { RealtimeAnalyzer } from '../features/realtime';
 
 let realtimeAnalyzer: RealtimeAnalyzer;
+let gasDecorationType: vscode.TextEditorDecorationType;
 let complexityDecorationType: vscode.TextEditorDecorationType;
 let statusBarItem: vscode.StatusBarItem;
 
@@ -22,7 +23,8 @@ export function activate(context: vscode.ExtensionContext) {
   const diagnosticCollection = vscode.languages.createDiagnosticCollection('sigscan');
   realtimeAnalyzer = new RealtimeAnalyzer(diagnosticCollection);
 
-  // Create decoration type for complexity hints only
+  // Create decoration types for gas and complexity hints
+  gasDecorationType = vscode.window.createTextEditorDecorationType({});
   complexityDecorationType = vscode.window.createTextEditorDecorationType({});
 
   // Create status bar item
@@ -147,7 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Helper function to update decorations (now for complexity only, gas uses inlay hints)
+  // Helper function to update decorations with colored gas hints
   async function updateDecorations(editor: vscode.TextEditor) {
     const config = vscode.workspace.getConfiguration('sigscan');
     if (!config.get('realtimeAnalysis', true)) {
@@ -156,30 +158,18 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (editor.document.languageId === 'solidity') {
       const analysis = await realtimeAnalyzer.analyzeDocument(editor.document);
+      const gasDecorations = realtimeAnalyzer.createGasDecorations(analysis, editor.document);
       const complexityDecorations = realtimeAnalyzer.createComplexityDecorations(
         analysis,
         editor.document
       );
 
+      editor.setDecorations(gasDecorationType, gasDecorations);
       editor.setDecorations(complexityDecorationType, complexityDecorations);
     }
   }
 
-  // Register inlay hints provider for gas annotations (non-selectable)
-  const gasInlayHintsProvider = vscode.languages.registerInlayHintsProvider(
-    { scheme: 'file', language: 'solidity' },
-    {
-      async provideInlayHints(document: vscode.TextDocument): Promise<vscode.InlayHint[]> {
-        const config = vscode.workspace.getConfiguration('sigscan');
-        if (!config.get('realtimeAnalysis', true)) {
-          return [];
-        }
-
-        const analysis = await realtimeAnalyzer.analyzeDocument(document);
-        return realtimeAnalyzer.createGasInlayHints(analysis, document);
-      },
-    }
-  );
+  // Gas annotations now use colored decorations (gradient from green to red)
 
   // Real-time analysis on text change
   const textChangeDisposable = vscode.workspace.onDidChangeTextDocument(async (event) => {
@@ -229,7 +219,7 @@ export function activate(context: vscode.ExtensionContext) {
     editorChangeDisposable,
     documentOpenDisposable,
     diagnosticCollection,
-    gasInlayHintsProvider,
+    gasDecorationType,
     complexityDecorationType,
     statusBarItem,
     ...commands
