@@ -2,6 +2,14 @@ import { ProjectScanner } from '../scanner';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Mock fs module
+jest.mock('fs', () => ({
+  existsSync: jest.fn(),
+  statSync: jest.fn(),
+  readdirSync: jest.fn(),
+  readFileSync: jest.fn(),
+}));
+
 // Mock the parser
 jest.mock('../parser', () => {
   return {
@@ -21,6 +29,9 @@ jest.mock('../parser', () => {
 
 describe('ProjectScanner', () => {
   let scanner: ProjectScanner;
+  const mockExistsSync = fs.existsSync as jest.MockedFunction<typeof fs.existsSync>;
+  const mockStatSync = fs.statSync as jest.MockedFunction<typeof fs.statSync>;
+  const mockReaddirSync = fs.readdirSync as jest.MockedFunction<typeof fs.readdirSync>;
 
   beforeEach(() => {
     scanner = new ProjectScanner();
@@ -36,37 +47,43 @@ describe('ProjectScanner', () => {
   describe('categorization', () => {
     it('should categorize test files correctly', () => {
       const testPaths = [
-        '/project/test/Token.t.sol',
-        '/project/tests/Token.test.sol',
-        '/project/src/Token.t.sol',
+        { path: '/project/test/Token.t.sol', expected: 'tests' },
+        { path: '/project/tests/Token.test.sol', expected: 'tests' },
+        { path: '/project/TestContract.sol', expected: 'tests' },
       ];
+      const rootPath = '/project';
 
-      testPaths.forEach((filePath) => {
+      testPaths.forEach(({ path: filePath, expected }) => {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore - accessing private method for testing
-        const category = scanner.categorizeContract(filePath);
-        expect(category).toBe('tests');
+        const category = scanner.categorizeContract(filePath, rootPath);
+        expect(category).toBe(expected);
       });
     });
 
     it('should categorize library files correctly', () => {
-      const libPaths = ['/project/lib/SafeMath.sol', '/project/libraries/Utils.sol'];
+      const libPaths = [
+        { path: '/project/lib/SafeMath.sol', expected: 'libs' },
+        { path: '/project/libs/Utils.sol', expected: 'libs' },
+      ];
+      const rootPath = '/project';
 
-      libPaths.forEach((filePath) => {
+      libPaths.forEach(({ path: filePath, expected }) => {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore - accessing private method for testing
-        const category = scanner.categorizeContract(filePath);
-        expect(category).toBe('libs');
+        const category = scanner.categorizeContract(filePath, rootPath);
+        expect(category).toBe(expected);
       });
     });
 
     it('should categorize regular contract files', () => {
       const contractPaths = ['/project/src/Token.sol', '/project/contracts/NFT.sol'];
+      const rootPath = '/project';
 
       contractPaths.forEach((filePath) => {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore - accessing private method for testing
-        const category = scanner.categorizeContract(filePath);
+        const category = scanner.categorizeContract(filePath, rootPath);
         expect(category).toBe('contracts');
       });
     });
@@ -80,8 +97,8 @@ describe('ProjectScanner', () => {
         '/project/test/Token.t.sol',
       ];
 
-      jest.spyOn(fs, 'existsSync').mockReturnValue(true);
-      jest.spyOn(fs, 'statSync').mockImplementation((filePath) => {
+      mockExistsSync.mockReturnValue(true);
+      mockStatSync.mockImplementation((filePath) => {
         if (filePath === '/test/project') {
           return { isDirectory: () => true } as any;
         }
@@ -89,7 +106,7 @@ describe('ProjectScanner', () => {
       });
 
       // Mock readdir to return files
-      jest.spyOn(fs, 'readdirSync').mockReturnValue(mockFiles.map((f) => path.basename(f)) as any);
+      mockReaddirSync.mockReturnValue(mockFiles.map((f) => path.basename(f)) as any);
 
       // Test would require more complex mocking for recursive directory scanning
       expect(scanner).toBeDefined();

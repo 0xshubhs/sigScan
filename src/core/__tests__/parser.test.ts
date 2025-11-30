@@ -1,11 +1,21 @@
 import { SolidityParser } from '../parser';
 import * as fs from 'fs';
 
+// Mock fs module
+jest.mock('fs', () => ({
+  readFileSync: jest.fn(),
+  statSync: jest.fn(),
+  existsSync: jest.fn(),
+}));
+
 describe('SolidityParser', () => {
   let parser: SolidityParser;
+  const mockReadFileSync = fs.readFileSync as jest.MockedFunction<typeof fs.readFileSync>;
+  const mockStatSync = fs.statSync as jest.MockedFunction<typeof fs.statSync>;
 
   beforeEach(() => {
     parser = new SolidityParser();
+    jest.clearAllMocks();
   });
 
   describe('parseFile', () => {
@@ -24,8 +34,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/SimpleToken.sol');
 
@@ -45,8 +55,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/TestContract.sol');
 
@@ -67,8 +77,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/TestContract.sol');
 
@@ -90,8 +100,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/TestContract.sol');
 
@@ -108,8 +118,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/TestContract.sol');
 
@@ -126,8 +136,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/TestContract.sol');
 
@@ -137,7 +147,7 @@ describe('SolidityParser', () => {
     });
 
     it('should return null for invalid files', () => {
-      jest.spyOn(fs, 'readFileSync').mockImplementation(() => {
+      mockReadFileSync.mockImplementation(() => {
         throw new Error('File not found');
       });
 
@@ -154,8 +164,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/MathUtils.sol');
 
@@ -169,8 +179,8 @@ describe('SolidityParser', () => {
         }
       `;
 
-      jest.spyOn(fs, 'readFileSync').mockReturnValue(mockContent);
-      jest.spyOn(fs, 'statSync').mockReturnValue({ mtime: new Date() } as any);
+      mockReadFileSync.mockReturnValue(mockContent);
+      mockStatSync.mockReturnValue({ mtime: new Date() } as any);
 
       const result = parser.parseFile('/test/IERC20.sol');
 

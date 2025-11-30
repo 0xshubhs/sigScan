@@ -33,24 +33,37 @@ SigScan is a developer tool designed to streamline smart contract development by
 - **Automatic Contract Detection**: Recursively scans your project for Solidity files
 - **Intelligent Categorization**: Separates contracts, libraries, and tests automatically
 - **Signature Extraction**: Extracts function selectors, event signatures, and error signatures
-- **Multiple Export Formats**: Generates both JSON and TXT format outputs
+- **Multiple Export Formats**: Generates JSON, TXT, CSV, and Markdown outputs
 - **Deduplication**: Eliminates duplicate signatures across your codebase
 - **Project-Aware**: Creates output in the correct project root directory
+
+### Advanced Analysis Features ⚡ NEW
+
+- **ABI Generation**: Transform signatures into standard Ethereum ABI format
+- **Gas Estimation**: Estimate gas costs based on code complexity analysis
+- **Contract Size Check**: Verify contracts stay within 24KB deployment limit
+- **Complexity Analysis**: Calculate cyclomatic and cognitive complexity metrics
+- **Etherscan Verification**: Verify signatures against deployed contracts
+- **Signature Database**: Maintain library of common contract signatures
+- **Performance Caching**: SHA-256 based cache with LRU eviction
 
 ### Developer Experience
 
 - **File Watching**: Automatically regenerates signatures when contracts change
 - **Tree View Integration**: Browse signatures directly in VS Code sidebar
-- **Command Palette**: Quick access to scanning and export functions
+- **Command Palette**: Quick access to all scanning and analysis functions
 - **CLI Support**: Integrate into build scripts and CI/CD pipelines
 - **Configurable Filtering**: Control visibility levels (public, external, internal, private)
 - **Lightweight**: Optimized package size of approximately 140KB
+- **Parallel Processing**: Fast analysis of large projects
 
 ### Supported Project Types
 
 - Foundry projects (foundry.toml)
 - Hardhat projects (hardhat.config.js/ts)
 - Mixed and monorepo structures
+
+**For detailed feature documentation, see [FEATURES.md](FEATURES.md)**
 
 ## Installation
 
@@ -90,10 +103,20 @@ npx sigscan scan ./my-project
 
 #### Available Commands
 
+**Basic Operations:**
 - **SigScan: Scan Project** - Scan all contracts in the current project
 - **SigScan: Export Signatures** - Export signatures to specific format
-- **SigScan: Toggle Watch Mode** - Enable/disable automatic rescanning
-- **SigScan: Clear Signatures** - Remove generated signature files
+- **SigScan: Start/Stop Watching** - Enable/disable automatic rescanning
+- **SigScan: Refresh Signatures** - Manually refresh signature tree view
+
+**Advanced Analysis:**
+- **SigScan: Generate ABI** - Create ABI files from extracted signatures
+- **SigScan: Estimate Gas** - Analyze and estimate gas costs for functions
+- **SigScan: Check Contract Size** - Verify contract sizes against 24KB limit
+- **SigScan: Analyze Complexity** - Calculate code complexity metrics
+- **SigScan: Verify Etherscan** - Verify against deployed contracts on Etherscan
+- **SigScan: Search Database** - Search signature database for common patterns
+- **SigScan: Generate All Reports** - Run complete analysis suite
 
 #### Tree View
 

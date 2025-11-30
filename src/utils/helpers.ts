@@ -19,7 +19,7 @@ export function generateEventSignature(signature: string): string {
  * Normalize function signature for consistency
  */
 export function normalizeFunctionSignature(name: string, inputs: any[]): string {
-  const params = inputs.map(input => normalizeType(input.type)).join(',');
+  const params = inputs.map((input) => normalizeType(input.type)).join(',');
   return `${name}(${params})`;
 }
 
@@ -36,8 +36,8 @@ export function normalizeType(type: string): string {
  */
 export function shouldIncludeFunction(
   visibility: string,
-  includeInternal: boolean = false,
-  includePrivate: boolean = false
+  includeInternal = false,
+  includePrivate = false
 ): boolean {
   switch (visibility) {
     case 'public':
@@ -67,7 +67,7 @@ export function getFileExtension(format: string): string {
     txt: '.txt',
     json: '.json',
     csv: '.csv',
-    md: '.md'
+    md: '.md',
   };
   return extensions[format] || '.txt';
 }
@@ -83,20 +83,22 @@ export function isValidSolidityIdentifier(name: string): boolean {
  * Parse function parameters from string
  */
 export function parseParameters(paramString: string): { name: string; type: string }[] {
-  if (!paramString.trim()) return [];
-  
-  const params = paramString.split(',').map(p => p.trim());
-  return params.map(param => {
-    const parts = param.split(' ').filter(p => p.length > 0);
+  if (!paramString.trim()) {
+    return [];
+  }
+
+  const params = paramString.split(',').map((p) => p.trim());
+  return params.map((param) => {
+    const parts = param.split(' ').filter((p) => p.length > 0);
     if (parts.length >= 2) {
       return {
         type: parts[0],
-        name: parts[1]
+        name: parts[1],
       };
     }
     return {
       type: param,
-      name: ''
+      name: '',
     };
   });
 }

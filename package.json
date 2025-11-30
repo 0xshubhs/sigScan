@@ -2,7 +2,7 @@
   "name": "sigscan",
   "displayName": "SigScan - Smart Contract Signature Scanner",
   "description": "Automatically scan and generate method signatures for Solidity contracts in Foundry/Hardhat projects",
-  "version": "0.3.0",
+  "version": "0.4.2",
   "publisher": "0xshubhs",
   "icon": "icon.png",
   "engines": {
@@ -56,6 +56,51 @@
         "command": "sigscan.refreshSignatures",
         "title": "Refresh Signatures",
         "category": "SigScan"
+      },
+      {
+        "command": "sigscan.generateABI",
+        "title": "Generate ABI from Signatures",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.estimateGas",
+        "title": "Estimate Gas Costs",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.checkContractSize",
+        "title": "Check Contract Size",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.analyzeComplexity",
+        "title": "Analyze Code Complexity",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.verifyEtherscan",
+        "title": "Verify Against Etherscan",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.searchDatabase",
+        "title": "Search Signature Database",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.generateAllReports",
+        "title": "Generate All Analysis Reports",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.showGasAnnotations",
+        "title": "Show Gas Annotations (Refresh)",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.toggleRealtimeAnalysis",
+        "title": "Toggle Real-time Gas Analysis",
+        "category": "SigScan"
       }
     ],
     "configuration": {
@@ -105,6 +150,31 @@
           "type": "boolean",
           "default": true,
           "description": "Exclude private functions from output"
+        },
+        "sigscan.generateABI": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically generate ABI files alongside signatures"
+        },
+        "sigscan.estimateGas": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include gas estimation in reports"
+        },
+        "sigscan.checkSize": {
+          "type": "boolean",
+          "default": false,
+          "description": "Check contract size against 24KB limit"
+        },
+        "sigscan.analyzeComplexity": {
+          "type": "boolean",
+          "default": false,
+          "description": "Analyze code complexity metrics"
+        },
+        "sigscan.etherscanApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Etherscan API key for contract verification"
         }
       }
     },

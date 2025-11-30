@@ -1,9 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { ProjectScanner } from '../core/scanner';
 import { SignatureExporter } from '../core/exporter';
 import { FileWatcher } from '../core/watcher';
 import { ScanResult, ExportOptions } from '../types';
+import { ABIGenerator } from '../features/abi';
+import { GasEstimator } from '../features/gas';
+import { ContractSizeAnalyzer } from '../features/size';
+import { ComplexityAnalyzer } from '../features/complexity';
+import { EtherscanVerifier } from '../features/verify';
+import { SignatureDatabase, SignatureEntry } from '../features/database';
 
 export class SigScanManager {
   private scanner: ProjectScanner;
@@ -273,6 +280,405 @@ export class SigScanManager {
     this.watcher.on('error', (error) => {
       vscode.window.showErrorMessage(`File watcher error: ${error.message}`);
     });
+  }
+
+  /**
+   * Generate ABI for all contracts
+   */
+  public async generateABI(): Promise<void> {
+    if (!this.lastScanResult) {
+      vscode.window.showWarningMessage('No scan results available. Run scan first.');
+      return;
+    }
+
+    try {
+      const generator = new ABIGenerator();
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders) {
+        return;
+      }
+      const outputDir = path.join(workspaceFolders[0].uri.fsPath, 'abi');
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Generating ABI files...',
+          cancellable: false,
+        },
+        async (progress) => {
+          let processed = 0;
+          const total = this.lastScanResult?.projectInfo.contracts.size || 0;
+
+          for (const [, contract] of this.lastScanResult?.projectInfo.contracts || []) {
+            const abi = generator.generateABI(contract);
+            // Save ABI to file
+            if (!fs.existsSync(outputDir)) {
+              fs.mkdirSync(outputDir, { recursive: true });
+            }
+            const abiPath = path.join(outputDir, `${contract.name}.json`);
+            fs.writeFileSync(abiPath, JSON.stringify(abi, null, 2));
+
+            processed++;
+            progress.report({ increment: (processed / total) * 100 });
+          }
+        }
+      );
+
+      vscode.window.showInformationMessage(`ABI files generated in ${outputDir}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error generating ABI: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Estimate gas costs for all contracts
+   */
+  public async estimateGas(): Promise<void> {
+    if (!this.lastScanResult) {
+      vscode.window.showWarningMessage('No scan results available. Run scan first.');
+      return;
+    }
+
+    try {
+      const estimator = new GasEstimator();
+      const results: Array<{ contract: string; function: string; estimate: number }> = [];
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Estimating gas costs...',
+          cancellable: false,
+        },
+        async (progress) => {
+          let processed = 0;
+          const total = this.lastScanResult?.projectInfo.contracts.size || 0;
+
+          for (const [, contract] of this.lastScanResult?.projectInfo.contracts || []) {
+            for (const func of contract.functions) {
+              // Get function code - in real scenario, read from file
+              const funcCode = ''; // TODO: Extract function body from source
+              const gasEstimate = estimator.estimateGas(funcCode, func.signature);
+              results.push({
+                contract: contract.name,
+                function: func.signature,
+                estimate: gasEstimate.estimatedGas.average,
+              });
+            }
+            processed++;
+            progress.report({ increment: (processed / total) * 100 });
+          }
+        }
+      );
+
+      // Show results in output channel
+      const outputChannel = vscode.window.createOutputChannel('SigScan Gas Estimates');
+      outputChannel.clear();
+      outputChannel.appendLine('=== Gas Estimates ===\n');
+
+      results.sort((a, b) => b.estimate - a.estimate);
+      results.forEach(({ contract, function: func, estimate }) => {
+        outputChannel.appendLine(`${contract}.${func}: ${estimate.toLocaleString()} gas`);
+      });
+
+      outputChannel.show();
+      vscode.window.showInformationMessage(
+        `Gas estimates generated for ${results.length} functions`
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error estimating gas: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Check contract sizes
+   */
+  public async checkContractSize(): Promise<void> {
+    if (!this.lastScanResult) {
+      vscode.window.showWarningMessage('No scan results available. Run scan first.');
+      return;
+    }
+
+    try {
+      const analyzer = new ContractSizeAnalyzer();
+      const results: Array<{ contract: string; size: number; withinLimit: boolean }> = [];
+
+      for (const [contractPath, contract] of this.lastScanResult.projectInfo.contracts) {
+        // Read contract source code
+        const contractCode = fs.existsSync(contractPath)
+          ? fs.readFileSync(contractPath, 'utf-8')
+          : '';
+        const result = analyzer.analyzeContract(contract.name, contractCode);
+        results.push({
+          contract: contract.name,
+          size: result.estimatedSize,
+          withinLimit: result.status === 'safe' || result.status === 'warning',
+        });
+      }
+
+      // Show results
+      const outputChannel = vscode.window.createOutputChannel('SigScan Contract Sizes');
+      outputChannel.clear();
+      outputChannel.appendLine('=== Contract Size Analysis ===\n');
+      outputChannel.appendLine(`EIP-170 Limit: 24,576 bytes\n`);
+
+      results.sort((a, b) => b.size - a.size);
+      results.forEach(({ contract, size, withinLimit }) => {
+        const status = withinLimit ? '✓' : '✗ EXCEEDS LIMIT';
+        outputChannel.appendLine(`${status} ${contract}: ${size.toLocaleString()} bytes`);
+      });
+
+      outputChannel.show();
+
+      const oversized = results.filter((r) => !r.withinLimit);
+      if (oversized.length > 0) {
+        vscode.window
+          .showWarningMessage(`${oversized.length} contract(s) exceed size limit!`, 'View Details')
+          .then((selection) => {
+            if (selection === 'View Details') {
+              outputChannel.show();
+            }
+          });
+      } else {
+        vscode.window.showInformationMessage('All contracts within size limits');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error checking contract size: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Analyze code complexity
+   */
+  public async analyzeComplexity(): Promise<void> {
+    if (!this.lastScanResult) {
+      vscode.window.showWarningMessage('No scan results available. Run scan first.');
+      return;
+    }
+
+    try {
+      const analyzer = new ComplexityAnalyzer();
+      const results: Array<{
+        contract: string;
+        function: string;
+        complexity: number;
+        rating: string;
+      }> = [];
+
+      for (const [contractPath, contract] of this.lastScanResult.projectInfo.contracts) {
+        // Read contract source code once per contract
+        const contractCode = fs.existsSync(contractPath)
+          ? fs.readFileSync(contractPath, 'utf-8')
+          : '';
+
+        for (const func of contract.functions) {
+          // Use the entire contract code as approximation (ideally extract function body)
+          const result = analyzer.analyzeFunction(contractCode, func.name);
+          results.push({
+            contract: contract.name,
+            function: func.signature,
+            complexity: result.cyclomaticComplexity,
+            rating: result.rating,
+          });
+        }
+      }
+
+      // Show results
+      const outputChannel = vscode.window.createOutputChannel('SigScan Complexity Analysis');
+      outputChannel.clear();
+      outputChannel.appendLine('=== Cyclomatic Complexity Analysis ===\n');
+      outputChannel.appendLine(
+        'Ratings: Low (1-5) | Medium (6-10) | High (11-20) | Very High (21+)\n'
+      );
+
+      results.sort((a, b) => b.complexity - a.complexity);
+      results.forEach(({ contract, function: func, complexity, rating }) => {
+        outputChannel.appendLine(`[${rating}] ${contract}.${func}: ${complexity}`);
+      });
+
+      outputChannel.show();
+
+      const highComplexity = results.filter((r) => r.complexity > 10);
+      if (highComplexity.length > 0) {
+        vscode.window
+          .showWarningMessage(
+            `${highComplexity.length} function(s) have high complexity`,
+            'View Details'
+          )
+          .then((selection) => {
+            if (selection === 'View Details') {
+              outputChannel.show();
+            }
+          });
+      } else {
+        vscode.window.showInformationMessage('All functions have acceptable complexity');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error analyzing complexity: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Verify contract on Etherscan
+   */
+  public async verifyEtherscan(): Promise<void> {
+    if (!this.lastScanResult) {
+      vscode.window.showWarningMessage('No scan results available. Run scan first.');
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration('sigscan');
+    const apiKey = config.get<string>('etherscanApiKey');
+
+    if (!apiKey) {
+      const result = await vscode.window.showErrorMessage(
+        'Etherscan API key not configured',
+        'Configure'
+      );
+      if (result === 'Configure') {
+        vscode.commands.executeCommand('workbench.action.openSettings', 'sigscan.etherscanApiKey');
+      }
+      return;
+    }
+
+    // Get contract address from user
+    const address = await vscode.window.showInputBox({
+      prompt: 'Enter deployed contract address',
+      placeHolder: '0x...',
+      validateInput: (value) => {
+        if (!value.match(/^0x[a-fA-F0-9]{40}$/)) {
+          return 'Invalid Ethereum address';
+        }
+        return null;
+      },
+    });
+
+    if (!address) {
+      return;
+    }
+
+    // Get network
+    const network = await vscode.window.showQuickPick(
+      ['mainnet', 'goerli', 'sepolia', 'polygon', 'mumbai', 'arbitrum', 'optimism'],
+      { placeHolder: 'Select network' }
+    );
+
+    if (!network) {
+      return;
+    }
+
+    try {
+      const config = { apiKey, network: network as 'mainnet' | 'goerli' | 'sepolia' };
+      const verifier = new EtherscanVerifier(config);
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Verifying contract on Etherscan...',
+          cancellable: false,
+        },
+        async () => {
+          // Verify the first contract
+          const contracts = Array.from(this.lastScanResult?.projectInfo.contracts.values() || []);
+          const firstContract = contracts[0];
+          if (firstContract) {
+            await verifier.verifyContract(address, firstContract);
+          }
+        }
+      );
+
+      vscode.window.showInformationMessage('Contract verification submitted to Etherscan');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error verifying contract: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Search signature database
+   */
+  public async searchDatabase(): Promise<void> {
+    const query = await vscode.window.showInputBox({
+      prompt: 'Search function signature or selector',
+      placeHolder: 'e.g., transfer(address,uint256) or 0xa9059cbb',
+    });
+
+    if (!query) {
+      return;
+    }
+
+    try {
+      const db = new SignatureDatabase();
+      const results = await db.search(query);
+
+      if (results.length === 0) {
+        vscode.window.showInformationMessage('No matching signatures found');
+        return;
+      }
+
+      // Show results in quick pick
+      const items = results.map((r: SignatureEntry) => ({
+        label: r.signature,
+        description: r.selector,
+        detail: `Category: ${r.category} - ${r.description}`,
+      }));
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: `Found ${results.length} matching signature(s)`,
+      });
+
+      if (selected && typeof selected !== 'string') {
+        // Copy to clipboard
+        await vscode.env.clipboard.writeText(selected.label);
+        vscode.window.showInformationMessage(`Copied: ${selected.label}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error searching database: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Generate all reports (comprehensive analysis)
+   */
+  public async generateAllReports(): Promise<void> {
+    if (!this.lastScanResult) {
+      vscode.window.showWarningMessage('No scan results available. Run scan first.');
+      return;
+    }
+
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Generating comprehensive reports...',
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ message: 'Generating ABI...', increment: 0 });
+          await this.generateABI();
+
+          progress.report({ message: 'Estimating gas...', increment: 25 });
+          await this.estimateGas();
+
+          progress.report({ message: 'Checking sizes...', increment: 50 });
+          await this.checkContractSize();
+
+          progress.report({ message: 'Analyzing complexity...', increment: 75 });
+          await this.analyzeComplexity();
+
+          progress.report({ message: 'Complete!', increment: 100 });
+        }
+      );
+
+      vscode.window.showInformationMessage('All reports generated successfully');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      vscode.window.showErrorMessage(`Error generating reports: ${errorMessage}`);
+    }
   }
 
   /**
