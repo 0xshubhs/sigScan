@@ -32,7 +32,7 @@ code --install-extension sigscan-0.1.0.vsix --force
 
 ### Method 3: Install from GitHub Releases
 
-1. Go to [GitHub Releases](https://github.com/DevJSter/sigScan/releases)
+1. Go to [GitHub Releases](https://github.com/0xshubhs/sigScan/releases)
 2. Download the latest `sigscan-x.x.x.vsix` file
 3. Install using VS Code command line:
    ```bash
@@ -55,7 +55,7 @@ Ensure you have the following installed:
 #### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/DevJSter/sigScan.git
+git clone https://github.com/0xshubhs/sigScan.git
 cd sigScan
 ```
 

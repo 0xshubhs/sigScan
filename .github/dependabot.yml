@@ -1,0 +1,56 @@
+version: 2
+updates:
+  # Enable version updates for npm
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 10
+    assignees:
+      - 'DevJSter'
+    labels:
+      - 'dependencies'
+      - 'automated'
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    # Group minor and patch updates together
+    groups:
+      dev-dependencies:
+        patterns:
+          - '@types/*'
+          - '@typescript-eslint/*'
+          - 'eslint*'
+          - 'prettier'
+          - 'jest'
+          - 'ts-*'
+        update-types:
+          - 'minor'
+          - 'patch'
+      production-dependencies:
+        patterns:
+          - '*'
+        exclude-patterns:
+          - '@types/*'
+          - '@typescript-eslint/*'
+          - 'eslint*'
+          - 'prettier'
+          - 'jest'
+          - 'ts-*'
+        update-types:
+          - 'minor'
+          - 'patch'
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    labels:
+      - 'github-actions'
+      - 'dependencies'
+      - 'automated'
+    commit-message:
+      prefix: 'ci'

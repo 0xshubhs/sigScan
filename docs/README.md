@@ -50,7 +50,7 @@ Welcome to the SigScan documentation! This index helps you find the information 
 
 ## 📖 External Resources
 
-- **[GitHub Repository](https://github.com/DevJSter/sigScan)** - Source code and issues
+- **[GitHub Repository](https://github.com/0xshubhs/sigScan)** - Source code and issues
 - **[VS Code API Documentation](https://code.visualstudio.com/api)** - VS Code extension development
 - **[Foundry Documentation](https://book.getfoundry.sh/)** - Foundry smart contract framework
 - **[Hardhat Documentation](https://hardhat.org/docs)** - Hardhat development environment

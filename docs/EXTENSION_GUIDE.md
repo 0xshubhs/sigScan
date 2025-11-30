@@ -54,7 +54,7 @@ SigScan is a VS Code extension that automatically scans Solidity smart contracts
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/DevJSter/sigScan.git
+   git clone https://github.com/0xshubhs/sigScan.git
    cd sigScan
    ```
 

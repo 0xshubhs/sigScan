@@ -1,6 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ScanResult, ExportOptions, FunctionSignature, EventSignature, ErrorSignature, ContractCategory, ContractInfo } from '../types';
+import {
+  ScanResult,
+  ExportOptions,
+  FunctionSignature,
+  EventSignature,
+  ErrorSignature,
+  ContractCategory,
+  ContractInfo,
+} from '../types';
 import { shouldIncludeFunction, formatTimestamp, getFileExtension } from '../utils/helpers';
 
 interface DeduplicatedSignatures {
@@ -14,6 +22,12 @@ export class SignatureExporter {
    * Export signatures to multiple formats with category separation and deduplication
    */
   public async exportSignatures(scanResult: ScanResult, options: ExportOptions): Promise<void> {
+    // Check if any contracts were found
+    if (scanResult.totalContracts === 0) {
+      console.log('No Solidity contracts found in workspace. Skipping signature export.');
+      return;
+    }
+
     // Ensure output directory exists
     if (!fs.existsSync(options.outputDir)) {
       fs.mkdirSync(options.outputDir, { recursive: true });
@@ -31,9 +45,15 @@ export class SignatureExporter {
         const categoryContracts = scanResult.contractsByCategory.get(category) || [];
         if (categoryContracts.length > 0) {
           const categoryResult = this.createCategoryResult(scanResult, categoryContracts, category);
-          
+
           for (const format of options.formats) {
-            await this.exportCategoryToFormat(categoryResult, options, format, category, deduplicateSignatures);
+            await this.exportCategoryToFormat(
+              categoryResult,
+              options,
+              format,
+              category,
+              deduplicateSignatures
+            );
           }
         }
       }
@@ -49,16 +69,16 @@ export class SignatureExporter {
    * Create a result object for a specific category
    */
   private createCategoryResult(
-    scanResult: ScanResult, 
-    categoryContracts: ContractInfo[], 
-    category: ContractCategory
+    scanResult: ScanResult,
+    categoryContracts: ContractInfo[],
+    _category: ContractCategory
   ): ScanResult {
     const contractsMap = new Map<string, ContractInfo>();
     let totalFunctions = 0;
     let totalEvents = 0;
     let totalErrors = 0;
 
-    categoryContracts.forEach(contract => {
+    categoryContracts.forEach((contract) => {
       contractsMap.set(contract.filePath, contract);
       totalFunctions += contract.functions.length;
       totalEvents += contract.events.length;
@@ -69,12 +89,12 @@ export class SignatureExporter {
       ...scanResult,
       projectInfo: {
         ...scanResult.projectInfo,
-        contracts: contractsMap
+        contracts: contractsMap,
       },
       totalContracts: categoryContracts.length,
       totalFunctions,
       totalEvents,
-      totalErrors
+      totalErrors,
     };
   }
 
@@ -95,16 +115,36 @@ export class SignatureExporter {
 
     switch (format) {
       case 'txt':
-        content = this.generateCategoryTextOutput(scanResult, options, category, deduplicateSignatures);
+        content = this.generateCategoryTextOutput(
+          scanResult,
+          options,
+          category,
+          deduplicateSignatures
+        );
         break;
       case 'json':
-        content = this.generateCategoryJsonOutput(scanResult, options, category, deduplicateSignatures);
+        content = this.generateCategoryJsonOutput(
+          scanResult,
+          options,
+          category,
+          deduplicateSignatures
+        );
         break;
       case 'csv':
-        content = this.generateCategoryCsvOutput(scanResult, options, category, deduplicateSignatures);
+        content = this.generateCategoryCsvOutput(
+          scanResult,
+          options,
+          category,
+          deduplicateSignatures
+        );
         break;
       case 'md':
-        content = this.generateCategoryMarkdownOutput(scanResult, options, category, deduplicateSignatures);
+        content = this.generateCategoryMarkdownOutput(
+          scanResult,
+          options,
+          category,
+          deduplicateSignatures
+        );
         break;
       default:
         throw new Error(`Unsupported format: ${format}`);
@@ -122,8 +162,8 @@ export class SignatureExporter {
    * Export to specific format (legacy mode)
    */
   private async exportToFormat(
-    scanResult: ScanResult, 
-    options: ExportOptions, 
+    scanResult: ScanResult,
+    options: ExportOptions,
     format: string,
     deduplicateSignatures: boolean
   ): Promise<void> {
@@ -164,23 +204,23 @@ export class SignatureExporter {
     const events = new Map<string, EventSignature>();
     const errors = new Map<string, ErrorSignature>();
 
-    contracts.forEach(contract => {
+    contracts.forEach((contract) => {
       // Deduplicate functions
       const filteredFunctions = this.filterFunctions(contract.functions, options);
-      filteredFunctions.forEach(func => {
+      filteredFunctions.forEach((func) => {
         functions.set(func.signature, func);
       });
 
       // Deduplicate events
       if (options.includeEvents) {
-        contract.events.forEach(event => {
+        contract.events.forEach((event) => {
           events.set(event.signature, event);
         });
       }
 
       // Deduplicate errors
       if (options.includeErrors) {
-        contract.errors.forEach(error => {
+        contract.errors.forEach((error) => {
           errors.set(error.signature, error);
         });
       }
@@ -193,13 +233,13 @@ export class SignatureExporter {
    * Generate category-specific text output
    */
   private generateCategoryTextOutput(
-    scanResult: ScanResult, 
-    options: ExportOptions, 
+    scanResult: ScanResult,
+    options: ExportOptions,
     category: ContractCategory,
     deduplicateSignatures: boolean
   ): string {
     const lines: string[] = [];
-    
+
     lines.push('# Smart Contract Signatures');
     lines.push(`# Category: ${category.toUpperCase()}`);
     lines.push(`# Generated: ${scanResult.scanTime.toISOString()}`);
@@ -210,50 +250,54 @@ export class SignatureExporter {
     if (deduplicateSignatures) {
       // Contract-wise organization with deduplication
       const addedSignatures = new Set<string>();
-      
-      scanResult.projectInfo.contracts.forEach(contract => {
+
+      scanResult.projectInfo.contracts.forEach((contract) => {
         const contractFunctions: FunctionSignature[] = [];
         const contractEvents: EventSignature[] = [];
         const contractErrors: ErrorSignature[] = [];
-        
+
         // Filter and deduplicate functions for this contract
         const functions = this.filterFunctions(contract.functions, options);
-        functions.forEach(func => {
+        functions.forEach((func) => {
           if (!addedSignatures.has(func.signature)) {
             contractFunctions.push(func);
             addedSignatures.add(func.signature);
           }
         });
-        
+
         // Filter and deduplicate events for this contract
         if (options.includeEvents) {
-          contract.events.forEach(event => {
+          contract.events.forEach((event) => {
             if (!addedSignatures.has(event.signature)) {
               contractEvents.push(event);
               addedSignatures.add(event.signature);
             }
           });
         }
-        
+
         // Filter and deduplicate errors for this contract
         if (options.includeErrors) {
-          contract.errors.forEach(error => {
+          contract.errors.forEach((error) => {
             if (!addedSignatures.has(error.signature)) {
               contractErrors.push(error);
               addedSignatures.add(error.signature);
             }
           });
         }
-        
+
         // Only show contract if it has unique signatures to contribute
-        if (contractFunctions.length > 0 || contractEvents.length > 0 || contractErrors.length > 0) {
+        if (
+          contractFunctions.length > 0 ||
+          contractEvents.length > 0 ||
+          contractErrors.length > 0
+        ) {
           lines.push(`## Contract: ${contract.name} (${path.basename(contract.filePath)})`);
           lines.push('');
 
           // Functions
           if (contractFunctions.length > 0) {
             lines.push('### Functions:');
-            contractFunctions.forEach(func => {
+            contractFunctions.forEach((func) => {
               lines.push(`${func.signature.padEnd(40)} --> ${func.selector}`);
             });
             lines.push('');
@@ -262,7 +306,7 @@ export class SignatureExporter {
           // Events
           if (contractEvents.length > 0) {
             lines.push('### Events:');
-            contractEvents.forEach(event => {
+            contractEvents.forEach((event) => {
               lines.push(`${event.signature.padEnd(40)} --> ${event.selector}`);
             });
             lines.push('');
@@ -271,7 +315,7 @@ export class SignatureExporter {
           // Errors
           if (contractErrors.length > 0) {
             lines.push('### Errors:');
-            contractErrors.forEach(error => {
+            contractErrors.forEach((error) => {
               lines.push(`${error.signature.padEnd(40)} --> ${error.selector}`);
             });
             lines.push('');
@@ -280,7 +324,7 @@ export class SignatureExporter {
       });
     } else {
       // Original contract-wise organization without deduplication
-      scanResult.projectInfo.contracts.forEach(contract => {
+      scanResult.projectInfo.contracts.forEach((contract) => {
         lines.push(`## Contract: ${contract.name} (${path.basename(contract.filePath)})`);
         lines.push('');
 
@@ -288,7 +332,7 @@ export class SignatureExporter {
         const functions = this.filterFunctions(contract.functions, options);
         if (functions.length > 0) {
           lines.push('### Functions:');
-          functions.forEach(func => {
+          functions.forEach((func) => {
             lines.push(`${func.signature.padEnd(40)} --> ${func.selector}`);
           });
           lines.push('');
@@ -297,7 +341,7 @@ export class SignatureExporter {
         // Events
         if (options.includeEvents && contract.events.length > 0) {
           lines.push('### Events:');
-          contract.events.forEach(event => {
+          contract.events.forEach((event) => {
             lines.push(`${event.signature.padEnd(40)} --> ${event.selector}`);
           });
           lines.push('');
@@ -306,7 +350,7 @@ export class SignatureExporter {
         // Errors
         if (options.includeErrors && contract.errors.length > 0) {
           lines.push('### Errors:');
-          contract.errors.forEach(error => {
+          contract.errors.forEach((error) => {
             lines.push(`${error.signature.padEnd(40)} --> ${error.selector}`);
           });
           lines.push('');
@@ -321,8 +365,8 @@ export class SignatureExporter {
    * Generate category-specific JSON output
    */
   private generateCategoryJsonOutput(
-    scanResult: ScanResult, 
-    options: ExportOptions, 
+    scanResult: ScanResult,
+    options: ExportOptions,
     category: ContractCategory,
     deduplicateSignatures: boolean
   ): string {
@@ -330,7 +374,7 @@ export class SignatureExporter {
 
     if (deduplicateSignatures) {
       const deduplicated = this.deduplicateSignatures(scanResult.projectInfo.contracts, options);
-      
+
       output = {
         metadata: {
           category: category,
@@ -340,13 +384,13 @@ export class SignatureExporter {
           totalContractsInCategory: scanResult.totalContracts,
           uniqueFunctions: deduplicated.functions.size,
           uniqueEvents: deduplicated.events.size,
-          uniqueErrors: deduplicated.errors.size
+          uniqueErrors: deduplicated.errors.size,
         },
         signatures: {
           functions: Array.from(deduplicated.functions.values()),
           events: options.includeEvents ? Array.from(deduplicated.events.values()) : [],
-          errors: options.includeErrors ? Array.from(deduplicated.errors.values()) : []
-        }
+          errors: options.includeErrors ? Array.from(deduplicated.errors.values()) : [],
+        },
       };
     } else {
       output = {
@@ -358,17 +402,17 @@ export class SignatureExporter {
           totalContractsInCategory: scanResult.totalContracts,
           totalFunctions: scanResult.totalFunctions,
           totalEvents: scanResult.totalEvents,
-          totalErrors: scanResult.totalErrors
+          totalErrors: scanResult.totalErrors,
         },
-        contracts: Array.from(scanResult.projectInfo.contracts.values()).map(contract => ({
+        contracts: Array.from(scanResult.projectInfo.contracts.values()).map((contract) => ({
           name: contract.name,
           filePath: contract.filePath,
           category: contract.category,
           lastModified: contract.lastModified,
           functions: this.filterFunctions(contract.functions, options),
           events: options.includeEvents ? contract.events : [],
-          errors: options.includeErrors ? contract.errors : []
-        }))
+          errors: options.includeErrors ? contract.errors : [],
+        })),
       };
     }
 
@@ -379,116 +423,142 @@ export class SignatureExporter {
    * Generate category-specific CSV output
    */
   private generateCategoryCsvOutput(
-    scanResult: ScanResult, 
-    options: ExportOptions, 
+    scanResult: ScanResult,
+    options: ExportOptions,
     category: ContractCategory,
     deduplicateSignatures: boolean
   ): string {
     const lines: string[] = [];
-    
+
     // Header
-    lines.push('Type,Contract,Name,Signature,Selector,Visibility,StateMutability,FilePath,Category');
+    lines.push(
+      'Type,Contract,Name,Signature,Selector,Visibility,StateMutability,FilePath,Category'
+    );
 
     if (deduplicateSignatures) {
       const deduplicated = this.deduplicateSignatures(scanResult.projectInfo.contracts, options);
-      
+
       // Functions
-      Array.from(deduplicated.functions.values()).forEach(func => {
-        lines.push([
-          'Function',
-          func.contractName,
-          func.name,
-          func.signature,
-          func.selector,
-          func.visibility,
-          func.stateMutability,
-          func.filePath,
-          category
-        ].map(field => `"${field}"`).join(','));
-      });
-
-      // Events
-      if (options.includeEvents) {
-        Array.from(deduplicated.events.values()).forEach(event => {
-          lines.push([
-            'Event',
-            event.contractName,
-            event.name,
-            event.signature,
-            event.selector,
-            '',
-            '',
-            event.filePath,
-            category
-          ].map(field => `"${field}"`).join(','));
-        });
-      }
-
-      // Errors
-      if (options.includeErrors) {
-        Array.from(deduplicated.errors.values()).forEach(error => {
-          lines.push([
-            'Error',
-            error.contractName,
-            error.name,
-            error.signature,
-            error.selector,
-            '',
-            '',
-            error.filePath,
-            category
-          ].map(field => `"${field}"`).join(','));
-        });
-      }
-    } else {
-      scanResult.projectInfo.contracts.forEach(contract => {
-        // Functions
-        const functions = this.filterFunctions(contract.functions, options);
-        functions.forEach(func => {
-          lines.push([
+      Array.from(deduplicated.functions.values()).forEach((func) => {
+        lines.push(
+          [
             'Function',
-            contract.name,
+            func.contractName,
             func.name,
             func.signature,
             func.selector,
             func.visibility,
             func.stateMutability,
-            contract.filePath,
-            category
-          ].map(field => `"${field}"`).join(','));
-        });
+            func.filePath,
+            category,
+          ]
+            .map((field) => `"${field}"`)
+            .join(',')
+        );
+      });
 
-        // Events
-        if (options.includeEvents) {
-          contract.events.forEach(event => {
-            lines.push([
+      // Events
+      if (options.includeEvents) {
+        Array.from(deduplicated.events.values()).forEach((event) => {
+          lines.push(
+            [
               'Event',
-              contract.name,
+              event.contractName,
               event.name,
               event.signature,
               event.selector,
               '',
               '',
-              contract.filePath,
-              category
-            ].map(field => `"${field}"`).join(','));
-          });
-        }
+              event.filePath,
+              category,
+            ]
+              .map((field) => `"${field}"`)
+              .join(',')
+          );
+        });
+      }
 
-        // Errors
-        if (options.includeErrors) {
-          contract.errors.forEach(error => {
-            lines.push([
+      // Errors
+      if (options.includeErrors) {
+        Array.from(deduplicated.errors.values()).forEach((error) => {
+          lines.push(
+            [
               'Error',
-              contract.name,
+              error.contractName,
               error.name,
               error.signature,
               error.selector,
               '',
               '',
+              error.filePath,
+              category,
+            ]
+              .map((field) => `"${field}"`)
+              .join(',')
+          );
+        });
+      }
+    } else {
+      scanResult.projectInfo.contracts.forEach((contract) => {
+        // Functions
+        const functions = this.filterFunctions(contract.functions, options);
+        functions.forEach((func) => {
+          lines.push(
+            [
+              'Function',
+              contract.name,
+              func.name,
+              func.signature,
+              func.selector,
+              func.visibility,
+              func.stateMutability,
               contract.filePath,
-              category
-            ].map(field => `"${field}"`).join(','));
+              category,
+            ]
+              .map((field) => `"${field}"`)
+              .join(',')
+          );
+        });
+
+        // Events
+        if (options.includeEvents) {
+          contract.events.forEach((event) => {
+            lines.push(
+              [
+                'Event',
+                contract.name,
+                event.name,
+                event.signature,
+                event.selector,
+                '',
+                '',
+                contract.filePath,
+                category,
+              ]
+                .map((field) => `"${field}"`)
+                .join(',')
+            );
+          });
+        }
+
+        // Errors
+        if (options.includeErrors) {
+          contract.errors.forEach((error) => {
+            lines.push(
+              [
+                'Error',
+                contract.name,
+                error.name,
+                error.signature,
+                error.selector,
+                '',
+                '',
+                contract.filePath,
+                category,
+              ]
+                .map((field) => `"${field}"`)
+                .join(',')
+            );
           });
         }
       });
@@ -501,13 +571,13 @@ export class SignatureExporter {
    * Generate category-specific Markdown output
    */
   private generateCategoryMarkdownOutput(
-    scanResult: ScanResult, 
-    options: ExportOptions, 
+    scanResult: ScanResult,
+    options: ExportOptions,
     category: ContractCategory,
     deduplicateSignatures: boolean
   ): string {
     const lines: string[] = [];
-    
+
     lines.push('# Smart Contract Signatures');
     lines.push('');
     lines.push(`**Category:** ${category.toUpperCase()}`);
@@ -520,43 +590,47 @@ export class SignatureExporter {
     if (deduplicateSignatures) {
       // Contract-wise organization with deduplication
       const addedSignatures = new Set<string>();
-      
-      scanResult.projectInfo.contracts.forEach(contract => {
+
+      scanResult.projectInfo.contracts.forEach((contract) => {
         const contractFunctions: FunctionSignature[] = [];
         const contractEvents: EventSignature[] = [];
         const contractErrors: ErrorSignature[] = [];
-        
+
         // Filter and deduplicate functions for this contract
         const functions = this.filterFunctions(contract.functions, options);
-        functions.forEach(func => {
+        functions.forEach((func) => {
           if (!addedSignatures.has(func.signature)) {
             contractFunctions.push(func);
             addedSignatures.add(func.signature);
           }
         });
-        
+
         // Filter and deduplicate events for this contract
         if (options.includeEvents) {
-          contract.events.forEach(event => {
+          contract.events.forEach((event) => {
             if (!addedSignatures.has(event.signature)) {
               contractEvents.push(event);
               addedSignatures.add(event.signature);
             }
           });
         }
-        
+
         // Filter and deduplicate errors for this contract
         if (options.includeErrors) {
-          contract.errors.forEach(error => {
+          contract.errors.forEach((error) => {
             if (!addedSignatures.has(error.signature)) {
               contractErrors.push(error);
               addedSignatures.add(error.signature);
             }
           });
         }
-        
+
         // Only show contract if it has unique signatures to contribute
-        if (contractFunctions.length > 0 || contractEvents.length > 0 || contractErrors.length > 0) {
+        if (
+          contractFunctions.length > 0 ||
+          contractEvents.length > 0 ||
+          contractErrors.length > 0
+        ) {
           lines.push(`## ${contract.name}`);
           lines.push('');
           lines.push(`**File:** \`${path.basename(contract.filePath)}\``);
@@ -568,9 +642,11 @@ export class SignatureExporter {
             lines.push('');
             lines.push('| Signature | Selector | Visibility | State Mutability |');
             lines.push('|-----------|----------|------------|-------------------|');
-            
-            contractFunctions.forEach(func => {
-              lines.push(`| \`${func.signature}\` | \`${func.selector}\` | ${func.visibility} | ${func.stateMutability} |`);
+
+            contractFunctions.forEach((func) => {
+              lines.push(
+                `| \`${func.signature}\` | \`${func.selector}\` | ${func.visibility} | ${func.stateMutability} |`
+              );
             });
             lines.push('');
           }
@@ -581,8 +657,8 @@ export class SignatureExporter {
             lines.push('');
             lines.push('| Signature | Selector |');
             lines.push('|-----------|----------|');
-            
-            contractEvents.forEach(event => {
+
+            contractEvents.forEach((event) => {
               lines.push(`| \`${event.signature}\` | \`${event.selector}\` |`);
             });
             lines.push('');
@@ -594,8 +670,8 @@ export class SignatureExporter {
             lines.push('');
             lines.push('| Signature | Selector |');
             lines.push('|-----------|----------|');
-            
-            contractErrors.forEach(error => {
+
+            contractErrors.forEach((error) => {
               lines.push(`| \`${error.signature}\` | \`${error.selector}\` |`);
             });
             lines.push('');
@@ -604,7 +680,7 @@ export class SignatureExporter {
       });
     } else {
       // Original contract-wise organization without deduplication
-      scanResult.projectInfo.contracts.forEach(contract => {
+      scanResult.projectInfo.contracts.forEach((contract) => {
         lines.push(`## ${contract.name}`);
         lines.push('');
         lines.push(`**File:** \`${path.basename(contract.filePath)}\``);
@@ -617,9 +693,11 @@ export class SignatureExporter {
           lines.push('');
           lines.push('| Signature | Selector | Visibility | State Mutability |');
           lines.push('|-----------|----------|------------|-------------------|');
-          
-          functions.forEach(func => {
-            lines.push(`| \`${func.signature}\` | \`${func.selector}\` | ${func.visibility} | ${func.stateMutability} |`);
+
+          functions.forEach((func) => {
+            lines.push(
+              `| \`${func.signature}\` | \`${func.selector}\` | ${func.visibility} | ${func.stateMutability} |`
+            );
           });
           lines.push('');
         }
@@ -630,8 +708,8 @@ export class SignatureExporter {
           lines.push('');
           lines.push('| Signature | Selector |');
           lines.push('|-----------|----------|');
-          
-          contract.events.forEach(event => {
+
+          contract.events.forEach((event) => {
             lines.push(`| \`${event.signature}\` | \`${event.selector}\` |`);
           });
           lines.push('');
@@ -643,8 +721,8 @@ export class SignatureExporter {
           lines.push('');
           lines.push('| Signature | Selector |');
           lines.push('|-----------|----------|');
-          
-          contract.errors.forEach(error => {
+
+          contract.errors.forEach((error) => {
             lines.push(`| \`${error.signature}\` | \`${error.selector}\` |`);
           });
           lines.push('');
@@ -658,29 +736,50 @@ export class SignatureExporter {
   /**
    * Legacy text output generation
    */
-  private generateTextOutput(scanResult: ScanResult, options: ExportOptions, deduplicateSignatures: boolean): string {
+  private generateTextOutput(
+    scanResult: ScanResult,
+    options: ExportOptions,
+    deduplicateSignatures: boolean
+  ): string {
     return this.generateCategoryTextOutput(scanResult, options, 'contracts', deduplicateSignatures);
   }
 
   /**
    * Legacy JSON output generation
    */
-  private generateJsonOutput(scanResult: ScanResult, options: ExportOptions, deduplicateSignatures: boolean): string {
+  private generateJsonOutput(
+    scanResult: ScanResult,
+    options: ExportOptions,
+    deduplicateSignatures: boolean
+  ): string {
     return this.generateCategoryJsonOutput(scanResult, options, 'contracts', deduplicateSignatures);
   }
 
   /**
    * Legacy CSV output generation
    */
-  private generateCsvOutput(scanResult: ScanResult, options: ExportOptions, deduplicateSignatures: boolean): string {
+  private generateCsvOutput(
+    scanResult: ScanResult,
+    options: ExportOptions,
+    deduplicateSignatures: boolean
+  ): string {
     return this.generateCategoryCsvOutput(scanResult, options, 'contracts', deduplicateSignatures);
   }
 
   /**
    * Legacy Markdown output generation
    */
-  private generateMarkdownOutput(scanResult: ScanResult, options: ExportOptions, deduplicateSignatures: boolean): string {
-    return this.generateCategoryMarkdownOutput(scanResult, options, 'contracts', deduplicateSignatures);
+  private generateMarkdownOutput(
+    scanResult: ScanResult,
+    options: ExportOptions,
+    deduplicateSignatures: boolean
+  ): string {
+    return this.generateCategoryMarkdownOutput(
+      scanResult,
+      options,
+      'contracts',
+      deduplicateSignatures
+    );
   }
 
   /**
@@ -688,16 +787,17 @@ export class SignatureExporter {
    */
   private prependUpdateInfo(content: string, format: string): string {
     const timestamp = new Date().toISOString();
-    
+
     switch (format) {
       case 'txt':
       case 'md':
         return `# Updated: ${timestamp}\n# Previous content replaced\n\n${content}`;
-      case 'json':
+      case 'json': {
         const jsonContent = JSON.parse(content);
         jsonContent.metadata.lastUpdated = timestamp;
-        jsonContent.metadata.note = "Previous content replaced";
+        jsonContent.metadata.note = 'Previous content replaced';
         return JSON.stringify(jsonContent, null, 2);
+      }
       case 'csv':
         return `# Updated: ${timestamp}\n# Previous content replaced\n${content}`;
       default:
@@ -720,7 +820,10 @@ export class SignatureExporter {
       }
 
       // Check if signatures directory is already in gitignore
-      if (!gitignoreContent.includes(relativePath + '/') && !gitignoreContent.includes('signatures/')) {
+      if (
+        !gitignoreContent.includes(relativePath + '/') &&
+        !gitignoreContent.includes('signatures/')
+      ) {
         fs.appendFileSync(gitignorePath, gitignoreEntry);
       }
     } catch (error) {
@@ -732,8 +835,11 @@ export class SignatureExporter {
   /**
    * Filter functions based on options
    */
-  private filterFunctions(functions: FunctionSignature[], options: ExportOptions): FunctionSignature[] {
-    return functions.filter(func => 
+  private filterFunctions(
+    functions: FunctionSignature[],
+    options: ExportOptions
+  ): FunctionSignature[] {
+    return functions.filter((func) =>
       shouldIncludeFunction(func.visibility, options.includeInternal, options.includePrivate)
     );
   }

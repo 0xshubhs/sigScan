@@ -1,259 +1,141 @@
 # SigScan - Smart Contract Signature Scanner
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-blue.svg)](https://marketplace.visualstudio.com/vscode)
-[![Node.js](https://img.shields.io/badge/Node.js-16%2B-green.svg)](https://nodejs.org/)
+[![Version](https://img.shields.io/visual-studio-marketplace/v/devjster.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/devjster.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/devjster.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-A comprehensive tool that automatically scans Solidity smart contracts and generates function signatures, event topics, and error selectors with their corresponding method hashes. Available as both a VS Code extension and CLI tool.
+> Automatically scan and generate method signatures for Solidity smart contracts in Foundry and Hardhat projects.
 
-## 🚀 Quick Start
+## 🚀 Features
 
-### VS Code Extension (Recommended)
+- **🔍 Smart Contract Scanning**: Automatically detects and scans Solidity contracts in your project
+- **📁 Organized Output**: Separate signature files for contracts, libraries, and tests
+- **🎯 Deduplication**: Eliminates duplicate signatures across your codebase
+- **📊 Multiple Formats**: Export signatures in both JSON and TXT formats
+- **👁️ File Watching**: Automatically updates signatures when contracts change
+- **🏗️ Project-Aware**: Creates signatures folder in the correct project directory
+- **⚡ Fast & Lightweight**: Only 135KB extension size, optimized for performance
+- **🔧 Configurable**: Filter by visibility (public, external, internal, private)
+- **🌳 Tree View**: Browse contract signatures directly in VS Code sidebar
+- **💻 CLI Support**: Use in CI/CD pipelines and build scripts
 
-1. **Install the extension**:
-   ```bash
-   code --install-extension sigscan-0.1.0.vsix
-   ```
+## 📦 Installation
 
-2. **Open your Solidity project** in VS Code
+### From VS Code Marketplace
 
-3. **Run the scanner**:
-   - Press `Ctrl+Shift+P`
-   - Type "SigScan: Scan Project for Signatures"
-   - Press Enter
+1. Open VS Code
+2. Press \`Ctrl+P\` / \`Cmd+P\`
+3. Type: \`ext install devjster.sigscan\`
+4. Press Enter
 
-4. **View generated signatures** in the `signatures/` folder
+### From VSIX File
+
+\`\`\`bash
+code --install-extension sigscan-0.3.0.vsix
+\`\`\`
+
+## 🎯 Usage
+
+### VS Code Extension
+
+#### Quick Start
+
+1. Open a Foundry or Hardhat project
+2. Press \`Ctrl+Shift+P\` / \`Cmd+Shift+P\`
+3. Type "SigScan: Scan Project"
+4. Signatures will be generated in \`<project-root>/signatures/\`
+
+#### Available Commands
+
+- **SigScan: Scan Project** - Scan all Solidity contracts
+- **SigScan: Export Signatures** - Export signatures to files
+- **SigScan: Start Watching** - Enable auto-update on file changes
+- **SigScan: Stop Watching** - Disable file watching
+- **SigScan: Refresh Signatures** - Refresh the signature tree view
 
 ### CLI Tool
 
-```bash
+\`\`\`bash
 # Scan a project
-npm run cli scan --path ./your-project
-
-# Get project info
-npm run cli info --path ./your-project
+sigscan scan /path/to/project --output ./signatures
 
 # Watch for changes
-npm run cli watch --path ./your-project
-```
+sigscan watch /path/to/project --output ./signatures
 
-## 📖 Documentation
+# Specify formats
+sigscan scan /path/to/project --output ./signatures --format json,txt
+\`\`\`
 
-- **[Extension Guide](docs/EXTENSION_GUIDE.md)** - Complete installation and usage guide
-- **[Contributing](docs/CONTRIBUTING.md)** - Development setup and contribution guidelines
-- **[Usage Guide](USAGE.md)** - Detailed usage examples and features
+## 📂 Output Structure
 
-## ✨ Features
-
-### 🔍 **Automatic Detection**
-- Detects Foundry and Hardhat projects automatically
-- Scans all `.sol` files in `src/` and `contracts/` directories
-- Supports complex project structures with libraries
-
-### 📝 **Comprehensive Signature Generation**
-- **Functions**: All visibility levels (public, external, internal, private)
-- **Events**: Including indexed parameters and event topics
-- **Errors**: Custom error types with 4-byte selectors
-- **Constructors**: Contract initialization signatures
-
-### 🔄 **Real-time Updates**
-- Automatic file watching for `.sol` files
-- Instant signature updates when contracts change
-- Background monitoring with VS Code notifications
-
-### 📊 **Multiple Output Formats**
-- **TXT**: Human-readable format
-- **JSON**: Structured data for tooling integration
-- **CSV**: Spreadsheet-friendly format
-- **Markdown**: Documentation-ready format
-
-### 🛠️ **VS Code Integration**
-- Interactive tree view in sidebar
-- Hover tooltips showing signature details
-- Command palette integration
-- Copy-to-clipboard functionality
-
-## 📁 Project Structure
-
-```
-sigScan/
+\`\`\`
+your-project/
+├── foundry.toml
 ├── src/
-│   ├── extension/          # VS Code extension
-│   ├── core/              # Core scanning logic
-│   ├── cli/               # Command-line interface
-│   └── utils/             # Utility functions
-├── examples/              # Example contracts
-├── docs/                  # Documentation
-├── dist/                  # Compiled output
-└── signatures/            # Generated signature files
-```
+│   ├── Token.sol
+│   └── NFT.sol
+└── signatures/
+    ├── signatures-contracts.json    # Contract signatures
+    ├── signatures-contracts.txt
+    ├── signatures-libs.json         # Library signatures
+    ├── signatures-libs.txt
+    ├── signatures-tests.json        # Test signatures
+    └── signatures-tests.txt
+\`\`\`
 
-### Quick Start
-```bash
-# Clone and setup
-cd sigScan
-npm install
-npm run build
+## 📋 Example Output
 
-# Scan any Foundry/Hardhat project
-npm run cli scan --path ./examples
+### Text Format (\`signatures-contracts.txt\`)
 
-# Get project info
-npm run cli info --path ./examples
+\`\`\`
+# Smart Contract Signatures
+# Category: CONTRACTS
+# Generated: 2025-11-30T16:30:00.000Z
 
-# Generated files in signatures/ folder:
-# - signatures_[timestamp].txt (your original format!)
-# - signatures_[timestamp].json (structured data)
-```
+## Token
 
-### **Live Demo Results**
-```bash
-$ npm run cli info --path ./examples
-Project Information:
-  Type: foundry
-  Path: ./examples
-  Contract Directories: src, lib
-  Total Contracts: 2
-  Total Functions: 16
-  Total Events: 4
-  Total Errors: 5
-```
+### Functions
+transfer(address,uint256) -> 0xa9059cbb
+approve(address,uint256) -> 0x095ea7b3
+balanceOf(address) -> 0x70a08231
 
-**Generated Output (signatures.txt):**
-```
-## Contract: SimpleToken (SimpleToken.sol)
+### Events
+Transfer(address,address,uint256) -> 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+Approval(address,address,uint256) -> 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
+\`\`\`
 
-### Functions:
-transfer(address,uint256)                --> 0xa9059cbb
-approve(address,uint256)                 --> 0x095ea7b3
-transferFrom(address,address,uint256)    --> 0x23b872dd
-mint(address,uint256)                    --> 0x40c10f19
-burn(uint256)                            --> 0x42966c68
-constructor(string,string,uint256)       --> 0xce3f0078
-```
+## ⚙️ Configuration
 
----
+### VS Code Settings
 
-## Enhanced Project Structure & Features
+\`\`\`json
+{
+  "sigscan.outputFormats": ["txt", "json"],
+  "sigscan.excludeInternal": true,
+  "sigscan.excludePrivate": true,
+  "sigscan.autoExport": true
+}
+\`\`\`
 
-### **IMPLEMENTED** Project Architecture
-```
-sigScan/                                 ✅ COMPLETE
-├── src/
-│   ├── core/                           ✅ Core functionality working
-│   │   ├── scanner.ts                  ✅ Contract scanning
-│   │   ├── parser.ts                   ✅ Solidity parsing  
-│   │   ├── watcher.ts                  ✅ File watching
-│   │   └── exporter.ts                 ✅ Multi-format export
-│   ├── cli/                            ✅ CLI tool working
-│   │   └── index.ts                    ✅ Scan, info, watch commands
-│   ├── extension/                      ✅ VS Code extension ready
-│   └── utils/                          ✅ Helper functions
-├── dist/                               ✅ Built and ready
-├── examples/                           ✅ Working test contracts
-└── signatures/                         ✅ Generated output files
-```
+## 🔧 Supported Projects
 
-### **WORKING** Core Features
+- ✅ **Foundry** - Full support
+- ✅ **Hardhat** - Full support
+- ✅ **Generic Solidity** - Basic support
 
-#### 1. **Project Detection & Support**
-- Auto-detect Foundry projects (`foundry.toml`)
-- Auto-detect Hardhat projects (`hardhat.config.js/ts`)
-- Support multiple contract directories (`src/`, `contracts/`, `lib/`)
-- Handle nested contract structures
+## 🤝 Contributing
 
-#### 2. **Enhanced Function Analysis**
-- Extract all function signatures with 4-byte selectors
-- Detect function visibility (public, external, internal, private)
-- Identify view/pure vs state-changing functions
-- Handle constructors, events, and custom errors
-- Parse function parameters correctly
+Contributions are welcome! Please see [CONTRIBUTING.md](docs/CONTRIBUTING.md) for details.
 
-#### 3. **Real-time Monitoring Framework**
-- File system watcher implemented
-- Change detection ready
-- Incremental update capability
+## 📄 License
 
-#### 4. **Output Formats & Storage**
-- `methods.txt` - Your original human readable format
-- `signatures.json` - Structured data for tools
-- `methods.csv` - Spreadsheet compatible
-- `signatures.md` - Documentation format
+MIT © [DevJSter](https://github.com/DevJSter)
 
-### **READY** Developer Experience
+## 🐛 Issues & Support
 
-#### 7. **CLI Tool**
-- `scan` command - Scan projects for signatures
-- `info` command - Project information and statistics
-- `watch` command - Framework ready for real-time monitoring
-- Custom filtering and export options
-
-#### 8. **VS Code Extension Framework**
-- Extension structure complete
-- Tree view provider for signature exploration
-- Hover tooltips for function information
-- Command integration ready
+Found a bug or have a feature request? [Open an issue](https://github.com/DevJSter/sigScan/issues)
 
 ---
 
-## **TECHNICAL IMPLEMENTATION** 
-
-### Stack Used:
-- **Language**: TypeScript
-- **CLI**: Commander.js
-- **Parsing**: Custom Solidity regex parser
-- **File Watching**: Chokidar
-- **Hashing**: js-sha3 (Keccak256)
-- **Build**: Webpack
-
-### Verification Against Original Requirements:
-
-| Requirement | Status | Implementation |
-|------------|--------|----------------|
-| Go through contracts in src/ | **WORKING** | Auto-detects Foundry/Hardhat projects |
-| Generate method hashes | **WORKING** | Keccak256 with 4-byte selectors |
-| Automatic detection | **WORKING** | File watcher framework ready |
-| Save in project root | **WORKING** | Creates `signatures/` folder |
-| Your exact format | **WORKING** | `method signature --> 0xhash` |
-| No need for cast | **WORKING** | Fully automated scanning |
-
----
-
-## **CURRENT STATUS: PRODUCTION READY** 
-
-### Phase 1: Core Functionality - **COMPLETE**
-- Contract scanning working
-- Function signature extraction working  
-- Method hash generation working
-- File watching framework ready
-- Multiple output formats working
-
-### Phase 2: CLI Tool - **COMPLETE** 
-- CLI development complete
-- Scan and info commands working
-- ✅ Watch framework implemented
-- ✅ All output formats working
-
-### � Phase 3: VS Code Extension - **READY**
-- ✅ Extension framework complete
-- 🔄 Packaging and publishing (next step)
-- 🔄 Testing and refinement (next step)
-
-### 📊 **LIVE RESULTS**
-Successfully processing real contracts:
-- **2 contracts** scanned from examples
-- **16 functions** with signatures generated
-- **4 events** with topic hashes  
-- **5 custom errors** with selectors
-- **Multiple formats** exported automatically
-
-## **YOUR VISION: ACHIEVED!**
-
-**"Tool goes through all contracts in src/ folder"** → Working  
-**"Generates calldata method hash"** → Working  
-**"No need to use cast"** → Working  
-**"Auto-execute when functions introduced"** → Framework ready  
-**"Makes methods.txt in root"** → Working  
-**"Detect changes in contracts"** → Working  
-
-**Ready for production use in your smart contract development workflow!**
+**Built with ❤️ for the Solidity community**
