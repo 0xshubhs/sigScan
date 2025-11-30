@@ -1,9 +1,9 @@
 # SigScan - Smart Contract Signature Scanner
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/devjster.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/devjster.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
-[![Rating](https://img.shields.io/visual-studio-marketplace/r/devjster.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/DevJSter/sigScan/pr-validation.yml?branch=main&style=flat-square)](https://github.com/DevJSter/sigScan/actions)
+[![Version](https://img.shields.io/visual-studio-marketplace/v/0xshubhs.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.sigscan)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/0xshubhs.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.sigscan)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/0xshubhs.sigscan?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.sigscan)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/0xshubhs/sigScan/pr-validation.yml?branch=main&style=flat-square)](https://github.com/0xshubhs/sigScan/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
 A professional VS Code extension and CLI tool for automatically scanning and generating method signatures from Solidity smart contracts in Foundry and Hardhat projects.
@@ -58,7 +58,7 @@ SigScan is a developer tool designed to streamline smart contract development by
 
 1. Open Visual Studio Code
 2. Press `Ctrl+P` (Windows/Linux) or `Cmd+P` (macOS)
-3. Type: `ext install devjster.sigscan`
+3. Type: `ext install 0xshubhs.sigscan`
 4. Press Enter
 
 ### From VSIX File
@@ -267,7 +267,7 @@ Create a `.sigscanrc.json` in your project root:
 
 ```bash
 # Clone the repository
-git clone https://github.com/DevJSter/sigScan.git
+git clone https://github.com/0xshubhs/sigScan.git
 cd sigScan
 
 # Install dependencies
@@ -358,13 +358,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Links
 
-- [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=devjster.sigscan)
-- [GitHub Repository](https://github.com/DevJSter/sigScan)
-- [Issue Tracker](https://github.com/DevJSter/sigScan/issues)
-- [Changelog](https://github.com/DevJSter/sigScan/releases)
+- [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=0xshubhs.sigscan)
+- [GitHub Repository](https://github.com/0xshubhs/sigScan)
+- [Issue Tracker](https://github.com/0xshubhs/sigScan/issues)
+- [Changelog](https://github.com/0xshubhs/sigScan/releases)
 
 ---
 
-**Maintained by**: [DevJSter](https://github.com/DevJSter)  
+**Maintained by**: [0xshubhs](https://github.com/0xshubhs)  
 **Version**: 0.3.0  
 **Last Updated**: November 2025

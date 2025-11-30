@@ -8,7 +8,7 @@ updates:
       day: 'monday'
     open-pull-requests-limit: 10
     assignees:
-      - 'DevJSter'
+      - '0xshubhs'
     labels:
       - 'dependencies'
       - 'automated'

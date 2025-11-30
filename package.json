@@ -3,7 +3,7 @@
   "displayName": "SigScan - Smart Contract Signature Scanner",
   "description": "Automatically scan and generate method signatures for Solidity contracts in Foundry/Hardhat projects",
   "version": "0.3.0",
-  "publisher": "devjster",
+  "publisher": "0xshubhs",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0",
@@ -193,12 +193,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/DevJSter/sigScan.git"
+    "url": "https://github.com/0xshubhs/sigScan.git"
   },
   "bugs": {
-    "url": "https://github.com/DevJSter/sigScan/issues"
+    "url": "https://github.com/0xshubhs/sigScan/issues"
   },
-  "homepage": "https://github.com/DevJSter/sigScan#readme",
+  "homepage": "https://github.com/0xshubhs/sigScan#readme",
   "author": {
     "name": "0xshubhs",
     "url": "https://github.com/0xshubhs"
