@@ -226,6 +226,54 @@ Features demonstrated:
 - Complex state machine patterns
 - Advanced access control and security mechanisms
 
+**foundry-options/** - Options Trading Protocol
+```
+foundry-options/
+├── foundry.toml
+├── src/
+│   ├── OptionsMarket.sol       # Options writing and trading
+│   └── VolatilityOracle.sol    # Implied volatility tracking
+├── test/
+│   └── OptionsMarket.t.sol     # Options tests
+└── signatures/
+    ├── signatures-contracts.json
+    └── signatures-contracts.txt
+```
+
+Features demonstrated:
+- Call and put option contracts
+- Black-Scholes pricing model implementation
+- Collateral management with margin requirements
+- Option lifecycle (write, buy, exercise, expire)
+- Volatility oracle with historical price tracking
+- Premium calculation with time decay
+- Intrinsic and time value calculations
+- Advanced mathematical operations (square root for volatility)
+
+**foundry-oracle/** - Multi-Source Price Oracle
+```
+foundry-oracle/
+├── foundry.toml
+├── src/
+│   ├── PriceAggregator.sol     # Multi-oracle price aggregation
+│   └── ChainlinkAdapter.sol    # Chainlink feed adapter
+├── test/
+│   └── PriceAggregator.t.sol   # Oracle tests
+└── signatures/
+    ├── signatures-contracts.json
+    └── signatures-contracts.txt
+```
+
+Features demonstrated:
+- Median price calculation from multiple sources
+- Weighted price aggregation
+- Outlier detection and circuit breaker
+- Heartbeat monitoring for stale prices
+- Oracle reputation system with success/failure tracking
+- Deviation calculations and confidence scoring
+- Emergency stop mechanism
+- Statistical functions (median, standard deviation)
+
 ### Hardhat Projects
 
 **hardhat-nft/** - NFT Marketplace Example
@@ -298,6 +346,31 @@ Features demonstrated:
 - Dispute resolution system
 - Dynamic threshold calculations
 
+**hardhat-amm/** - Concentrated Liquidity AMM
+```
+hardhat-amm/
+├── hardhat.config.js
+├── contracts/
+│   ├── ConcentratedLiquidity.sol  # Uniswap V3 style AMM
+│   └── RouterV3.sol                # Multi-hop swap router
+├── test/
+│   └── ConcentratedLiquidity.test.js
+└── signatures/
+    ├── signatures-contracts.json
+    └── signatures-contracts.txt
+```
+
+Features demonstrated:
+- Tick-based concentrated liquidity positions
+- Position management (mint, burn, collect fees)
+- Fee growth tracking per position
+- Multi-hop swap routing with path encoding
+- Price oracle with time-weighted average prices (TWAP)
+- Liquidity range management
+- SqrtPriceX96 math for precision
+- Gas-optimized position updates
+- Complex data structure handling (nested mappings)
+
 ### Running Examples
 
 ```bash
@@ -307,6 +380,14 @@ sigscan scan
 
 # Scan the DAO governance example
 cd examples/foundry-dao
+sigscan scan
+
+# Scan the options trading example
+cd examples/foundry-options
+sigscan scan
+
+# Scan the oracle aggregator example
+cd examples/foundry-oracle
 sigscan scan
 
 # Scan the NFT marketplace example
@@ -319,6 +400,10 @@ sigscan scan
 
 # Scan the bridge example
 cd examples/hardhat-bridge
+sigscan scan
+
+# Scan the concentrated liquidity AMM example
+cd examples/hardhat-amm
 sigscan scan
 
 # Watch mode for development
