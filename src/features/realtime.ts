@@ -532,8 +532,30 @@ export class RealtimeAnalyzer {
         let hintPos: vscode.Position;
 
         if (isEvent) {
-          // For events, show after 'emit EventName('
-          hintPos = document.positionAt(match.index + match[0].length);
+          // For events, find the closing parenthesis after emit
+          const emitStart = match.index;
+          const afterEmit = content.substring(emitStart);
+          // Find matching closing parenthesis
+          let depth = 0;
+          let closingParenIndex = -1;
+          for (let i = 0; i < afterEmit.length; i++) {
+            if (afterEmit[i] === '(') {
+              depth++;
+            }
+            if (afterEmit[i] === ')') {
+              depth--;
+              if (depth === 0) {
+                closingParenIndex = i;
+                break;
+              }
+            }
+          }
+          if (closingParenIndex !== -1) {
+            hintPos = document.positionAt(emitStart + closingParenIndex + 1);
+          } else {
+            // Fallback: after opening paren if we can't find closing
+            hintPos = document.positionAt(match.index + match[0].length);
+          }
         } else {
           // For functions, modifiers, structs, constructors - show after '{'
           const braceIndex = match[0].lastIndexOf('{');
@@ -623,7 +645,30 @@ export class RealtimeAnalyzer {
         let hintPos: vscode.Position;
 
         if (isEvent) {
-          hintPos = document.positionAt(match.index + match[0].length);
+          // For events, find the closing parenthesis after emit
+          const emitStart = match.index;
+          const afterEmit = content.substring(emitStart);
+          // Find matching closing parenthesis
+          let depth = 0;
+          let closingParenIndex = -1;
+          for (let i = 0; i < afterEmit.length; i++) {
+            if (afterEmit[i] === '(') {
+              depth++;
+            }
+            if (afterEmit[i] === ')') {
+              depth--;
+              if (depth === 0) {
+                closingParenIndex = i;
+                break;
+              }
+            }
+          }
+          if (closingParenIndex !== -1) {
+            hintPos = document.positionAt(emitStart + closingParenIndex + 1);
+          } else {
+            // Fallback: after opening paren if we can't find closing
+            hintPos = document.positionAt(match.index + match[0].length);
+          }
         } else {
           const braceIndex = match[0].lastIndexOf('{');
           hintPos = document.positionAt(match.index + braceIndex + 1);
