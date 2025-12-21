@@ -1,1 +1,1 @@
- code --install-extension sigscan-0.1.0.vsix --force
+ vsce package && code --install-extension sigscan-0.4.4.vsix --force
