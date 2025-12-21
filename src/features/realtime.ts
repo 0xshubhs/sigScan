@@ -11,12 +11,23 @@ import { GasEstimator, GasEstimate } from './gas';
 import { ContractSizeAnalyzer, ContractSizeInfo } from './size';
 import { ComplexityAnalyzer, ComplexityMetrics } from './complexity';
 import { SolidityParser } from '../core/parser';
+import { StorageLayoutAnalyzer, StorageLayout } from './storage-layout';
+import { CallGraphAnalyzer, CallGraph } from './call-graph';
+import { DeploymentCostEstimator, DeploymentCost } from './deployment';
+import { GasRegressionTracker, RegressionReport } from './regression';
+import { RuntimeProfiler, ProfilerReport } from './profiler';
 
 export interface LiveAnalysis {
   gasEstimates: Map<string, GasEstimate>;
   sizeInfo: ContractSizeInfo | null;
   complexityMetrics: Map<string, ComplexityMetrics>;
   diagnostics: vscode.Diagnostic[];
+  // Extended analysis (computed on-demand for performance)
+  storageLayout?: StorageLayout;
+  callGraph?: CallGraph;
+  deploymentCost?: DeploymentCost;
+  regressionReport?: RegressionReport;
+  profilerReport?: ProfilerReport;
 }
 
 export class RealtimeAnalyzer {
@@ -30,6 +41,19 @@ export class RealtimeAnalyzer {
   private contentHashCache: Map<string, LiveAnalysis>; // Hash-based cache for solc results
   private idleTimers: Map<string, NodeJS.Timeout>; // Per-document idle timers
   private activeSolcCompilations: Map<string, boolean>; // Track active compilations to cancel
+  private analysisInProgress = false; // Global flag to prevent parallel heavy operations
+  private extendedAnalysisInProgress = false; // Track extended analysis
+
+  // Resource thresholds for automatic extended analysis
+  private readonly MEMORY_THRESHOLD_MB = 500; // Run extended analysis only if using < 500MB
+  private readonly CPU_THRESHOLD_PERCENT = 50; // Run if CPU usage < 50%
+
+  // Extended analyzers (lazy-loaded for performance)
+  private storageAnalyzer: StorageLayoutAnalyzer;
+  private callGraphAnalyzer: CallGraphAnalyzer;
+  private deploymentAnalyzer: DeploymentCostEstimator;
+  private regressionTracker: GasRegressionTracker;
+  private runtimeProfiler: RuntimeProfiler;
 
   constructor(diagnosticCollection: vscode.DiagnosticCollection) {
     // Tier 1: Heuristic estimator (no solc, instant)
@@ -44,6 +68,13 @@ export class RealtimeAnalyzer {
     this.contentHashCache = new Map();
     this.idleTimers = new Map();
     this.activeSolcCompilations = new Map();
+
+    // Extended analyzers (lightweight initialization)
+    this.storageAnalyzer = new StorageLayoutAnalyzer();
+    this.callGraphAnalyzer = new CallGraphAnalyzer();
+    this.deploymentAnalyzer = new DeploymentCostEstimator();
+    this.regressionTracker = new GasRegressionTracker();
+    this.runtimeProfiler = new RuntimeProfiler();
   }
 
   /**
@@ -158,6 +189,88 @@ export class RealtimeAnalyzer {
 
     // Run solc analysis immediately
     await this.runSolcAnalysis(document, contentHash);
+  }
+
+  /**
+   * Check if heavy analysis (solc) is currently running
+   */
+  public isAnalysisInProgress(): boolean {
+    return (
+      this.analysisInProgress ||
+      Array.from(this.activeSolcCompilations.values()).some((active) => active)
+    );
+  }
+
+  /**
+   * Check if system resources are available for extended analysis
+   */
+  private async checkResourcesAvailable(): Promise<boolean> {
+    try {
+      const memUsage = process.memoryUsage();
+      const memUsedMB = memUsage.heapUsed / 1024 / 1024;
+
+      // Check if memory usage is below threshold
+      if (memUsedMB > this.MEMORY_THRESHOLD_MB) {
+        return false;
+      }
+
+      // Check if any heavy analysis is running
+      if (this.isAnalysisInProgress() || this.extendedAnalysisInProgress) {
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      // If resource check fails, be conservative and don't run
+      return false;
+    }
+  }
+
+  /**
+   * Run extended analysis automatically in background if resources available
+   */
+  private async runExtendedAnalysisIfAvailable(document: vscode.TextDocument): Promise<void> {
+    // Don't run if already running or if main analysis is active
+    if (this.extendedAnalysisInProgress || !(await this.checkResourcesAvailable())) {
+      return;
+    }
+
+    this.extendedAnalysisInProgress = true;
+
+    try {
+      const content = document.getText();
+      const contractName = this.extractContractName(content);
+
+      if (!contractName) {
+        return;
+      }
+
+      // Run extended features sequentially to avoid resource spike
+      // Only run synchronous analyzers automatically (storage, callgraph, deployment)
+      // Profiler and regression require external tools and are command-only
+      try {
+        if (await this.checkResourcesAvailable()) {
+          this.storageAnalyzer.analyzeContract(content, contractName);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        if (await this.checkResourcesAvailable()) {
+          this.callGraphAnalyzer.analyzeContract(content);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        if (await this.checkResourcesAvailable()) {
+          this.deploymentAnalyzer.estimateContract(content, contractName);
+        }
+      } catch (error) {
+        // Continue even if extended analysis fails
+        console.error('Extended analysis feature failed:', error);
+      }
+    } finally {
+      this.extendedAnalysisInProgress = false;
+    }
   }
 
   /**
@@ -380,6 +493,7 @@ export class RealtimeAnalyzer {
 
     // Mark as active
     this.activeSolcCompilations.set(uri, true);
+    this.analysisInProgress = true; // Global flag for heavy operations
 
     try {
       // Parse contract
@@ -457,9 +571,11 @@ export class RealtimeAnalyzer {
       };
 
       this.contentHashCache.set(contentHash, analysis);
+      this.analysisInProgress = false; // Mark as complete
     } finally {
       // Mark as inactive
       this.activeSolcCompilations.set(uri, false);
+      this.analysisInProgress = false;
     }
   }
 
@@ -597,6 +713,125 @@ export class RealtimeAnalyzer {
     });
 
     return hints;
+  }
+
+  /**
+   * Extended Analysis - On-demand features (lightweight, cached)
+   */
+
+  /**
+   * Analyze storage layout (on-demand)
+   */
+  public async analyzeStorageLayout(document: vscode.TextDocument): Promise<StorageLayout> {
+    const content = document.getText();
+    const contractName = this.extractContractName(content);
+    return this.storageAnalyzer.analyzeContract(content, contractName);
+  }
+
+  /**
+   * Analyze call graph (on-demand)
+   */
+  public async analyzeCallGraph(document: vscode.TextDocument): Promise<CallGraph> {
+    const content = document.getText();
+    return this.callGraphAnalyzer.analyzeContract(content);
+  }
+
+  /**
+   * Estimate deployment cost (on-demand)
+   */
+  public async estimateDeploymentCost(document: vscode.TextDocument): Promise<DeploymentCost> {
+    const content = document.getText();
+    const contractName = this.extractContractName(content);
+    return this.deploymentAnalyzer.estimateContract(content, contractName);
+  }
+
+  /**
+   * Extract contract name from content
+   */
+  private extractContractName(content: string): string {
+    const match = content.match(/(contract|library|interface)\s+(\w+)/);
+    return match ? match[2] : 'Unknown';
+  }
+
+  /**
+   * Compare with git branch (on-demand)
+   */
+  public async compareWithBranch(
+    document: vscode.TextDocument,
+    targetBranch = 'main'
+  ): Promise<RegressionReport | null> {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!workspaceFolder) {
+      return null;
+    }
+
+    const isGit = await this.regressionTracker.isGitRepository(workspaceFolder.uri.fsPath);
+    if (!isGit) {
+      return null;
+    }
+
+    // Get current gas data
+    const analysis = await this.analyzeDocumentOnChange(document);
+    const gasData = new Map<
+      string,
+      { signature: string; gas: number; source: 'solc' | 'heuristic'; complexity: string }
+    >();
+
+    analysis.gasEstimates.forEach((estimate, funcName) => {
+      gasData.set(funcName, {
+        signature: estimate.signature,
+        gas: typeof estimate.estimatedGas.average === 'number' ? estimate.estimatedGas.average : 0,
+        source: estimate.source,
+        complexity: estimate.complexity,
+      });
+    });
+
+    return this.regressionTracker.compareWithCommit(
+      gasData,
+      workspaceFolder.uri.fsPath,
+      targetBranch
+    );
+  }
+
+  /**
+   * Get runtime profiler report (on-demand)
+   */
+  public async getProfilerReport(document: vscode.TextDocument): Promise<ProfilerReport | null> {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (!workspaceFolder) {
+      return null;
+    }
+
+    const forgeReports = await this.runtimeProfiler.parseForgeGasReport(workspaceFolder.uri.fsPath);
+    if (forgeReports.length === 0) {
+      return null;
+    }
+
+    // Get estimates
+    const analysis = await this.analyzeDocumentOnChange(document);
+    const estimates = new Map<string, { gas: number; signature: string }>();
+
+    analysis.gasEstimates.forEach((estimate, funcName) => {
+      estimates.set(funcName, {
+        gas: typeof estimate.estimatedGas.average === 'number' ? estimate.estimatedGas.average : 0,
+        signature: estimate.signature,
+      });
+    });
+
+    return this.runtimeProfiler.compareEstimates(forgeReports, estimates);
+  }
+
+  /**
+   * Get extended analyzers
+   */
+  public getExtendedAnalyzers() {
+    return {
+      storage: this.storageAnalyzer,
+      callGraph: this.callGraphAnalyzer,
+      deployment: this.deploymentAnalyzer,
+      regression: this.regressionTracker,
+      profiler: this.runtimeProfiler,
+    };
   }
 
   /**

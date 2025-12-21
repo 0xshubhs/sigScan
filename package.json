@@ -101,6 +101,36 @@
         "command": "sigscan.toggleRealtimeAnalysis",
         "title": "Toggle Real-time Gas Analysis",
         "category": "SigScan"
+      },
+      {
+        "command": "sigscan.showStorageLayout",
+        "title": "Show Storage Layout Analysis",
+        "category": "SigScan",
+        "icon": "$(database)"
+      },
+      {
+        "command": "sigscan.showCallGraph",
+        "title": "Show Function Call Graph",
+        "category": "SigScan",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "sigscan.showDeploymentCost",
+        "title": "Show Deployment Cost Estimate",
+        "category": "SigScan",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "sigscan.compareWithBranch",
+        "title": "Compare Gas with Branch",
+        "category": "SigScan",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "sigscan.showProfilerReport",
+        "title": "Show Runtime Profiler Report",
+        "category": "SigScan",
+        "icon": "$(graph)"
       }
     ],
     "configuration": {

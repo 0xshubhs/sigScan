@@ -37,15 +37,47 @@ SigScan is a developer tool designed to streamline smart contract development by
 - **Deduplication**: Eliminates duplicate signatures across your codebase
 - **Project-Aware**: Creates output in the correct project root directory
 
-### Advanced Analysis Features ⚡ NEW
+### Advanced Analysis Features
 
+- **Real-time Gas Analysis**: Instant gas estimation with inline annotations and hover details
+- **Two-tier Analysis**: Fast heuristic analysis (under 5ms) with optional solc compilation for accuracy
+- **Storage Layout Analyzer**: Visualize storage slots, detect packing opportunities, estimate SSTORE/SLOAD costs
+- **Function Call Graph**: Analyze call hierarchies, detect recursion, track external calls
+- **Deployment Cost Estimator**: Calculate contract creation gas and costs at different gas prices
+- **Gas Regression Tracker**: Compare gas usage across git branches and commits
+- **Runtime Profiler**: Parse forge test reports and compare actual vs estimated gas
 - **ABI Generation**: Transform signatures into standard Ethereum ABI format
-- **Gas Estimation**: Estimate gas costs based on code complexity analysis
 - **Contract Size Check**: Verify contracts stay within 24KB deployment limit
 - **Complexity Analysis**: Calculate cyclomatic and cognitive complexity metrics
-- **Etherscan Verification**: Verify signatures against deployed contracts
-- **Signature Database**: Maintain library of common contract signatures
-- **Performance Caching**: SHA-256 based cache with LRU eviction
+- **Performance Caching**: SHA-256 based cache with intelligent invalidation
+
+### Real-time Analysis Engine
+
+The extension operates in multiple tiers:
+
+**Tier 1 - Instant Analysis (0-100ms)**
+- Fast heuristic patterns and regex-based detection
+- No compilation required
+- Runs on every keystroke
+
+**Tier 2 - Smart Compilation (200-500ms)**
+- Full solc analysis with optimization enabled
+- Triggered after 200ms of inactivity or file open
+- Provides accurate gas estimates and warnings
+
+**Tier 3 - Extended Analysis (Automatic Background)**
+- Runs automatically after main analysis completes when resources are available
+- Monitors memory usage (< 500MB) and CPU before running
+- Includes storage layout, call graph, and deployment cost analysis
+- Sequential execution with delays prevents resource spikes
+- Never blocks main analysis or editing experience
+
+**Performance Features:**
+- Automatic resource monitoring prevents execution during heavy load
+- Extended features run intelligently in background when system is idle
+- Intelligent caching prevents redundant analysis
+- Debounced updates reduce CPU load
+- Manual commands available for immediate analysis when needed
 
 ### Developer Experience
 
@@ -54,8 +86,8 @@ SigScan is a developer tool designed to streamline smart contract development by
 - **Command Palette**: Quick access to all scanning and analysis functions
 - **CLI Support**: Integrate into build scripts and CI/CD pipelines
 - **Configurable Filtering**: Control visibility levels (public, external, internal, private)
-- **Lightweight**: Optimized package size of approximately 140KB
-- **Parallel Processing**: Fast analysis of large projects
+- **Lightweight**: Optimized package size, extended analysis runs only when requested
+- **Non-blocking**: Heavy operations never interfere with realtime gas estimation
 
 ### Supported Project Types
 
@@ -108,15 +140,37 @@ npx sigscan scan ./my-project
 - **SigScan: Export Signatures** - Export signatures to specific format
 - **SigScan: Start/Stop Watching** - Enable/disable automatic rescanning
 - **SigScan: Refresh Signatures** - Manually refresh signature tree view
+- **SigScan: Toggle Real-time Gas Analysis** - Enable/disable inline gas annotations
 
 **Advanced Analysis:**
+
+These features run automatically in the background after main analysis completes, when system resources are available:
+- **Storage Layout Analysis** - Analyzes storage slot allocation and packing opportunities
+- **Function Call Graph** - Maps function call dependencies and detects recursion
+- **Deployment Cost Estimation** - Calculates deployment gas and ETH costs
+
+Manual commands are also available for immediate execution:
+- **SigScan: Show Storage Layout Analysis** - View storage layout report
+- **SigScan: Show Function Call Graph** - View call graph visualization
+- **SigScan: Show Deployment Cost Estimate** - View deployment cost breakdown
+- **SigScan: Compare Gas with Branch** - Compare gas usage with another git branch (requires git)
+- **SigScan: Show Runtime Profiler Report** - Compare estimated vs actual gas from forge tests (requires Foundry)
+
+**Additional Analysis Tools:**
 - **SigScan: Generate ABI** - Create ABI files from extracted signatures
 - **SigScan: Estimate Gas** - Analyze and estimate gas costs for functions
 - **SigScan: Check Contract Size** - Verify contract sizes against 24KB limit
 - **SigScan: Analyze Complexity** - Calculate code complexity metrics
-- **SigScan: Verify Etherscan** - Verify against deployed contracts on Etherscan
-- **SigScan: Search Database** - Search signature database for common patterns
 - **SigScan: Generate All Reports** - Run complete analysis suite
+
+**How It Works:**
+Extended analysis features (storage layout, call graph, deployment) automatically run in the background after each successful compilation when:
+- Main solc analysis is complete
+- Memory usage is below 500MB
+- CPU is not heavily loaded
+- No other analysis is in progress
+
+This ensures zero impact on your editing experience while providing comprehensive insights automatically.
 
 #### Tree View
 

@@ -214,6 +214,214 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Extended analysis commands (on-demand only, runs when idle - never parallel with solc)
+  const storageLayoutCommand = vscode.commands.registerCommand(
+    'sigscan.showStorageLayout',
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze storage layout');
+        return;
+      }
+
+      // Check if heavy analysis is running
+      if (realtimeAnalyzer.isAnalysisInProgress()) {
+        vscode.window.showWarningMessage('Analysis in progress, please wait...');
+        return;
+      }
+
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Analyzing storage layout...',
+          cancellable: false,
+        },
+        async () => {
+          const layout = await realtimeAnalyzer.analyzeStorageLayout(editor.document);
+          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const report = analyzers.storage.generateReport(layout, editor.document.fileName);
+
+          const doc = await vscode.workspace.openTextDocument({
+            content: report,
+            language: 'markdown',
+          });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        }
+      );
+    }
+  );
+
+  const callGraphCommand = vscode.commands.registerCommand('sigscan.showCallGraph', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'solidity') {
+      vscode.window.showErrorMessage('Open a Solidity file to analyze call graph');
+      return;
+    }
+
+    if (realtimeAnalyzer.isAnalysisInProgress()) {
+      vscode.window.showWarningMessage('Analysis in progress, please wait...');
+      return;
+    }
+
+    vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Building call graph...',
+        cancellable: false,
+      },
+      async () => {
+        const callGraph = await realtimeAnalyzer.analyzeCallGraph(editor.document);
+        const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+        const report = analyzers.callGraph.generateReport(callGraph, editor.document.fileName);
+
+        const doc = await vscode.workspace.openTextDocument({
+          content: report,
+          language: 'markdown',
+        });
+        await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+      }
+    );
+  });
+
+  const deploymentCostCommand = vscode.commands.registerCommand(
+    'sigscan.showDeploymentCost',
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to estimate deployment cost');
+        return;
+      }
+
+      if (realtimeAnalyzer.isAnalysisInProgress()) {
+        vscode.window.showWarningMessage('Analysis in progress, please wait...');
+        return;
+      }
+
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Estimating deployment cost...',
+          cancellable: false,
+        },
+        async () => {
+          const cost = await realtimeAnalyzer.estimateDeploymentCost(editor.document);
+          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+
+          const analysis = {
+            contracts: [cost],
+            totalGas: cost.deploymentGas.total,
+            totalCost: cost.costInEth,
+            largestContract: cost.contractName,
+            recommendations: [],
+          };
+          const report = analyzers.deployment.generateReport(analysis);
+
+          const doc = await vscode.workspace.openTextDocument({
+            content: report,
+            language: 'markdown',
+          });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        }
+      );
+    }
+  );
+
+  const regressionCommand = vscode.commands.registerCommand(
+    'sigscan.compareWithBranch',
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to compare gas usage');
+        return;
+      }
+
+      if (realtimeAnalyzer.isAnalysisInProgress()) {
+        vscode.window.showWarningMessage('Analysis in progress, please wait...');
+        return;
+      }
+
+      const branch = await vscode.window.showInputBox({
+        prompt: 'Enter branch/commit to compare with',
+        value: 'main',
+      });
+
+      if (!branch) {
+        return;
+      }
+
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Comparing gas usage...',
+          cancellable: false,
+        },
+        async () => {
+          const regressionReport = await realtimeAnalyzer.compareWithBranch(
+            editor.document,
+            branch
+          );
+
+          if (!regressionReport) {
+            vscode.window.showErrorMessage('Not a git repository or no data available');
+            return;
+          }
+
+          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const report = analyzers.regression.generateReport(regressionReport);
+
+          const doc = await vscode.workspace.openTextDocument({
+            content: report,
+            language: 'markdown',
+          });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        }
+      );
+    }
+  );
+
+  const profilerCommand = vscode.commands.registerCommand(
+    'sigscan.showProfilerReport',
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to see profiler report');
+        return;
+      }
+
+      if (realtimeAnalyzer.isAnalysisInProgress()) {
+        vscode.window.showWarningMessage('Analysis in progress, please wait...');
+        return;
+      }
+
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Loading profiler data...',
+          cancellable: false,
+        },
+        async () => {
+          const profilerReport = await realtimeAnalyzer.getProfilerReport(editor.document);
+
+          if (!profilerReport) {
+            vscode.window.showInformationMessage(
+              'No forge test data found. Run `forge test --gas-report` first.'
+            );
+            return;
+          }
+
+          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const report = analyzers.profiler.generateReport(profilerReport);
+
+          const doc = await vscode.workspace.openTextDocument({
+            content: report,
+            language: 'markdown',
+          });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        }
+      );
+    }
+  );
+
   // Add to context
   context.subscriptions.push(
     treeView,
@@ -226,6 +434,11 @@ export function activate(context: vscode.ExtensionContext) {
     gasDecorationType,
     complexityDecorationType,
     statusBarItem,
+    storageLayoutCommand,
+    callGraphCommand,
+    deploymentCostCommand,
+    regressionCommand,
+    profilerCommand,
     ...commands
   );
 
