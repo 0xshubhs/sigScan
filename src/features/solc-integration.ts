@@ -6,6 +6,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 
+// Try to import solc wrapper (bundled in extension)
+let solcWrapper: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  solcWrapper = require('solc');
+} catch (error) {
+  console.log('solc wrapper not available, will try CLI fallback');
+}
+
 export interface SolcGasEstimate {
   min: number | 'infinite';
   max: number | 'infinite';
@@ -128,9 +137,15 @@ export class SolcIntegration {
   }
 
   /**
-   * Check if solc is available
+   * Check if solc is available (either wrapper or CLI)
    */
   public isSolcAvailable(): boolean {
+    // First check if we have the JavaScript wrapper (bundled)
+    if (solcWrapper) {
+      return true;
+    }
+
+    // Fallback to CLI check
     try {
       execSync(`${this.solcPath} --version`, { stdio: 'ignore' });
       return true;
@@ -143,12 +158,48 @@ export class SolcIntegration {
    * Get solc version
    */
   public getSolcVersion(): string | null {
+    // Try wrapper first
+    if (solcWrapper) {
+      try {
+        return solcWrapper.version();
+      } catch (error) {
+        // Fall through to CLI
+      }
+    }
+
+    // Fallback to CLI
     try {
       const output = execSync(`${this.solcPath} --version`, { encoding: 'utf-8' });
       const match = output.match(/Version: ([^\s]+)/);
       return match ? match[1] : null;
     } catch (error) {
       return null;
+    }
+  }
+
+  /**
+   * Compile using CLI (fallback method)
+   */
+  private compileWithCLI(input: any): string {
+    // Write input to temp file
+    const tempInputFile = path.join('/tmp', `solc-input-${Date.now()}.json`);
+    fs.writeFileSync(tempInputFile, JSON.stringify(input));
+
+    try {
+      // Compile with solc
+      const output = execSync(`${this.solcPath} --standard-json < ${tempInputFile}`, {
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+      });
+
+      return output;
+    } finally {
+      // Clean up temp file
+      try {
+        fs.unlinkSync(tempInputFile);
+      } catch (error) {
+        // File may not exist or already cleaned up
+      }
     }
   }
 
@@ -185,21 +236,21 @@ export class SolcIntegration {
         },
       };
 
-      // Write input to temp file
-      const tempInputFile = path.join('/tmp', `solc-input-${Date.now()}.json`);
-      fs.writeFileSync(tempInputFile, JSON.stringify(input));
+      let output: string;
 
-      // Compile with solc
-      const output = execSync(`${this.solcPath} --standard-json < ${tempInputFile}`, {
-        encoding: 'utf-8',
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-      });
-
-      // Clean up temp file
-      try {
-        fs.unlinkSync(tempInputFile);
-      } catch (error) {
-        // File may not exist or already cleaned up
+      // Try using JavaScript wrapper first (bundled in extension)
+      if (solcWrapper) {
+        try {
+          const result = solcWrapper.compile(JSON.stringify(input));
+          output = result;
+        } catch (error) {
+          console.error('Solc wrapper failed, falling back to CLI:', error);
+          // Fall through to CLI compilation
+          output = this.compileWithCLI(input);
+        }
+      } else {
+        // Use CLI compilation
+        output = this.compileWithCLI(input);
       }
 
       // Parse output
