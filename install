@@ -1,1 +1,1 @@
- vsce package && code --install-extension sigscan-0.4.4.vsix --force
+ npm run compile && vsce package && code --install-extension sigscan-0.4.4.vsix --force 2>&1 | tail -5

@@ -53,19 +53,15 @@ SigScan is a developer tool designed to streamline smart contract development by
 
 ### Real-time Analysis Engine
 
-The extension operates in multiple tiers:
+The extension uses solc for accurate gas analysis:
 
-**Tier 1 - Instant Analysis (0-100ms)**
-- Fast heuristic patterns and regex-based detection
-- No compilation required
-- Runs on every keystroke
-
-**Tier 2 - Smart Compilation (200-500ms)**
-- Full solc analysis with optimization enabled
-- Triggered after 200ms of inactivity or file open
+**Compilation with Optimization**
+- Full solc analysis runs on every file open and change
+- Compilation runs with optimization enabled for accurate estimates
+- Content-hash based caching prevents redundant analysis for unchanged code
 - Provides accurate gas estimates and warnings
 
-**Tier 3 - Extended Analysis (Automatic Background)**
+**Extended Analysis (Automatic Background)**
 - Runs automatically after main analysis completes when resources are available
 - Monitors memory usage (< 500MB) and CPU before running
 - Includes storage layout, call graph, and deployment cost analysis
@@ -76,7 +72,6 @@ The extension operates in multiple tiers:
 - Automatic resource monitoring prevents execution during heavy load
 - Extended features run intelligently in background when system is idle
 - Intelligent caching prevents redundant analysis
-- Debounced updates reduce CPU load
 - Manual commands available for immediate analysis when needed
 
 ### Developer Experience

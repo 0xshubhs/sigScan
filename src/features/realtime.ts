@@ -31,8 +31,7 @@ export interface LiveAnalysis {
 }
 
 export class RealtimeAnalyzer {
-  private heuristicGasEstimator: GasEstimator; // Fast, always enabled
-  private solcGasEstimator: GasEstimator; // Accurate, runs on idle
+  private solcGasEstimator: GasEstimator; // Accurate, solc-based
   private sizeAnalyzer: ContractSizeAnalyzer;
   private complexityAnalyzer: ComplexityAnalyzer;
   private parser: SolidityParser;
@@ -56,9 +55,7 @@ export class RealtimeAnalyzer {
   private runtimeProfiler: RuntimeProfiler;
 
   constructor(diagnosticCollection: vscode.DiagnosticCollection) {
-    // Tier 1: Heuristic estimator (no solc, instant)
-    this.heuristicGasEstimator = new GasEstimator(false);
-    // Tier 2: Solc estimator (accurate, runs on idle)
+    // Solc estimator (accurate, always enabled)
     this.solcGasEstimator = new GasEstimator(true);
     this.sizeAnalyzer = new ContractSizeAnalyzer();
     this.complexityAnalyzer = new ComplexityAnalyzer();
@@ -94,17 +91,14 @@ export class RealtimeAnalyzer {
       return hashCached;
     }
 
-    // Run instant heuristic analysis
-    const heuristicAnalysis = await this.runHeuristicAnalysis(document);
+    // Run solc analysis immediately and wait for results
+    const solcAnalysis = await this.runSolcAnalysisSync(document, contentHash);
 
-    // Immediately trigger solc analysis (no wait on file open)
-    this.runSolcAnalysisImmediate(document, contentHash);
-
-    return heuristicAnalysis;
+    return solcAnalysis;
   }
 
   /**
-   * Analyze document on change - waits 10s idle before solc
+   * Analyze document on change - runs solc immediately
    */
   public async analyzeDocumentOnChange(document: vscode.TextDocument): Promise<LiveAnalysis> {
     const content = document.getText();
@@ -117,17 +111,14 @@ export class RealtimeAnalyzer {
       return hashCached;
     }
 
-    // Run instant heuristic analysis
-    const heuristicAnalysis = await this.runHeuristicAnalysis(document);
+    // Run solc analysis immediately and wait for results
+    const solcAnalysis = await this.runSolcAnalysisSync(document, contentHash);
 
-    // Schedule Tier 2 (solc) after idle timeout
-    this.scheduleIdleSolcAnalysis(document, contentHash);
-
-    return heuristicAnalysis;
+    return solcAnalysis;
   }
 
   /**
-   * Tier 1: Instant heuristic analysis (runs on every keystroke)
+   * Analyze document using solc only
    * @deprecated Use analyzeDocumentOnOpen or analyzeDocumentOnChange
    */
   public async analyzeDocument(document: vscode.TextDocument): Promise<LiveAnalysis> {
@@ -189,6 +180,129 @@ export class RealtimeAnalyzer {
 
     // Run solc analysis immediately
     await this.runSolcAnalysis(document, contentHash);
+  }
+
+  /**
+   * Run solc analysis synchronously and return results
+   */
+  private async runSolcAnalysisSync(
+    document: vscode.TextDocument,
+    contentHash: string
+  ): Promise<LiveAnalysis> {
+    const uri = document.uri.toString();
+    const content = document.getText();
+
+    // Mark as active
+    this.activeSolcCompilations.set(uri, true);
+    this.analysisInProgress = true;
+
+    try {
+      // Parse contract
+      const contractInfo = this.parser.parseFile(document.uri.fsPath);
+      if (!contractInfo) {
+        return this.createEmptyAnalysis();
+      }
+
+      const gasEstimates = new Map<string, GasEstimate>();
+      const diagnostics: vscode.Diagnostic[] = [];
+
+      // Analyze each function with solc
+      for (const func of contractInfo.functions) {
+        // Check if cancelled
+        if (!this.activeSolcCompilations.get(uri)) {
+          console.log('Solc analysis cancelled for', uri);
+          return this.createEmptyAnalysis();
+        }
+
+        const isConstructor = func.name === 'constructor';
+        const funcPattern = isConstructor
+          ? new RegExp(`constructor\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`, 's')
+          : new RegExp(
+              `function\\s+${func.name}\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`,
+              's'
+            );
+        const match = content.match(funcPattern);
+
+        if (match && match[1]) {
+          const functionBody = match[1];
+          const functionStart = content.indexOf(match[0]);
+          const lines = content.substring(0, functionStart).split('\\n').length - 1;
+
+          // Accurate solc gas estimation
+          const gasEstimate = await this.solcGasEstimator.estimateGas(
+            functionBody,
+            func.signature,
+            document.uri.fsPath,
+            content
+          );
+
+          gasEstimates.set(func.name, gasEstimate);
+
+          // Add diagnostics for high gas functions
+          const avgGas = gasEstimate.estimatedGas.average;
+          const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+
+          if (
+            gasEstimate.complexity === 'high' ||
+            gasEstimate.complexity === 'very-high' ||
+            gasEstimate.complexity === 'unbounded'
+          ) {
+            const diagnostic = new vscode.Diagnostic(
+              new vscode.Range(lines, 0, lines, 1000),
+              `High gas cost (${avgGasString} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
+              gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
+                ? vscode.DiagnosticSeverity.Warning
+                : vscode.DiagnosticSeverity.Information
+            );
+            diagnostic.source = 'SigScan Gas';
+            diagnostics.push(diagnostic);
+          }
+        }
+      }
+
+      // Contract size analysis
+      const sizeInfo = this.sizeAnalyzer.analyzeContract(contractInfo.name, content);
+      if (sizeInfo.status === 'critical' || sizeInfo.status === 'too-large') {
+        const diagnostic = new vscode.Diagnostic(
+          new vscode.Range(0, 0, 0, 1000),
+          `Contract size ${sizeInfo.sizeInKB} KB (${sizeInfo.percentage}% of 24KB limit): ${sizeInfo.recommendations[0]}`,
+          sizeInfo.status === 'too-large'
+            ? vscode.DiagnosticSeverity.Error
+            : vscode.DiagnosticSeverity.Warning
+        );
+        diagnostic.source = 'SigScan Size';
+        diagnostics.push(diagnostic);
+      }
+
+      // Set diagnostics
+      this.diagnosticCollection.set(document.uri, diagnostics);
+
+      // Create analysis result
+      const analysis: LiveAnalysis = {
+        gasEstimates,
+        sizeInfo,
+        complexityMetrics: new Map(),
+        diagnostics,
+      };
+
+      // Cache the result
+      this.contentHashCache.set(contentHash, analysis);
+
+      // Automatically run extended analysis if resources available
+      setImmediate(() => {
+        this.runExtendedAnalysisIfAvailable(document).catch((err) => {
+          console.error('Auto extended analysis failed:', err);
+        });
+      });
+
+      return analysis;
+    } catch (error) {
+      console.error('Solc analysis error:', error);
+      return this.createEmptyAnalysis();
+    } finally {
+      this.activeSolcCompilations.set(uri, false);
+      this.analysisInProgress = false;
+    }
   }
 
   /**
@@ -271,217 +385,6 @@ export class RealtimeAnalyzer {
     } finally {
       this.extendedAnalysisInProgress = false;
     }
-  }
-
-  /**
-   * Run fast heuristic analysis (Tier 1)
-   */
-  private async runHeuristicAnalysis(document: vscode.TextDocument): Promise<LiveAnalysis> {
-    const content = document.getText();
-    const uri = document.uri.toString();
-
-    // Parse contract
-    const contractInfo = this.parser.parseFile(document.uri.fsPath);
-    if (!contractInfo) {
-      return this.createEmptyAnalysis();
-    }
-
-    // Perform analyses
-    const gasEstimates = new Map<string, GasEstimate>();
-    const complexityMetrics = new Map<string, ComplexityMetrics>();
-    const diagnostics: vscode.Diagnostic[] = [];
-
-    // Analyze each function (including constructors)
-    for (const func of contractInfo.functions) {
-      // Match both regular functions and constructors
-      const isConstructor = func.name === 'constructor';
-      const funcPattern = isConstructor
-        ? new RegExp(`constructor\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`, 's')
-        : new RegExp(`function\\s+${func.name}\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`, 's');
-      const match = content.match(funcPattern);
-
-      if (match && match[1]) {
-        const functionBody = match[1];
-        const functionStart = content.indexOf(match[0]);
-        const lines = content.substring(0, functionStart).split('\n').length - 1;
-
-        // Tier 1: Fast heuristic gas estimation
-        const gasEstimate = this.heuristicGasEstimator.estimateGasSync(
-          functionBody,
-          func.signature
-        );
-
-        gasEstimates.set(func.name, gasEstimate);
-
-        // Add gas diagnostics
-        const avgGas = gasEstimate.estimatedGas.average;
-        const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
-
-        if (
-          gasEstimate.complexity === 'high' ||
-          gasEstimate.complexity === 'very-high' ||
-          gasEstimate.complexity === 'unbounded'
-        ) {
-          const diagnostic = new vscode.Diagnostic(
-            new vscode.Range(lines, 0, lines, 1000),
-            `High gas cost (${avgGasString} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
-            gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
-              ? vscode.DiagnosticSeverity.Warning
-              : vscode.DiagnosticSeverity.Information
-          );
-          diagnostic.source = `SigScan Gas (${gasEstimate.source})`;
-          diagnostics.push(diagnostic);
-        }
-
-        // Complexity analysis
-        const complexity = this.complexityAnalyzer.analyzeFunction(functionBody, func.name);
-        complexityMetrics.set(func.name, complexity);
-
-        // Add complexity diagnostics
-        if (complexity.issues.length > 0) {
-          const diagnostic = new vscode.Diagnostic(
-            new vscode.Range(lines, 0, lines, 1000),
-            `Complexity issues: ${complexity.issues.join(', ')} (Maintainability: ${complexity.rating})`,
-            complexity.rating === 'F' || complexity.rating === 'D'
-              ? vscode.DiagnosticSeverity.Warning
-              : vscode.DiagnosticSeverity.Information
-          );
-          diagnostic.source = 'SigScan Complexity';
-          diagnostics.push(diagnostic);
-        }
-      }
-    }
-
-    // Analyze modifiers
-    const modifierRegex = /modifier\s+(\w+)\s*\([^)]*\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}/gs;
-    let modifierMatch;
-    while ((modifierMatch = modifierRegex.exec(content)) !== null) {
-      const [fullMatch, modifierName, modifierBody] = modifierMatch;
-      const modifierStart = content.indexOf(fullMatch);
-      const lines = content.substring(0, modifierStart).split('\n').length - 1;
-
-      // Gas estimation for modifier (sync only as modifiers aren't compiled separately)
-      const gasEstimate = this.heuristicGasEstimator.estimateGasSync(
-        modifierBody,
-        `modifier:${modifierName}`
-      );
-      gasEstimates.set(`modifier:${modifierName}`, gasEstimate);
-
-      // Complexity for modifier
-      const complexity = this.complexityAnalyzer.analyzeFunction(modifierBody, modifierName);
-      complexityMetrics.set(`modifier:${modifierName}`, complexity);
-
-      // Add gas diagnostics for high-cost modifiers
-      const avgGas = gasEstimate.estimatedGas.average;
-      const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
-
-      if (
-        gasEstimate.complexity === 'high' ||
-        gasEstimate.complexity === 'very-high' ||
-        gasEstimate.complexity === 'unbounded'
-      ) {
-        const diagnostic = new vscode.Diagnostic(
-          new vscode.Range(lines, 0, lines, 1000),
-          `Modifier '${modifierName}' has high gas cost: ${avgGasString} gas. ${gasEstimate.warning || ''}`,
-          vscode.DiagnosticSeverity.Warning
-        );
-        diagnostic.source = 'SigScan Gas';
-        diagnostics.push(diagnostic);
-      }
-    }
-
-    // Analyze events (emit statements)
-    contractInfo.events.forEach((event) => {
-      const eventPattern = new RegExp(`emit\\s+${event.name}\\s*\\([^)]*\\)`, 'g');
-      const matches = content.match(eventPattern);
-      if (matches && matches.length > 0) {
-        // Base gas cost for emitting an event: ~375 gas per log + ~375 per topic + ~8 per byte
-        const topicsCount = event.inputs.filter((i) => i.indexed).length;
-        const baseGas = 375 + topicsCount * 375;
-        const dataSize = event.inputs.filter((i) => !i.indexed).length * 32; // Estimate
-        const totalGas = baseGas + dataSize * 8;
-
-        // Use event signature and selector if available
-        const signature = event.signature || `event:${event.name}`;
-        const selector = event.selector || '0x00000000';
-
-        gasEstimates.set(`event:${event.name}`, {
-          function: `event:${event.name}`,
-          signature,
-          selector,
-          estimatedGas: { min: totalGas, max: totalGas + 500, average: totalGas },
-          complexity: 'low',
-          factors: ['event emission', `${topicsCount} indexed topics`, `${matches.length} calls`],
-          warning: undefined,
-          source: 'heuristic',
-        });
-      }
-    });
-
-    // Analyze structs (storage operations)
-    const structRegex = /struct\s+(\w+)\s*{([^}]*)}/gs;
-    let structMatch;
-    while ((structMatch = structRegex.exec(content)) !== null) {
-      const [, structName, structBody] = structMatch;
-      // Count fields in struct
-      const fields = structBody.split(';').filter((f) => f.trim()).length;
-      // Storage write: ~20,000 gas for first write, ~5,000 for updates per slot
-      const storageGas = 20000 + (fields - 1) * 5000;
-
-      gasEstimates.set(`struct:${structName}`, {
-        function: `struct:${structName}`,
-        signature: `struct:${structName}`,
-        selector: '0x00000000', // Structs don't have selectors
-        estimatedGas: {
-          min: storageGas,
-          max: storageGas * 2,
-          average: Math.floor(storageGas * 1.5),
-        },
-        complexity: fields > 5 ? 'high' : 'medium',
-        factors: ['struct storage', `${fields} fields`, 'cold storage access'],
-        warning: fields > 10 ? 'Large struct may be expensive to store' : undefined,
-        source: 'heuristic',
-      });
-    }
-
-    // Contract size analysis
-    const sizeInfo = this.sizeAnalyzer.analyzeContract(contractInfo.name, content);
-
-    // Add size diagnostics
-    if (sizeInfo.status === 'critical' || sizeInfo.status === 'too-large') {
-      const diagnostic = new vscode.Diagnostic(
-        new vscode.Range(0, 0, 0, 1000),
-        `Contract size ${sizeInfo.sizeInKB} KB (${sizeInfo.percentage}% of 24KB limit): ${sizeInfo.recommendations[0]}`,
-        sizeInfo.status === 'too-large'
-          ? vscode.DiagnosticSeverity.Error
-          : vscode.DiagnosticSeverity.Warning
-      );
-      diagnostic.source = 'SigScan Size';
-      diagnostics.push(diagnostic);
-    } else if (sizeInfo.status === 'warning') {
-      const diagnostic = new vscode.Diagnostic(
-        new vscode.Range(0, 0, 0, 1000),
-        `Contract approaching size limit: ${sizeInfo.sizeInKB} KB (${sizeInfo.percentage}%)`,
-        vscode.DiagnosticSeverity.Information
-      );
-      diagnostic.source = 'SigScan Size';
-      diagnostics.push(diagnostic);
-    }
-
-    // Update diagnostics
-    this.diagnosticCollection.set(document.uri, diagnostics);
-
-    const analysis: LiveAnalysis = {
-      gasEstimates,
-      sizeInfo,
-      complexityMetrics,
-      diagnostics,
-    };
-
-    // Cache result (timestamp-based cache for heuristic results)
-    this.analysisCache.set(uri, { timestamp: Date.now(), analysis });
-
-    return analysis;
   }
 
   /**
