@@ -69,20 +69,49 @@ export class SolcIntegration {
    * Find solc executable in system
    */
   private findSolc(): string {
+    // First, try to find bundled solcjs in node_modules (for extension packaging)
+    const bundledSolcPaths = [
+      path.join(__dirname, '../../node_modules/.bin/solcjs'),
+      path.join(__dirname, '../../../node_modules/.bin/solcjs'),
+      path.join(process.cwd(), 'node_modules/.bin/solcjs'),
+    ];
+
+    for (const p of bundledSolcPaths) {
+      try {
+        if (fs.existsSync(p)) {
+          execSync(`${p} --version`, { stdio: 'ignore' });
+          return p;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+
     try {
-      // Try to find solc in PATH
+      // Try to find solcjs in PATH
+      const result = execSync('which solcjs', { encoding: 'utf-8' }).trim();
+      if (result) {
+        return result;
+      }
+    } catch (error) {
+      // Not found in PATH
+    }
+
+    try {
+      // Try to find native solc in PATH
       const result = execSync('which solc', { encoding: 'utf-8' }).trim();
       if (result) {
         return result;
       }
     } catch (error) {
-      // Not found in PATH - solc not available
+      // Not found in PATH
     }
 
-    // Common installation paths
+    // Common installation paths for native solc
     const commonPaths = [
       '/usr/local/bin/solc',
       '/usr/bin/solc',
+      'solcjs', // Global install
       'solc', // Will work if in PATH
     ];
 
@@ -91,12 +120,11 @@ export class SolcIntegration {
         execSync(`${p} --version`, { stdio: 'ignore' });
         return p;
       } catch (error) {
-        // This path doesn't work, try next
         continue;
       }
     }
 
-    return 'solc'; // Default, will fail if not available
+    return 'solcjs'; // Default to solcjs, will fail if not available
   }
 
   /**
