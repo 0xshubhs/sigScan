@@ -150,14 +150,18 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Helper function to update decorations with colored gas hints
-  async function updateDecorations(editor: vscode.TextEditor) {
+  async function updateDecorations(editor: vscode.TextEditor, isFileOpenEvent = false) {
     const config = vscode.workspace.getConfiguration('sigscan');
     if (!config.get('realtimeAnalysis', true)) {
       return;
     }
 
     if (editor.document.languageId === 'solidity') {
-      const analysis = await realtimeAnalyzer.analyzeDocument(editor.document);
+      // Use appropriate analysis method based on event type
+      const analysis = isFileOpenEvent
+        ? await realtimeAnalyzer.analyzeDocumentOnOpen(editor.document)
+        : await realtimeAnalyzer.analyzeDocumentOnChange(editor.document);
+
       const gasDecorations = realtimeAnalyzer.createGasDecorations(analysis, editor.document);
       const complexityDecorations = realtimeAnalyzer.createComplexityDecorations(
         analysis,
@@ -190,13 +194,13 @@ export function activate(context: vscode.ExtensionContext) {
   const documentOpenDisposable = vscode.workspace.onDidOpenTextDocument(async (document) => {
     const editor = vscode.window.activeTextEditor;
     if (editor && editor.document === document) {
-      await updateDecorations(editor);
+      await updateDecorations(editor, true); // true = file open event
     }
   });
 
-  // Trigger initial analysis for currently open editor
+  // Trigger initial analysis for currently open editor (treat as file open)
   if (vscode.window.activeTextEditor) {
-    updateDecorations(vscode.window.activeTextEditor);
+    updateDecorations(vscode.window.activeTextEditor, true);
   }
 
   // Real-time hover provider
@@ -204,7 +208,7 @@ export function activate(context: vscode.ExtensionContext) {
     { scheme: 'file', language: 'solidity' },
     {
       async provideHover(document, position) {
-        const analysis = await realtimeAnalyzer.analyzeDocument(document);
+        const analysis = await realtimeAnalyzer.analyzeDocumentOnChange(document);
         return realtimeAnalyzer.createHoverInfo(position, analysis, document);
       },
     }

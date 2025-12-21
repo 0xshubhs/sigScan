@@ -1,8 +1,12 @@
 /**
  * Real-time Analysis - Live gas profiling and diagnostics during code editing
+ * Two-tier analysis model:
+ * - Tier 1: Instant heuristic analysis (<5ms)
+ * - Tier 2: Full solc compilation after idle timeout (cancelable)
  */
 
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import { GasEstimator, GasEstimate } from './gas';
 import { ContractSizeAnalyzer, ContractSizeInfo } from './size';
 import { ComplexityAnalyzer, ComplexityMetrics } from './complexity';
@@ -16,34 +20,152 @@ export interface LiveAnalysis {
 }
 
 export class RealtimeAnalyzer {
-  private gasEstimator: GasEstimator;
+  private heuristicGasEstimator: GasEstimator; // Fast, always enabled
+  private solcGasEstimator: GasEstimator; // Accurate, runs on idle
   private sizeAnalyzer: ContractSizeAnalyzer;
   private complexityAnalyzer: ComplexityAnalyzer;
   private parser: SolidityParser;
   private diagnosticCollection: vscode.DiagnosticCollection;
   private analysisCache: Map<string, { timestamp: number; analysis: LiveAnalysis }>;
+  private contentHashCache: Map<string, LiveAnalysis>; // Hash-based cache for solc results
+  private idleTimers: Map<string, NodeJS.Timeout>; // Per-document idle timers
+  private activeSolcCompilations: Map<string, boolean>; // Track active compilations to cancel
 
   constructor(diagnosticCollection: vscode.DiagnosticCollection) {
-    this.gasEstimator = new GasEstimator();
+    // Tier 1: Heuristic estimator (no solc, instant)
+    this.heuristicGasEstimator = new GasEstimator(false);
+    // Tier 2: Solc estimator (accurate, runs on idle)
+    this.solcGasEstimator = new GasEstimator(true);
     this.sizeAnalyzer = new ContractSizeAnalyzer();
     this.complexityAnalyzer = new ComplexityAnalyzer();
     this.parser = new SolidityParser();
     this.diagnosticCollection = diagnosticCollection;
     this.analysisCache = new Map();
+    this.contentHashCache = new Map();
+    this.idleTimers = new Map();
+    this.activeSolcCompilations = new Map();
   }
 
   /**
-   * Analyze document in real-time as user types
+   * Analyze document on file open - immediately runs solc (no wait)
    */
-  public async analyzeDocument(document: vscode.TextDocument): Promise<LiveAnalysis> {
+  public async analyzeDocumentOnOpen(document: vscode.TextDocument): Promise<LiveAnalysis> {
     const content = document.getText();
     const uri = document.uri.toString();
+    const contentHash = this.hashContent(content);
 
-    // Check cache (5 second TTL)
-    const cached = this.analysisCache.get(uri);
-    if (cached && Date.now() - cached.timestamp < 5000) {
-      return cached.analysis;
+    // Clear old cache for this file
+    this.analysisCache.delete(uri);
+
+    // Check hash-based cache first (exact content match)
+    const hashCached = this.contentHashCache.get(contentHash);
+    if (hashCached) {
+      return hashCached;
     }
+
+    // Run instant heuristic analysis
+    const heuristicAnalysis = await this.runHeuristicAnalysis(document);
+
+    // Immediately trigger solc analysis (no wait on file open)
+    this.runSolcAnalysisImmediate(document, contentHash);
+
+    return heuristicAnalysis;
+  }
+
+  /**
+   * Analyze document on change - waits 10s idle before solc
+   */
+  public async analyzeDocumentOnChange(document: vscode.TextDocument): Promise<LiveAnalysis> {
+    const content = document.getText();
+    const uri = document.uri.toString();
+    const contentHash = this.hashContent(content);
+
+    // Check hash-based cache first (exact content match)
+    const hashCached = this.contentHashCache.get(contentHash);
+    if (hashCached) {
+      return hashCached;
+    }
+
+    // Run instant heuristic analysis
+    const heuristicAnalysis = await this.runHeuristicAnalysis(document);
+
+    // Schedule Tier 2 (solc) after idle timeout
+    this.scheduleIdleSolcAnalysis(document, contentHash);
+
+    return heuristicAnalysis;
+  }
+
+  /**
+   * Tier 1: Instant heuristic analysis (runs on every keystroke)
+   * @deprecated Use analyzeDocumentOnOpen or analyzeDocumentOnChange
+   */
+  public async analyzeDocument(document: vscode.TextDocument): Promise<LiveAnalysis> {
+    // Default to onChange behavior for backward compatibility
+    return this.analyzeDocumentOnChange(document);
+  }
+
+  /**
+   * Hash document content for cache key
+   */
+  private hashContent(content: string): string {
+    return crypto.createHash('sha256').update(content).digest('hex');
+  }
+
+  /**
+   * Schedule solc analysis after idle timeout (resets on each change)
+   */
+  private scheduleIdleSolcAnalysis(document: vscode.TextDocument, contentHash: string): void {
+    const uri = document.uri.toString();
+    const config = vscode.workspace.getConfiguration('sigscan');
+    const idleMs = config.get<number>('realtime.solcIdleMs', 10000);
+
+    // Cancel previous timer
+    const existingTimer = this.idleTimers.get(uri);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    // Cancel any active compilation for this document
+    if (this.activeSolcCompilations.get(uri)) {
+      this.activeSolcCompilations.set(uri, false); // Signal cancellation
+    }
+
+    // Schedule new timer
+    const timer = setTimeout(async () => {
+      await this.runSolcAnalysis(document, contentHash);
+    }, idleMs);
+
+    this.idleTimers.set(uri, timer);
+  }
+
+  /**
+   * Run solc analysis immediately (for file open)
+   */
+  private async runSolcAnalysisImmediate(
+    document: vscode.TextDocument,
+    contentHash: string
+  ): Promise<void> {
+    const uri = document.uri.toString();
+
+    // Cancel any existing timer or compilation
+    const existingTimer = this.idleTimers.get(uri);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    if (this.activeSolcCompilations.get(uri)) {
+      this.activeSolcCompilations.set(uri, false);
+    }
+
+    // Run solc analysis immediately
+    await this.runSolcAnalysis(document, contentHash);
+  }
+
+  /**
+   * Run fast heuristic analysis (Tier 1)
+   */
+  private async runHeuristicAnalysis(document: vscode.TextDocument): Promise<LiveAnalysis> {
+    const content = document.getText();
+    const uri = document.uri.toString();
 
     // Parse contract
     const contractInfo = this.parser.parseFile(document.uri.fsPath);
@@ -70,19 +192,11 @@ export class RealtimeAnalyzer {
         const functionStart = content.indexOf(match[0]);
         const lines = content.substring(0, functionStart).split('\n').length - 1;
 
-        // Gas estimation - try async first (with solc), fallback to sync
-        let gasEstimate: GasEstimate;
-        try {
-          gasEstimate = await this.gasEstimator.estimateGas(
-            functionBody,
-            func.signature,
-            document.uri.fsPath,
-            content
-          );
-        } catch {
-          // Fallback to sync heuristic
-          gasEstimate = this.gasEstimator.estimateGasSync(functionBody, func.signature);
-        }
+        // Tier 1: Fast heuristic gas estimation
+        const gasEstimate = this.heuristicGasEstimator.estimateGasSync(
+          functionBody,
+          func.signature
+        );
 
         gasEstimates.set(func.name, gasEstimate);
 
@@ -134,7 +248,7 @@ export class RealtimeAnalyzer {
       const lines = content.substring(0, modifierStart).split('\n').length - 1;
 
       // Gas estimation for modifier (sync only as modifiers aren't compiled separately)
-      const gasEstimate = this.gasEstimator.estimateGasSync(
+      const gasEstimate = this.heuristicGasEstimator.estimateGasSync(
         modifierBody,
         `modifier:${modifierName}`
       );
@@ -251,10 +365,123 @@ export class RealtimeAnalyzer {
       diagnostics,
     };
 
-    // Cache result
+    // Cache result (timestamp-based cache for heuristic results)
     this.analysisCache.set(uri, { timestamp: Date.now(), analysis });
 
     return analysis;
+  }
+
+  /**
+   * Tier 2: Accurate solc analysis (runs after idle timeout)
+   */
+  private async runSolcAnalysis(document: vscode.TextDocument, contentHash: string): Promise<void> {
+    const uri = document.uri.toString();
+    const content = document.getText();
+
+    // Mark as active
+    this.activeSolcCompilations.set(uri, true);
+
+    try {
+      // Parse contract
+      const contractInfo = this.parser.parseFile(document.uri.fsPath);
+      if (!contractInfo) {
+        return;
+      }
+
+      const gasEstimates = new Map<string, GasEstimate>();
+      const diagnostics: vscode.Diagnostic[] = [];
+
+      // Analyze each function with solc
+      for (const func of contractInfo.functions) {
+        // Check if cancelled
+        if (!this.activeSolcCompilations.get(uri)) {
+          console.log('Solc analysis cancelled for', uri);
+          return;
+        }
+
+        const isConstructor = func.name === 'constructor';
+        const funcPattern = isConstructor
+          ? new RegExp(`constructor\\\\s*\\\\([^)]*\\\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`, 's')
+          : new RegExp(
+              `function\\\\s+${func.name}\\\\s*\\\\([^)]*\\\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`,
+              's'
+            );
+        const match = content.match(funcPattern);
+
+        if (match && match[1]) {
+          const functionBody = match[1];
+          const functionStart = content.indexOf(match[0]);
+          const lines = content.substring(0, functionStart).split('\\n').length - 1;
+
+          // Tier 2: Accurate solc gas estimation
+          const gasEstimate = await this.solcGasEstimator.estimateGas(
+            functionBody,
+            func.signature,
+            document.uri.fsPath,
+            content
+          );
+
+          gasEstimates.set(func.name, gasEstimate);
+
+          // Add diagnostics for high gas functions
+          const avgGas = gasEstimate.estimatedGas.average;
+          const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+
+          if (
+            gasEstimate.complexity === 'high' ||
+            gasEstimate.complexity === 'very-high' ||
+            gasEstimate.complexity === 'unbounded'
+          ) {
+            const diagnostic = new vscode.Diagnostic(
+              new vscode.Range(lines, 0, lines, 1000),
+              `High gas cost (${avgGasString} gas - solc): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
+              gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
+                ? vscode.DiagnosticSeverity.Warning
+                : vscode.DiagnosticSeverity.Information
+            );
+            diagnostic.source = 'SigScan Gas (solc)';
+            diagnostics.push(diagnostic);
+          }
+        }
+      }
+
+      // Update diagnostics
+      this.diagnosticCollection.set(document.uri, diagnostics);
+
+      // Cache by content hash
+      const analysis: LiveAnalysis = {
+        gasEstimates,
+        sizeInfo: null,
+        complexityMetrics: new Map(),
+        diagnostics,
+      };
+
+      this.contentHashCache.set(contentHash, analysis);
+    } finally {
+      // Mark as inactive
+      this.activeSolcCompilations.set(uri, false);
+    }
+  }
+
+  /**
+   * Cancel all pending solc compilations and timers
+   */
+  public dispose(): void {
+    // Cancel all idle timers
+    for (const timer of this.idleTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.idleTimers.clear();
+
+    // Cancel active compilations
+    for (const uri of this.activeSolcCompilations.keys()) {
+      this.activeSolcCompilations.set(uri, false);
+    }
+    this.activeSolcCompilations.clear();
+
+    // Clear caches
+    this.analysisCache.clear();
+    this.contentHashCache.clear();
   }
 
   /**

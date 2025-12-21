@@ -171,6 +171,13 @@
           "default": false,
           "description": "Analyze code complexity metrics"
         },
+        "sigscan.realtime.solcIdleMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Run accurate solc gas estimation after this many milliseconds of no typing (0 = disabled, 10000 = 10 seconds recommended)"
+        },
         "sigscan.etherscanApiKey": {
           "type": "string",
           "default": "",
@@ -192,7 +199,8 @@
         {
           "command": "sigscan.refreshSignatures",
           "when": "view == sigScanExplorer",
-          "group": "navigation"
+          "group": "navigation",
+          "icon": "$(refresh)"
         }
       ],
       "commandPalette": [
