@@ -57,7 +57,7 @@ export class RealtimeAnalyzer {
     const diagnostics: vscode.Diagnostic[] = [];
 
     // Analyze each function (including constructors)
-    contractInfo.functions.forEach((func) => {
+    for (const func of contractInfo.functions) {
       // Match both regular functions and constructors
       const isConstructor = func.name === 'constructor';
       const funcPattern = isConstructor
@@ -70,20 +70,39 @@ export class RealtimeAnalyzer {
         const functionStart = content.indexOf(match[0]);
         const lines = content.substring(0, functionStart).split('\n').length - 1;
 
-        // Gas estimation
-        const gasEstimate = this.gasEstimator.estimateGas(functionBody, func.signature);
+        // Gas estimation - try async first (with solc), fallback to sync
+        let gasEstimate: GasEstimate;
+        try {
+          gasEstimate = await this.gasEstimator.estimateGas(
+            functionBody,
+            func.signature,
+            document.uri.fsPath,
+            content
+          );
+        } catch {
+          // Fallback to sync heuristic
+          gasEstimate = this.gasEstimator.estimateGasSync(functionBody, func.signature);
+        }
+
         gasEstimates.set(func.name, gasEstimate);
 
         // Add gas diagnostics
-        if (gasEstimate.complexity === 'high' || gasEstimate.complexity === 'very-high') {
+        const avgGas = gasEstimate.estimatedGas.average;
+        const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+
+        if (
+          gasEstimate.complexity === 'high' ||
+          gasEstimate.complexity === 'very-high' ||
+          gasEstimate.complexity === 'unbounded'
+        ) {
           const diagnostic = new vscode.Diagnostic(
             new vscode.Range(lines, 0, lines, 1000),
-            `High gas cost (${gasEstimate.estimatedGas.average.toLocaleString()} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
-            gasEstimate.complexity === 'very-high'
+            `High gas cost (${avgGasString} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
+            gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
               ? vscode.DiagnosticSeverity.Warning
               : vscode.DiagnosticSeverity.Information
           );
-          diagnostic.source = 'SigScan Gas';
+          diagnostic.source = `SigScan Gas (${gasEstimate.source})`;
           diagnostics.push(diagnostic);
         }
 
@@ -104,7 +123,7 @@ export class RealtimeAnalyzer {
           diagnostics.push(diagnostic);
         }
       }
-    });
+    }
 
     // Analyze modifiers
     const modifierRegex = /modifier\s+(\w+)\s*\([^)]*\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}/gs;
@@ -114,8 +133,11 @@ export class RealtimeAnalyzer {
       const modifierStart = content.indexOf(fullMatch);
       const lines = content.substring(0, modifierStart).split('\n').length - 1;
 
-      // Gas estimation for modifier
-      const gasEstimate = this.gasEstimator.estimateGas(modifierBody, `modifier:${modifierName}`);
+      // Gas estimation for modifier (sync only as modifiers aren't compiled separately)
+      const gasEstimate = this.gasEstimator.estimateGasSync(
+        modifierBody,
+        `modifier:${modifierName}`
+      );
       gasEstimates.set(`modifier:${modifierName}`, gasEstimate);
 
       // Complexity for modifier
@@ -123,10 +145,17 @@ export class RealtimeAnalyzer {
       complexityMetrics.set(`modifier:${modifierName}`, complexity);
 
       // Add gas diagnostics for high-cost modifiers
-      if (gasEstimate.complexity === 'high' || gasEstimate.complexity === 'very-high') {
+      const avgGas = gasEstimate.estimatedGas.average;
+      const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+
+      if (
+        gasEstimate.complexity === 'high' ||
+        gasEstimate.complexity === 'very-high' ||
+        gasEstimate.complexity === 'unbounded'
+      ) {
         const diagnostic = new vscode.Diagnostic(
           new vscode.Range(lines, 0, lines, 1000),
-          `Modifier '${modifierName}' has high gas cost: ${gasEstimate.estimatedGas.average.toLocaleString()} gas. ${gasEstimate.warning || ''}`,
+          `Modifier '${modifierName}' has high gas cost: ${avgGasString} gas. ${gasEstimate.warning || ''}`,
           vscode.DiagnosticSeverity.Warning
         );
         diagnostic.source = 'SigScan Gas';
@@ -145,12 +174,19 @@ export class RealtimeAnalyzer {
         const dataSize = event.inputs.filter((i) => !i.indexed).length * 32; // Estimate
         const totalGas = baseGas + dataSize * 8;
 
+        // Use event signature and selector if available
+        const signature = event.signature || `event:${event.name}`;
+        const selector = event.selector || '0x00000000';
+
         gasEstimates.set(`event:${event.name}`, {
           function: `event:${event.name}`,
+          signature,
+          selector,
           estimatedGas: { min: totalGas, max: totalGas + 500, average: totalGas },
           complexity: 'low',
           factors: ['event emission', `${topicsCount} indexed topics`, `${matches.length} calls`],
           warning: undefined,
+          source: 'heuristic',
         });
       }
     });
@@ -167,6 +203,8 @@ export class RealtimeAnalyzer {
 
       gasEstimates.set(`struct:${structName}`, {
         function: `struct:${structName}`,
+        signature: `struct:${structName}`,
+        selector: '0x00000000', // Structs don't have selectors
         estimatedGas: {
           min: storageGas,
           max: storageGas * 2,
@@ -175,6 +213,7 @@ export class RealtimeAnalyzer {
         complexity: fields > 5 ? 'high' : 'medium',
         factors: ['struct storage', `${fields} fields`, 'cold storage access'],
         warning: fields > 10 ? 'Large struct may be expensive to store' : undefined,
+        source: 'heuristic',
       });
     }
 
@@ -274,20 +313,31 @@ export class RealtimeAnalyzer {
           hintPos = document.positionAt(match.index + braceIndex + 1);
         }
 
-        // Create inlay hint with colored gas amount
+        // Create inlay hint with colored gas amount and hash
         const gasAmount = estimate.estimatedGas.average;
+        const gasAmountStr = gasAmount === 'infinite' ? '∞' : gasAmount.toLocaleString();
+        const minGasStr =
+          estimate.estimatedGas.min === 'infinite'
+            ? '∞'
+            : estimate.estimatedGas.min.toLocaleString();
+        const maxGasStr =
+          estimate.estimatedGas.max === 'infinite'
+            ? '∞'
+            : estimate.estimatedGas.max.toLocaleString();
 
         const hint = new vscode.InlayHint(
           hintPos,
-          ` ⛽ ${gasAmount.toLocaleString()} gas `,
+          ` ⛽ ${gasAmountStr} gas | ${estimate.selector} `,
           vscode.InlayHintKind.Parameter
         );
 
-        // Add tooltip with detailed info
+        // Add tooltip with detailed info including signature
         hint.tooltip = new vscode.MarkdownString(
-          `**⛽ Gas Estimate for \`${displayName}\`**\n\n` +
-            `**Range**: ${estimate.estimatedGas.min.toLocaleString()} - ${estimate.estimatedGas.max.toLocaleString()} gas\n\n` +
-            `**Average**: ${gasAmount.toLocaleString()} gas\n\n` +
+          `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
+            `**Source**: ${estimate.source === 'solc' ? 'Solidity Compiler' : 'Heuristic Analysis'}\n\n` +
+            `**Signature**: \`${estimate.signature}\`\n\n` +
+            `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
+            `**Average**: ${gasAmountStr} gas\n\n` +
             `**Complexity**: ${estimate.complexity}\n\n` +
             `**Factors**: ${estimate.factors.join(', ')}` +
             (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
@@ -353,22 +403,33 @@ export class RealtimeAnalyzer {
         }
 
         const gasAmount = estimate.estimatedGas.average;
+        const gasAmountStr = gasAmount === 'infinite' ? '∞' : gasAmount.toLocaleString();
+        const minGasStr =
+          estimate.estimatedGas.min === 'infinite'
+            ? '∞'
+            : estimate.estimatedGas.min.toLocaleString();
+        const maxGasStr =
+          estimate.estimatedGas.max === 'infinite'
+            ? '∞'
+            : estimate.estimatedGas.max.toLocaleString();
         const color = this.getGasGradientColor(gasAmount);
 
         const decoration: vscode.DecorationOptions = {
           range: new vscode.Range(hintPos, hintPos),
           renderOptions: {
             after: {
-              contentText: ` ⛽ ${gasAmount.toLocaleString()} gas`,
+              contentText: ` ⛽ ${gasAmountStr} gas | ${estimate.selector}`,
               color: color,
               fontStyle: 'normal',
               margin: '0 0 0 0.5em',
             },
           },
           hoverMessage: new vscode.MarkdownString(
-            `**⛽ Gas Estimate for \`${displayName}\`**\n\n` +
-              `**Range**: ${estimate.estimatedGas.min.toLocaleString()} - ${estimate.estimatedGas.max.toLocaleString()} gas\n\n` +
-              `**Average**: ${gasAmount.toLocaleString()} gas\n\n` +
+            `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
+              `**Source**: ${estimate.source === 'solc' ? 'Solidity Compiler' : 'Heuristic Analysis'}\n\n` +
+              `**Signature**: \`${estimate.signature}\`\n\n` +
+              `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
+              `**Average**: ${gasAmountStr} gas\n\n` +
               `**Complexity**: ${estimate.complexity}\n\n` +
               `**Factors**: ${estimate.factors.join(', ')}` +
               (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
@@ -446,8 +507,25 @@ export class RealtimeAnalyzer {
     if (gasEstimate) {
       markdown.appendMarkdown(`#### ⛽ Gas Analysis\n\n`);
       markdown.appendMarkdown(
-        `- **Estimated Gas**: ${gasEstimate.estimatedGas.min.toLocaleString()} - ${gasEstimate.estimatedGas.max.toLocaleString()} (avg: ${gasEstimate.estimatedGas.average.toLocaleString()})\n`
+        `- **Source**: ${gasEstimate.source === 'solc' ? 'Solidity Compiler' : 'Heuristic'}\n`
       );
+      markdown.appendMarkdown(`- **Signature**: \`${gasEstimate.signature}\`\n`);
+      markdown.appendMarkdown(`- **Selector**: \`${gasEstimate.selector}\`\n`);
+
+      const minGas =
+        gasEstimate.estimatedGas.min === 'infinite'
+          ? '∞'
+          : gasEstimate.estimatedGas.min.toLocaleString();
+      const maxGas =
+        gasEstimate.estimatedGas.max === 'infinite'
+          ? '∞'
+          : gasEstimate.estimatedGas.max.toLocaleString();
+      const avgGas =
+        gasEstimate.estimatedGas.average === 'infinite'
+          ? '∞'
+          : gasEstimate.estimatedGas.average.toLocaleString();
+
+      markdown.appendMarkdown(`- **Estimated Gas**: ${minGas} - ${maxGas} (avg: ${avgGas})\n`);
       markdown.appendMarkdown(`- **Complexity**: ${gasEstimate.complexity}\n`);
       markdown.appendMarkdown(`- **Factors**: ${gasEstimate.factors.join(', ')}\n`);
       if (gasEstimate.warning) {
@@ -513,7 +591,12 @@ export class RealtimeAnalyzer {
   /**
    * Get color gradient from green to red based on gas amount
    */
-  private getGasGradientColor(gasAmount: number): string {
+  private getGasGradientColor(gasAmount: number | 'infinite'): string {
+    // Infinite gas is always red
+    if (gasAmount === 'infinite') {
+      return '#FF0000'; // Red
+    }
+
     // Gas thresholds for color gradient
     // 0-5K: Green
     // 5K-20K: Yellow-Green

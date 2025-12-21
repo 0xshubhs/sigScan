@@ -358,11 +358,14 @@ export class SigScanManager {
             for (const func of contract.functions) {
               // Get function code - in real scenario, read from file
               const funcCode = ''; // TODO: Extract function body from source
-              const gasEstimate = estimator.estimateGas(funcCode, func.signature);
+              const gasEstimate = await estimator.estimateGas(funcCode, func.signature);
               results.push({
                 contract: contract.name,
                 function: func.signature,
-                estimate: gasEstimate.estimatedGas.average,
+                estimate:
+                  gasEstimate.estimatedGas.average === 'infinite'
+                    ? Infinity
+                    : gasEstimate.estimatedGas.average,
               });
             }
             processed++;

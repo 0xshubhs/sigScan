@@ -49,7 +49,7 @@ contract DemoContract {
 }
 `;
 
-    it('should complete full analysis pipeline', () => {
+    it('should complete full analysis pipeline', async () => {
       // 1. Parse signatures (mock)
       const signatures = {
         functions: [
@@ -95,10 +95,11 @@ contract DemoContract {
 
       // 3. Estimate gas
       const gasEst = new GasEstimator();
-      const estimates = gasEst.estimateContractGas(testContract, signatures.functions);
+      const estimates = await gasEst.estimateContractGas(testContract, signatures.functions);
 
       expect(estimates.length).toBe(2);
-      expect(estimates[0].estimatedGas.average).toBeGreaterThan(0);
+      const avg0 = estimates[0].estimatedGas.average;
+      expect(avg0 === 'infinite' || avg0 > 0).toBe(true);
 
       // 4. Check size
       const sizeAnalyzer = new ContractSizeAnalyzer();
@@ -239,7 +240,7 @@ contract Large {
   });
 
   describe('Report Generation', () => {
-    it('should generate comprehensive reports', () => {
+    it('should generate comprehensive reports', async () => {
       const signatures = {
         functions: [
           {
@@ -262,9 +263,8 @@ contract Large {
 
       const abi = abiGen.generateABI(signatures);
       const abiDocs = abiGen.generateABIDocs(abi);
-      const gasReport = gasEst.generateGasReport(
-        gasEst.estimateContractGas(contractCode, signatures.functions)
-      );
+      const gasEstimates = await gasEst.estimateContractGas(contractCode, signatures.functions);
+      const gasReport = gasEst.generateGasReport(gasEstimates);
       const sizeReport = sizeAnalyzer.generateReport(
         new Map([['Test', sizeAnalyzer.analyzeContract('Test', contractCode)]])
       );

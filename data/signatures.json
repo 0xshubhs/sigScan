@@ -1,0 +1,90 @@
+[
+  {
+    "signature": "transfer(address,uint256)",
+    "selector": "0xa9059cbb",
+    "category": "ERC20",
+    "description": "Transfer tokens to address",
+    "tags": [
+      "token",
+      "transfer",
+      "erc20"
+    ]
+  },
+  {
+    "signature": "approve(address,uint256)",
+    "selector": "0x095ea7b3",
+    "category": "ERC20",
+    "description": "Approve spender to spend tokens",
+    "tags": [
+      "token",
+      "approve",
+      "erc20"
+    ]
+  },
+  {
+    "signature": "transferFrom(address,address,uint256)",
+    "selector": "0x23b872dd",
+    "category": "ERC20",
+    "description": "Transfer tokens from address",
+    "tags": [
+      "token",
+      "transfer",
+      "erc20"
+    ]
+  },
+  {
+    "signature": "safeTransferFrom(address,address,uint256)",
+    "selector": "0x42842e0e",
+    "category": "ERC721",
+    "description": "Safely transfer NFT",
+    "tags": [
+      "nft",
+      "transfer",
+      "erc721"
+    ]
+  },
+  {
+    "signature": "mint(address,uint256)",
+    "selector": "0x40c10f19",
+    "category": "Minting",
+    "description": "Mint new tokens",
+    "tags": [
+      "mint",
+      "token",
+      "nft"
+    ]
+  },
+  {
+    "signature": "initialize()",
+    "selector": "0x8129fc1c",
+    "category": "Proxy",
+    "description": "Initialize upgradeable contract",
+    "tags": [
+      "proxy",
+      "upgrade",
+      "initialize"
+    ]
+  },
+  {
+    "signature": "pause()",
+    "selector": "0x8456cb59",
+    "category": "Access Control",
+    "description": "Pause contract operations",
+    "tags": [
+      "pause",
+      "emergency",
+      "access-control"
+    ]
+  },
+  {
+    "signature": "unpause()",
+    "selector": "0x3f4ba83a",
+    "category": "Access Control",
+    "description": "Unpause contract operations",
+    "tags": [
+      "unpause",
+      "emergency",
+      "access-control"
+    ]
+  }
+]
