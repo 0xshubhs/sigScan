@@ -1,0 +1,148 @@
+name: Cleanup Merged Branches
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  delete-branch:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    
+    steps:
+      - name: Delete merged branch
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const branchName = context.payload.pull_request.head.ref;
+            const defaultBranch = context.payload.repository.default_branch;
+            
+            // Don't delete default branch or protected branches
+            if (branchName === defaultBranch || 
+                branchName === 'main' || 
+                branchName === 'develop' ||
+                branchName === 'master') {
+              console.log(`Skipping deletion of protected branch: ${branchName}`);
+              return;
+            }
+            
+            // Check if this is a fork (don't delete branches from forks)
+            if (context.payload.pull_request.head.repo.full_name !== context.payload.pull_request.base.repo.full_name) {
+              console.log(`Skipping deletion of fork branch: ${branchName}`);
+              return;
+            }
+            
+            try {
+              console.log(`Attempting to delete branch: ${branchName}`);
+              await github.rest.git.deleteRef({
+                owner,
+                repo,
+                ref: `heads/${branchName}`
+              });
+              console.log(`Successfully deleted branch: ${branchName}`);
+            } catch (error) {
+              if (error.status === 404) {
+                console.log(`Branch ${branchName} already deleted or doesn't exist`);
+              } else if (error.status === 422) {
+                console.log(`Branch ${branchName} is protected or cannot be deleted`);
+              } else {
+                console.error(`Error deleting branch ${branchName}:`, error.message);
+                throw error;
+              }
+            }
+
+  delete-dependabot-branches:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.merged == true && 
+      github.event.pull_request.user.login == 'dependabot[bot]'
+    
+    steps:
+      - name: Delete dependabot branch
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const branchName = context.payload.pull_request.head.ref;
+            
+            console.log(`Deleting dependabot branch: ${branchName}`);
+            
+            try {
+              await github.rest.git.deleteRef({
+                owner,
+                repo,
+                ref: `heads/${branchName}`
+              });
+              console.log(`✅ Successfully deleted dependabot branch: ${branchName}`);
+              
+              // Also delete any remaining dependabot branches that are stale
+              const { data: branches } = await github.rest.repos.listBranches({
+                owner,
+                repo,
+                per_page: 100
+              });
+              
+              const dependabotBranches = branches.filter(branch => 
+                branch.name.startsWith('dependabot/')
+              );
+              
+              console.log(`Found ${dependabotBranches.length} total dependabot branches`);
+              
+              // Check if branches have closed/merged PRs
+              for (const branch of dependabotBranches) {
+                try {
+                  const { data: prs } = await github.rest.pulls.list({
+                    owner,
+                    repo,
+                    head: `${owner}:${branch.name}`,
+                    state: 'all',
+                    per_page: 1
+                  });
+                  
+                  if (prs.length > 0 && prs[0].state === 'closed') {
+                    console.log(`Deleting stale dependabot branch: ${branch.name}`);
+                    await github.rest.git.deleteRef({
+                      owner,
+                      repo,
+                      ref: `heads/${branch.name}`
+                    });
+                    console.log(`✅ Deleted stale branch: ${branch.name}`);
+                  }
+                } catch (error) {
+                  console.log(`Could not process branch ${branch.name}: ${error.message}`);
+                }
+              }
+            } catch (error) {
+              console.error(`Error during cleanup:`, error.message);
+            }
+
+  comment-on-pr:
+    runs-on: ubuntu-latest
+    needs: [delete-branch, delete-dependabot-branches]
+    if: |
+      always() && 
+      github.event.pull_request.merged == true &&
+      (needs.delete-branch.result == 'success' || needs.delete-dependabot-branches.result == 'success')
+    
+    steps:
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branchName = context.payload.pull_request.head.ref;
+            const isDependabot = context.payload.pull_request.user.login === 'dependabot[bot]';
+            
+            const message = isDependabot 
+              ? `🤖 Dependabot branch \`${branchName}\` has been automatically deleted after merge.`
+              : `🧹 Branch \`${branchName}\` has been automatically deleted after merge.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });

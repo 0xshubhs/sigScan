@@ -1,0 +1,216 @@
+name: Cleanup Stale Branches
+
+on:
+  schedule:
+    # Run every Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-stale-branches:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clean up stale branches
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            
+            // Get default branch
+            const { data: repository } = await github.rest.repos.get({
+              owner,
+              repo
+            });
+            const defaultBranch = repository.default_branch;
+            
+            console.log(`Default branch: ${defaultBranch}`);
+            
+            // Get all branches
+            const { data: branches } = await github.rest.repos.listBranches({
+              owner,
+              repo,
+              per_page: 100
+            });
+            
+            console.log(`Total branches: ${branches.length}`);
+            
+            const protectedBranches = [defaultBranch, 'main', 'master', 'develop', 'development', 'staging', 'production'];
+            let deletedCount = 0;
+            let skippedCount = 0;
+            
+            for (const branch of branches) {
+              const branchName = branch.name;
+              
+              // Skip protected branches
+              if (protectedBranches.includes(branchName)) {
+                console.log(`⏭️  Skipping protected branch: ${branchName}`);
+                skippedCount++;
+                continue;
+              }
+              
+              try {
+                // Check if branch has an open PR
+                const { data: prs } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  head: `${owner}:${branchName}`,
+                  state: 'open',
+                  per_page: 1
+                });
+                
+                if (prs.length > 0) {
+                  console.log(`⏭️  Skipping branch with open PR: ${branchName}`);
+                  skippedCount++;
+                  continue;
+                }
+                
+                // Check if branch has closed/merged PRs
+                const { data: closedPrs } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  head: `${owner}:${branchName}`,
+                  state: 'closed',
+                  per_page: 1
+                });
+                
+                if (closedPrs.length > 0) {
+                  const pr = closedPrs[0];
+                  const daysSinceClosed = (Date.now() - new Date(pr.closed_at)) / (1000 * 60 * 60 * 24);
+                  
+                  // Delete branches from merged/closed PRs older than 7 days
+                  if (daysSinceClosed > 7) {
+                    console.log(`🗑️  Deleting stale branch: ${branchName} (PR closed ${Math.floor(daysSinceClosed)} days ago)`);
+                    
+                    await github.rest.git.deleteRef({
+                      owner,
+                      repo,
+                      ref: `heads/${branchName}`
+                    });
+                    
+                    deletedCount++;
+                    console.log(`✅ Deleted: ${branchName}`);
+                  } else {
+                    console.log(`⏭️  Branch too recent: ${branchName} (closed ${Math.floor(daysSinceClosed)} days ago)`);
+                    skippedCount++;
+                  }
+                } else {
+                  // Check if branch is stale (no commits in last 90 days)
+                  const { data: commits } = await github.rest.repos.listCommits({
+                    owner,
+                    repo,
+                    sha: branchName,
+                    per_page: 1
+                  });
+                  
+                  if (commits.length > 0) {
+                    const lastCommitDate = new Date(commits[0].commit.committer.date);
+                    const daysSinceLastCommit = (Date.now() - lastCommitDate) / (1000 * 60 * 60 * 24);
+                    
+                    if (daysSinceLastCommit > 90) {
+                      console.log(`🗑️  Deleting stale branch: ${branchName} (last commit ${Math.floor(daysSinceLastCommit)} days ago)`);
+                      
+                      await github.rest.git.deleteRef({
+                        owner,
+                        repo,
+                        ref: `heads/${branchName}`
+                      });
+                      
+                      deletedCount++;
+                      console.log(`✅ Deleted: ${branchName}`);
+                    } else {
+                      console.log(`⏭️  Branch still active: ${branchName} (last commit ${Math.floor(daysSinceLastCommit)} days ago)`);
+                      skippedCount++;
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error(`❌ Error processing branch ${branchName}:`, error.message);
+                skippedCount++;
+              }
+            }
+            
+            console.log('\n📊 Summary:');
+            console.log(`- Total branches: ${branches.length}`);
+            console.log(`- Deleted: ${deletedCount}`);
+            console.log(`- Skipped: ${skippedCount}`);
+            
+            // Create issue comment with summary
+            if (deletedCount > 0) {
+              const issues = await github.rest.issues.listForRepo({
+                owner,
+                repo,
+                state: 'open',
+                labels: 'maintenance',
+                per_page: 1
+              });
+              
+              if (issues.data.length > 0) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issues.data[0].number,
+                  body: `🧹 **Stale Branch Cleanup Report**\n\n- **Deleted branches:** ${deletedCount}\n- **Skipped branches:** ${skippedCount}\n- **Total branches:** ${branches.length}\n\nCleanup completed successfully.`
+                });
+              }
+            }
+
+      - name: Cleanup dependabot branches specifically
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            
+            // Get all branches
+            const { data: branches } = await github.rest.repos.listBranches({
+              owner,
+              repo,
+              per_page: 100
+            });
+            
+            const dependabotBranches = branches.filter(branch => 
+              branch.name.startsWith('dependabot/')
+            );
+            
+            console.log(`Found ${dependabotBranches.length} dependabot branches`);
+            let deletedDependabotCount = 0;
+            
+            for (const branch of dependabotBranches) {
+              try {
+                // Check if has closed PR
+                const { data: prs } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  head: `${owner}:${branch.name}`,
+                  state: 'closed',
+                  per_page: 1
+                });
+                
+                if (prs.length > 0) {
+                  console.log(`🗑️  Deleting dependabot branch with closed PR: ${branch.name}`);
+                  
+                  await github.rest.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${branch.name}`
+                  });
+                  
+                  deletedDependabotCount++;
+                  console.log(`✅ Deleted dependabot branch: ${branch.name}`);
+                }
+              } catch (error) {
+                console.error(`Error processing dependabot branch ${branch.name}:`, error.message);
+              }
+            }
+            
+            console.log(`\n🤖 Deleted ${deletedDependabotCount} dependabot branches`);

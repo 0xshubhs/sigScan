@@ -38,6 +38,28 @@ Enhancement suggestions are welcome! Please include:
 7. Commit with conventional commits: `feat:`, `fix:`, `docs:`, etc.
 8. Push to your fork and submit a pull request
 
+**Note:** Branches are automatically deleted after PR merge. Don't worry about cleanup! 🧹
+
+## Automated Branch Management
+
+### Branch Cleanup
+
+This repository uses automated workflows to keep branches clean:
+
+- **Auto-delete on merge**: When a PR is merged, the source branch is automatically deleted
+- **Dependabot branches**: Special handling for dependabot PRs - branches auto-delete after merge
+- **Stale branch cleanup**: Weekly automated cleanup of old branches (90+ days inactive)
+- **Manual trigger**: You can manually trigger cleanup via GitHub Actions
+
+### Dependabot Auto-Merge
+
+For dependency updates:
+- **Patch/Minor updates**: Auto-approved and auto-merged after CI passes
+- **Major updates**: Requires manual review (commented with warning)
+- **All updates**: Branches automatically deleted after merge
+
+No manual branch cleanup needed! 🎉
+
 ## Development Setup
 
 ```bash

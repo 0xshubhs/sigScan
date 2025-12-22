@@ -1,0 +1,121 @@
+name: Dependabot Auto-Approve and Merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-approve dependabot PRs
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: |
+          gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment on major updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '⚠️ **Major version update detected!**\n\nThis PR contains a major version update and requires manual review before merging.\n\nPlease review the changelog and test thoroughly.'
+            });
+
+  auto-merge:
+    needs: auto-approve
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for CI to pass
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const pull_number = context.issue.number;
+            
+            // Wait for checks to complete
+            let attempts = 0;
+            const maxAttempts = 30; // 5 minutes max wait
+            
+            while (attempts < maxAttempts) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number
+              });
+              
+              // Check if mergeable
+              if (pr.mergeable_state === 'clean') {
+                console.log('PR is ready to merge!');
+                return true;
+              } else if (pr.mergeable_state === 'unstable' || pr.mergeable_state === 'dirty') {
+                console.log(`PR is not mergeable: ${pr.mergeable_state}`);
+                return false;
+              }
+              
+              console.log(`Waiting for checks... (attempt ${attempts + 1}/${maxAttempts})`);
+              await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+              attempts++;
+            }
+            
+            console.log('Timeout waiting for checks to complete');
+            return false;
+
+      - name: Enable auto-merge for patch and minor updates
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: |
+          gh pr merge --auto --squash "$PR_URL"
+          echo "✅ Auto-merge enabled for PR"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add success comment
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const updateType = '${{ steps.metadata.outputs.update-type }}';
+            const dependencyName = '${{ steps.metadata.outputs.dependency-names }}';
+            
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🤖 **Dependabot Auto-Merge Enabled**\n\n- Update type: \`${updateType}\`\n- Dependency: \`${dependencyName}\`\n\nThis PR will be automatically merged once all checks pass.\n\n_The branch will be automatically deleted after merge._`
+            });
