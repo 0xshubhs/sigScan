@@ -3,6 +3,7 @@
  */
 
 import { GasEstimator, GasEstimate } from '../gas';
+import { FunctionSignature } from '../../types';
 import * as fs from 'fs';
 
 describe('GasEstimator', () => {
@@ -242,7 +243,17 @@ contract Test {
     });
 
     it('should estimate gas for all functions in contract', async () => {
-      const estimates = await estimator.estimateContractGas(contractCode, functions);
+      const functionsWithMetadata = functions.map((f) => ({
+        ...f,
+        selector: '0x' + '00000000',
+        visibility: 'public' as const,
+        stateMutability: 'nonpayable' as const,
+        inputs: [],
+        outputs: [],
+        contractName: 'TestContract',
+        filePath: '/tmp/TestContract.sol',
+      })) as FunctionSignature[];
+      const estimates = await estimator.estimateContractGas(contractCode, functionsWithMetadata);
 
       expect(estimates).toBeDefined();
       expect(estimates.length).toBeGreaterThan(0);
@@ -259,7 +270,30 @@ contract Test {
     });
 
     it('should handle functions with no match gracefully', async () => {
-      const funcsWithInvalid = [...functions, { name: 'nonExistent', signature: 'nonExistent()' }];
+      const functionsWithMetadata = functions.map((f) => ({
+        ...f,
+        selector: '0x' + '00000000',
+        visibility: 'public' as const,
+        stateMutability: 'nonpayable' as const,
+        inputs: [],
+        outputs: [],
+        contractName: 'TestContract',
+        filePath: '/tmp/TestContract.sol',
+      })) as FunctionSignature[];
+      const funcsWithInvalid = [
+        ...functionsWithMetadata,
+        {
+          name: 'nonExistent',
+          signature: 'nonExistent()',
+          selector: '0x00000000',
+          visibility: 'public' as const,
+          stateMutability: 'nonpayable' as const,
+          inputs: [],
+          outputs: [],
+          contractName: 'TestContract',
+          filePath: '/tmp/TestContract.sol',
+        },
+      ];
 
       const estimates = await estimator.estimateContractGas(contractCode, funcsWithInvalid);
 
