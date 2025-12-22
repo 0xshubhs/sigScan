@@ -4,6 +4,7 @@
 
 import { keccak256 } from 'js-sha3';
 import { SolcIntegration, SolcGasEstimate } from './solc-integration';
+import { FunctionSignature } from '../types';
 
 export interface GasEstimate {
   function: string;
@@ -127,7 +128,7 @@ export class GasEstimator {
           max: gasEstimate.max,
           average,
         },
-        complexity: complexity as any,
+        complexity: complexity as 'low' | 'medium' | 'high' | 'very-high' | 'unbounded',
         factors,
         warning,
         source: 'solc',
@@ -233,7 +234,7 @@ export class GasEstimator {
   }
 
   /**
-   * Estimate gas for a function - tries solc first, falls back to heuristic
+   * Estimate gas for a function - uses solc only, no heuristic fallback
    */
   public async estimateGas(
     functionCode: string,
@@ -241,16 +242,41 @@ export class GasEstimator {
     filePath?: string,
     fileContent?: string
   ): Promise<GasEstimate> {
-    // Try solc-based estimation if available and we have file path
-    if (this.useSolc && filePath) {
-      const solcEstimate = await this.estimateGasWithSolc(filePath, signature, fileContent);
-      if (solcEstimate) {
-        return solcEstimate;
-      }
+    // Always use solc-based estimation
+    if (!this.useSolc || !filePath) {
+      // Return error estimate if solc not available
+      const hash = keccak256(signature);
+      const selector = '0x' + hash.substring(0, 8);
+      return {
+        function: signature,
+        signature,
+        selector,
+        estimatedGas: { min: 0, max: 0, average: 0 },
+        complexity: 'low',
+        factors: ['⚠️ Solc unavailable - cannot estimate'],
+        warning: 'Install solc for gas estimation',
+        source: 'solc',
+      };
     }
 
-    // Fallback to heuristic estimation
-    return this.estimateGasHeuristic(functionCode, signature);
+    const solcEstimate = await this.estimateGasWithSolc(filePath, signature, fileContent);
+    if (solcEstimate) {
+      return solcEstimate;
+    }
+
+    // If solc failed, return error estimate
+    const hash = keccak256(signature);
+    const selector = '0x' + hash.substring(0, 8);
+    return {
+      function: signature,
+      signature,
+      selector,
+      estimatedGas: { min: 0, max: 0, average: 0 },
+      complexity: 'low',
+      factors: ['⚠️ Compilation failed'],
+      warning: 'Could not compile contract - check for errors',
+      source: 'solc',
+    };
   }
 
   /**
@@ -265,7 +291,7 @@ export class GasEstimator {
    */
   public async estimateContractGas(
     contractCode: string,
-    functions: any[],
+    functions: FunctionSignature[],
     filePath?: string
   ): Promise<GasEstimate[]> {
     const estimates: GasEstimate[] = [];
@@ -279,18 +305,46 @@ export class GasEstimator {
           // Match functions with solc estimates
           for (const func of functions) {
             const signature = func.signature;
+            const funcName = func.name;
             let gasEstimate: SolcGasEstimate | null = null;
 
-            // Try exact match
-            if (result.gasEstimates[signature]) {
+            // Check if this is an internal function or modifier
+            const isInternal = func.visibility === 'internal' || funcName.startsWith('modifier:');
+
+            // For internal functions, check the internal gas estimates
+            if (isInternal) {
+              const internalKey = `internal:${signature}`;
+              if (result.gasEstimates[internalKey]) {
+                gasEstimate = result.gasEstimates[internalKey];
+              }
+            }
+
+            // If not found or not internal, try exact match in external
+            if (!gasEstimate && result.gasEstimates[signature]) {
               gasEstimate = result.gasEstimates[signature];
-            } else {
-              // Try matching by function name
+            }
+
+            // Try matching by function name
+            if (!gasEstimate) {
               const functionName = signature.split('(')[0];
-              for (const [sig, estimate] of Object.entries(result.gasEstimates)) {
-                if (sig.startsWith(functionName + '(')) {
-                  gasEstimate = estimate;
-                  break;
+
+              // Try internal functions first for internal/modifier
+              if (isInternal) {
+                for (const [sig, estimate] of Object.entries(result.gasEstimates)) {
+                  if (sig.startsWith('internal:') && sig.includes(functionName + '(')) {
+                    gasEstimate = estimate;
+                    break;
+                  }
+                }
+              }
+
+              // Fallback to external
+              if (!gasEstimate) {
+                for (const [sig, estimate] of Object.entries(result.gasEstimates)) {
+                  if (sig.startsWith(functionName + '(')) {
+                    gasEstimate = estimate;
+                    break;
+                  }
                 }
               }
             }
@@ -315,7 +369,12 @@ export class GasEstimator {
                   max: gasEstimate.max,
                   average,
                 },
-                complexity: this.solcIntegration.classifyComplexity(gasEstimate) as any,
+                complexity: this.solcIntegration.classifyComplexity(gasEstimate) as
+                  | 'low'
+                  | 'medium'
+                  | 'high'
+                  | 'very-high'
+                  | 'unbounded',
                 factors: this.solcIntegration.inferFactors(signature, gasEstimate),
                 warning: this.solcIntegration.generateWarning(signature, gasEstimate),
                 source: 'solc',
@@ -326,26 +385,17 @@ export class GasEstimator {
         }
       } catch (error) {
         console.error('Error getting solc estimates for contract:', error);
+        // Log error but don't fallback - we want solc-only estimates
+        console.warn('Solc compilation failed - no heuristic fallback will be used');
       }
     }
 
-    // Fallback to heuristic for functions without solc estimates
+    // Log any functions that didn't get solc estimates
     for (const func of functions) {
-      // Skip if already estimated
-      if (estimates.find((e) => e.signature === func.signature)) {
-        continue;
-      }
-
-      // Extract function body from contract code
-      const funcPattern = new RegExp(
-        `function\\s+${func.name}\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`,
-        's'
-      );
-      const match = contractCode.match(funcPattern);
-
-      if (match && match[1]) {
-        const functionBody = match[1];
-        estimates.push(this.estimateGasHeuristic(functionBody, func.signature));
+      if (!estimates.find((e) => e.signature === func.signature)) {
+        console.warn(
+          `⚠️  No solc estimate available for ${func.signature} - skipping heuristic fallback`
+        );
       }
     }
 
@@ -405,5 +455,13 @@ export class GasEstimator {
     report += `- **Unbounded Functions**: ${estimates.filter((e) => e.complexity === 'unbounded').length}\n`;
 
     return report;
+  }
+
+  /**
+   * Trigger compiler upgrade check and download if needed
+   */
+  public triggerCompilerUpgrade(source: string, onUpgrade?: (version: string) => void): void {
+    // Delegate to solc integration which handles version manager
+    this.solcIntegration.triggerCompilerUpgrade(source, onUpgrade);
   }
 }

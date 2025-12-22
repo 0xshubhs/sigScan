@@ -5,8 +5,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import {
+  parsePragma,
+  getCompilerForSource,
+  bundledCompilerSatisfies,
+  resolveBestVersion,
+} from './solc-version-manager';
 
 // Try to import solc wrapper (bundled in extension)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let solcWrapper: any = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -34,6 +41,8 @@ export interface SolcCompilationResult {
   success: boolean;
   gasEstimates: Record<string, SolcGasEstimate>;
   errors?: string[];
+  version?: string; // Version of solc used
+  isExactMatch?: boolean; // Whether the version exactly matches pragma
 }
 
 interface SolcError {
@@ -55,9 +64,11 @@ interface ContractData {
 interface GasEstimatesData {
   creation?: {
     executionCost: string | number;
+    codeDepositCost?: string | number;
+    totalCost?: string | number;
   };
-  external?: Record<string, GasValue>;
-  internal?: Record<string, GasValue>;
+  external?: Record<string, GasValue | string>;
+  internal?: Record<string, GasValue | string>;
 }
 
 interface GasValue {
@@ -180,17 +191,23 @@ export class SolcIntegration {
   /**
    * Compile using CLI (fallback method)
    */
-  private compileWithCLI(input: any): string {
+  private compileWithCLI(input: Record<string, unknown>): string {
     // Write input to temp file
     const tempInputFile = path.join('/tmp', `solc-input-${Date.now()}.json`);
     fs.writeFileSync(tempInputFile, JSON.stringify(input));
 
     try {
       // Compile with solc
-      const output = execSync(`${this.solcPath} --standard-json < ${tempInputFile}`, {
+      const rawOutput = execSync(`${this.solcPath} --standard-json < ${tempInputFile}`, {
         encoding: 'utf-8',
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
       });
+
+      // Strip out SMT warning that appears before JSON
+      // Remove lines starting with >>> (SMT solver warnings)
+      const lines = rawOutput.split('\n');
+      const jsonLines = lines.filter((line) => !line.startsWith('>>>'));
+      const output = jsonLines.join('\n');
 
       return output;
     } finally {
@@ -204,18 +221,98 @@ export class SolcIntegration {
   }
 
   /**
+   * Find imports in source file
+   */
+  private findImports(
+    importPath: string,
+    filePath: string
+  ): { contents: string } | { error: string } {
+    try {
+      // Try relative to source file
+      const dir = path.dirname(filePath);
+      let fullPath = path.resolve(dir, importPath);
+
+      if (fs.existsSync(fullPath)) {
+        return { contents: fs.readFileSync(fullPath, 'utf-8') };
+      }
+
+      // Try node_modules
+      fullPath = path.resolve(dir, 'node_modules', importPath);
+      if (fs.existsSync(fullPath)) {
+        return { contents: fs.readFileSync(fullPath, 'utf-8') };
+      }
+
+      // Try common library paths
+      const libPaths = [
+        path.resolve(dir, 'lib', importPath),
+        path.resolve(dir, '..', 'lib', importPath),
+        path.resolve(dir, 'contracts', importPath),
+      ];
+
+      for (const libPath of libPaths) {
+        if (fs.existsSync(libPath)) {
+          return { contents: fs.readFileSync(libPath, 'utf-8') };
+        }
+      }
+
+      // Return empty stub to allow compilation to continue
+      console.warn(`Import not found: ${importPath}, using stub`);
+      return { contents: '' };
+    } catch (error) {
+      return { error: `Failed to read import: ${importPath}` };
+    }
+  }
+
+  /**
    * Compile contract and get gas estimates using standard JSON input
+   * Uses version manager for lazy compiler selection
+   * Downloads and uses pragma-specific version for each file
    */
   public async compileAndGetGasEstimates(
     filePath: string,
-    content?: string
+    content?: string,
+    onUpgrade?: (version: string) => void
   ): Promise<SolcCompilationResult> {
     try {
       // Read file content if not provided
       const sourceCode = content || fs.readFileSync(filePath, 'utf-8');
       const fileName = path.basename(filePath);
 
-      // Create standard JSON input
+      // Parse pragma and get appropriate compiler
+      const pragma = parsePragma(sourceCode);
+      const isExactMatch = bundledCompilerSatisfies(pragma);
+
+      // Enhanced logging with pragma information
+      if (pragma) {
+        if (pragma.exactVersion) {
+          console.log(
+            `📝 File: ${fileName}, Pragma: ${pragma.range} → Version: ${pragma.exactVersion}`
+          );
+        } else {
+          console.log(`📝 File: ${fileName}, Pragma: ${pragma.range}`);
+        }
+      } else {
+        console.log(`📝 File: ${fileName}, No pragma found (using bundled)`);
+      }
+
+      if (!isExactMatch && pragma) {
+        const resolvedVersion = resolveBestVersion(pragma);
+        console.log(
+          `ℹ️  Pragma ${pragma.range} needs ${resolvedVersion || 'unresolved'}, compiling with bundled 0.8.33 initially...`
+        );
+      }
+
+      // Get compiler (returns bundled immediately, triggers background download if needed)
+      const { compiler, version } = getCompilerForSource(sourceCode, (downloadedVersion) => {
+        console.log(
+          `🔄 Exact compiler ${downloadedVersion} ready for ${fileName}, re-compilation available`
+        );
+        if (onUpgrade) {
+          onUpgrade(downloadedVersion);
+        }
+      });
+
+      // Create standard JSON input with import callback
       const input = {
         language: 'Solidity',
         sources: {
@@ -238,18 +335,29 @@ export class SolcIntegration {
 
       let output: string;
 
-      // Try using JavaScript wrapper first (bundled in extension)
-      if (solcWrapper) {
+      // Use the selected compiler (could be bundled or cached exact version)
+      if (compiler && typeof compiler.compile === 'function') {
         try {
-          const result = solcWrapper.compile(JSON.stringify(input));
+          // Use import callback for better dependency resolution
+          const importCallback = (importPath: string) => this.findImports(importPath, filePath);
+
+          // Compile with the wrapper (supports import callbacks)
+          const result = compiler.compile(JSON.stringify(input), { import: importCallback });
           output = result;
+
+          // Strip SMT warnings
+          const lines = output.split('\n');
+          const jsonLines = lines.filter((line: string) => !line.startsWith('>>>'));
+          output = jsonLines.join('\n');
+
+          console.log(`✅ Solc ${version} compilation successful for ${fileName}`);
         } catch (error) {
-          console.error('Solc wrapper failed, falling back to CLI:', error);
-          // Fall through to CLI compilation
-          output = this.compileWithCLI(input);
+          console.error(`❌ Solc ${version} compile error for ${fileName}:`, error);
+          throw error; // Don't fall back to CLI for wrapper errors
         }
       } else {
-        // Use CLI compilation
+        // Use CLI compilation as fallback (doesn't support imports well)
+        console.log('⚠️  Using CLI compilation (limited import support)');
         output = this.compileWithCLI(input);
       }
 
@@ -259,11 +367,29 @@ export class SolcIntegration {
       // Check for errors
       if (result.errors) {
         const errors = result.errors.filter((e) => e.severity === 'error');
+        const warnings = result.errors.filter((e) => e.severity === 'warning');
+
+        if (warnings.length > 0) {
+          console.log(
+            `⚠️  Solc warnings (${warnings.length}) for ${fileName}:`,
+            warnings.slice(0, 2).map((w) => w.message.substring(0, 100))
+          );
+        }
+
         if (errors.length > 0) {
+          console.error(`❌ Solc compilation errors (${errors.length}) for ${fileName}:`);
+          errors.forEach((e, i) => {
+            if (i < 3) {
+              // Show first 3 errors
+              console.error(`  ${i + 1}. ${e.message.substring(0, 150)}`);
+            }
+          });
           return {
             success: false,
             gasEstimates: {},
             errors: errors.map((e) => e.message),
+            version,
+            isExactMatch,
           };
         }
       }
@@ -271,11 +397,22 @@ export class SolcIntegration {
       // Extract gas estimates
       const gasEstimates = this.parseGasEstimates(result);
 
+      console.log(
+        `💡 Extracted ${Object.keys(gasEstimates).length} gas estimates from ${fileName}`
+      );
+
       return {
         success: true,
         gasEstimates,
+        version,
+        isExactMatch,
       };
     } catch (error) {
+      const fileName = path.basename(filePath);
+      console.error(
+        `❌ Compilation failed for ${fileName}:`,
+        error instanceof Error ? error.message : error
+      );
       return {
         success: false,
         gasEstimates: {},
@@ -304,8 +441,19 @@ export class SolcIntegration {
           // Parse external functions
           const external = gasEstimates.external || {};
           for (const [signature, gas] of Object.entries(external)) {
-            const minVal = gas.min ?? 0;
-            const maxVal = gas.max ?? 0;
+            let minVal: string | number | 'infinite';
+            let maxVal: string | number | 'infinite';
+
+            // Handle both string format (single value) and object format (min/max)
+            if (typeof gas === 'string' || typeof gas === 'number') {
+              // Single value format: "22309" or 22309
+              minVal = maxVal = gas;
+            } else {
+              // Object format: { min: ..., max: ... }
+              minVal = gas.min ?? 0;
+              maxVal = gas.max ?? 0;
+            }
+
             estimates[signature] = {
               min: minVal === 'infinite' ? 'infinite' : Number(minVal),
               max: maxVal === 'infinite' ? 'infinite' : Number(maxVal),
@@ -315,8 +463,17 @@ export class SolcIntegration {
           // Parse internal functions (if available)
           const internal = gasEstimates.internal || {};
           for (const [signature, gas] of Object.entries(internal)) {
-            const minVal = gas.min ?? 0;
-            const maxVal = gas.max ?? 0;
+            let minVal: string | number | 'infinite';
+            let maxVal: string | number | 'infinite';
+
+            // Handle both string format and object format
+            if (typeof gas === 'string' || typeof gas === 'number') {
+              minVal = maxVal = gas;
+            } else {
+              minVal = gas.min ?? 0;
+              maxVal = gas.max ?? 0;
+            }
+
             estimates[`internal:${signature}`] = {
               min: minVal === 'infinite' ? 'infinite' : Number(minVal),
               max: maxVal === 'infinite' ? 'infinite' : Number(maxVal),
@@ -462,5 +619,14 @@ export class SolcIntegration {
     }
 
     return undefined;
+  }
+
+  /**
+   * Trigger compiler upgrade check and download if needed
+   */
+  public triggerCompilerUpgrade(source: string, onUpgrade?: (version: string) => void): void {
+    // This triggers the version manager to check for exact version
+    // If not cached, it will download in background and call onUpgrade when ready
+    getCompilerForSource(source, onUpgrade);
   }
 }

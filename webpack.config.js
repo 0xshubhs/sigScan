@@ -14,10 +14,14 @@ module.exports = {
   },
   externals: {
     vscode: 'commonjs vscode',
-    sqlite3: 'commonjs sqlite3'
+    sqlite3: 'commonjs sqlite3',
+    solc: 'commonjs solc'
   },
   resolve: {
-    extensions: ['.ts', '.js']
+    extensions: ['.ts', '.js'],
+    fallback: {
+      fsevents: false
+    }
   },
   module: {
     rules: [
@@ -28,5 +32,11 @@ module.exports = {
       }
     ]
   },
-  devtool: 'source-map'
+  devtool: 'source-map',
+  ignoreWarnings: [
+    {
+      module: /node_modules\/chokidar/,
+      message: /Can't resolve 'fsevents'/,
+    },
+  ]
 };

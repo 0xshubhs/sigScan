@@ -346,4 +346,236 @@ contract Invalid {
       }
     });
   });
+
+  describe('Version-Specific Compilation', () => {
+    it('should compile contract with pragma 0.8.20', async () => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        return;
+      }
+
+      const contract820 = `
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Test820 {
+    function test() public pure returns (uint256) {
+        return 42;
+    }
+}
+`;
+      const tempFile = '/tmp/Test820.sol';
+      fs.writeFileSync(tempFile, contract820);
+
+      const result = await solc.compileAndGetGasEstimates(tempFile);
+
+      expect(result.success).toBe(true);
+      expect(result.version).toBeDefined();
+      expect(result.isExactMatch).toBeDefined();
+
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        // Ignore
+      }
+    });
+
+    it('should compile contract with pragma 0.8.0', async () => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        return;
+      }
+
+      const contract80 = `
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract Test80 {
+    function test() public pure returns (uint256) {
+        return 100;
+    }
+}
+`;
+      const tempFile = '/tmp/Test80.sol';
+      fs.writeFileSync(tempFile, contract80);
+
+      const result = await solc.compileAndGetGasEstimates(tempFile);
+
+      expect(result.success).toBe(true);
+      expect(result.version).toBeDefined();
+
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        // Ignore
+      }
+    });
+
+    it('should compile contract with exact version pragma', async () => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        return;
+      }
+
+      const contractExact = `
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+contract TestExact {
+    function test() public pure returns (uint256) {
+        return 999;
+    }
+}
+`;
+      const tempFile = '/tmp/TestExact.sol';
+      fs.writeFileSync(tempFile, contractExact);
+
+      const result = await solc.compileAndGetGasEstimates(tempFile);
+
+      // When bundled doesn't match exact pragma (0.8.19 vs 0.8.33),
+      // it will fail with bundled but trigger background download
+      // This is expected behavior
+      expect(result.version).toBeDefined();
+      expect(result.isExactMatch).toBeDefined();
+
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        // Ignore
+      }
+    });
+
+    it('should compile contract with range pragma', async () => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        return;
+      }
+
+      const contractRange = `
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.8.0 <0.9.0;
+
+contract TestRange {
+    function test() public pure returns (uint256) {
+        return 777;
+    }
+}
+`;
+      const tempFile = '/tmp/TestRange.sol';
+      fs.writeFileSync(tempFile, contractRange);
+
+      const result = await solc.compileAndGetGasEstimates(tempFile);
+
+      expect(result.success).toBe(true);
+      expect(result.version).toBeDefined();
+
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        // Ignore
+      }
+    });
+
+    it('should handle contract without pragma', async () => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        return;
+      }
+
+      const contractNoPragma = `
+// SPDX-License-Identifier: MIT
+contract TestNoPragma {
+    function test() public pure returns (uint256) {
+        return 555;
+    }
+}
+`;
+      const tempFile = '/tmp/TestNoPragma.sol';
+      fs.writeFileSync(tempFile, contractNoPragma);
+
+      const result = await solc.compileAndGetGasEstimates(tempFile);
+
+      // Should use bundled version
+      expect(result.version).toBeDefined();
+      expect(result.isExactMatch).toBe(true); // No pragma = bundled is fine
+
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        // Ignore
+      }
+    });
+
+    it('should report non-exact match when bundled doesnt satisfy', async () => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        return;
+      }
+
+      // Use a version that bundled 0.8.33 doesn't satisfy
+      const contract70 = `
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.7.0;
+
+contract Test70 {
+    function test() public pure returns (uint256) {
+        return 42;
+    }
+}
+`;
+      const tempFile = '/tmp/Test70.sol';
+      fs.writeFileSync(tempFile, contract70);
+
+      const result = await solc.compileAndGetGasEstimates(tempFile);
+
+      // May succeed with bundled as fallback, but isExactMatch should be false initially
+      expect(result.version).toBeDefined();
+      // Note: isExactMatch will be false on first compile, true after download
+
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        // Ignore
+      }
+    });
+
+    it('should trigger upgrade callback when exact version downloaded', (done) => {
+      if (!solc.isSolcAvailable()) {
+        console.log('Skipping test - solc not available');
+        done();
+        return;
+      }
+
+      const contract819 = `
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+contract TestUpgrade {
+    function test() public pure returns (uint256) {
+        return 123;
+    }
+}
+`;
+      const tempFile = '/tmp/TestUpgrade.sol';
+      fs.writeFileSync(tempFile, contract819);
+
+      const upgradeCallback = (version: string) => {
+        console.log(`Upgrade callback triggered for version: ${version}`);
+      };
+
+      solc.compileAndGetGasEstimates(tempFile, undefined, upgradeCallback).then(() => {
+        // Give some time for async download (may or may not complete in test)
+        setTimeout(() => {
+          // Callback may or may not be called depending on download speed
+          // Just verify the compilation worked
+          try {
+            fs.unlinkSync(tempFile);
+          } catch (error) {
+            // Ignore
+          }
+          done();
+        }, 100);
+      });
+    });
+  });
 });

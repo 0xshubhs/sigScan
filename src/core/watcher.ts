@@ -5,10 +5,10 @@ import { ProjectInfo, ContractInfo } from '../types';
 import { SolidityParser } from './parser';
 
 export interface WatcherEvents {
-  'fileChanged': (filePath: string, contractInfo: ContractInfo | null) => void;
-  'fileAdded': (filePath: string, contractInfo: ContractInfo | null) => void;
-  'fileRemoved': (filePath: string) => void;
-  'error': (error: Error) => void;
+  fileChanged: (filePath: string, contractInfo: ContractInfo | null) => void;
+  fileAdded: (filePath: string, contractInfo: ContractInfo | null) => void;
+  fileRemoved: (filePath: string) => void;
+  error: (error: Error) => void;
 }
 
 export class FileWatcher extends EventEmitter {
@@ -29,14 +29,14 @@ export class FileWatcher extends EventEmitter {
       return;
     }
 
-    const watchPaths = projectInfo.contractDirs.map(dir => 
+    const watchPaths = projectInfo.contractDirs.map((dir) =>
       path.join(projectInfo.rootPath, dir, '**/*.sol')
     );
 
     this.watcher = chokidar.watch(watchPaths, {
       ignored: /node_modules/,
       persistent: true,
-      ignoreInitial: true
+      ignoreInitial: true,
     });
 
     this.watcher
@@ -80,19 +80,21 @@ export class FileWatcher extends EventEmitter {
    * Get watched paths
    */
   public getWatchedPaths(): string[] {
-    if (!this.watcher) return [];
-    
+    if (!this.watcher) {
+      return [];
+    }
+
     const watched = this.watcher.getWatched();
     const paths: string[] = [];
-    
-    Object.keys(watched).forEach(dir => {
-      watched[dir].forEach(file => {
+
+    Object.keys(watched).forEach((dir) => {
+      watched[dir].forEach((file) => {
         if (file.endsWith('.sol')) {
           paths.push(path.join(dir, file));
         }
       });
     });
-    
+
     return paths;
   }
 }

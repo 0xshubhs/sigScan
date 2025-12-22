@@ -2,7 +2,7 @@
   "name": "sigscan",
   "displayName": "SigScan - Smart Contract Signature Scanner",
   "description": "Automatically scan and generate method signatures for Solidity contracts in Foundry/Hardhat projects",
-  "version": "0.4.4",
+  "version": "0.0.2",
   "publisher": "0xshubhs",
   "icon": "icon.png",
   "engines": {
@@ -208,6 +208,11 @@
           "maximum": 60000,
           "description": "Run accurate solc gas estimation after this many milliseconds of no typing (0 = disabled, 10000 = 10 seconds recommended)"
         },
+        "sigscan.gas.solcOnly": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use only solc compiler for gas estimates (no heuristic fallback). Recommended for accuracy."
+        },
         "sigscan.etherscanApiKey": {
           "type": "string",
           "default": "",
@@ -273,6 +278,7 @@
     "@types/glob": "^8.1.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^18.0.0",
+    "@types/semver": "^7.7.1",
     "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
@@ -294,6 +300,7 @@
     "commander": "^9.4.1",
     "glob": "^8.0.3",
     "js-sha3": "^0.8.0",
+    "semver": "^7.7.3",
     "solc": "^0.8.33",
     "sqlite3": "^5.1.6"
   },

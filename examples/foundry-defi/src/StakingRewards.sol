@@ -60,7 +60,7 @@ contract StakingRewards {
         emit Staked(msg.sender, amount);
     }
 
-    function withdraw(uint256 amount) external updateReward(msg.sender) {
+    function withdraw(uint256 amount) public updateReward(msg.sender) {
         if (amount == 0) revert InvalidAmount();
         if (stakedBalance[msg.sender] < amount) revert InsufficientBalance();
         
@@ -70,7 +70,7 @@ contract StakingRewards {
         emit Withdrawn(msg.sender, amount);
     }
 
-    function claimReward() external updateReward(msg.sender) {
+    function claimReward() public updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;

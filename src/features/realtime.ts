@@ -94,6 +94,9 @@ export class RealtimeAnalyzer {
     // Run solc analysis immediately and wait for results
     const solcAnalysis = await this.runSolcAnalysisSync(document, contentHash);
 
+    // Set up background compiler download with re-compilation callback
+    this.setupCompilerUpgrade(document);
+
     return solcAnalysis;
   }
 
@@ -102,7 +105,6 @@ export class RealtimeAnalyzer {
    */
   public async analyzeDocumentOnChange(document: vscode.TextDocument): Promise<LiveAnalysis> {
     const content = document.getText();
-    const uri = document.uri.toString();
     const contentHash = this.hashContent(content);
 
     // Check hash-based cache first (exact content match)
@@ -184,6 +186,7 @@ export class RealtimeAnalyzer {
 
   /**
    * Run solc analysis synchronously and return results
+   * Compiles once but shows results progressively
    */
   private async runSolcAnalysisSync(
     document: vscode.TextDocument,
@@ -206,7 +209,23 @@ export class RealtimeAnalyzer {
       const gasEstimates = new Map<string, GasEstimate>();
       const diagnostics: vscode.Diagnostic[] = [];
 
-      // Analyze each function with solc
+      // Compile once to get all gas estimates from solc
+      console.log(`📊 Compiling ${contractInfo.name} with solc...`);
+      const compileResult = await this.solcGasEstimator.estimateContractGas(
+        content,
+        contractInfo.functions,
+        document.uri.fsPath
+      );
+
+      // Create a map of function name to gas estimate
+      const gasEstimateMap = new Map<string, GasEstimate>();
+      for (const estimate of compileResult) {
+        const funcName = estimate.signature.split('(')[0];
+        gasEstimateMap.set(funcName, estimate);
+      }
+
+      // Now process each function and show results progressively
+      let processedCount = 0;
       for (const func of contractInfo.functions) {
         // Check if cancelled
         if (!this.activeSolcCompilations.get(uri)) {
@@ -214,26 +233,13 @@ export class RealtimeAnalyzer {
           return this.createEmptyAnalysis();
         }
 
-        const isConstructor = func.name === 'constructor';
-        const funcPattern = isConstructor
-          ? new RegExp(`constructor\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`, 's')
-          : new RegExp(
-              `function\\s+${func.name}\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`,
-              's'
-            );
-        const match = content.match(funcPattern);
+        // Get the gas estimate for this function
+        const gasEstimate = gasEstimateMap.get(func.name);
 
-        if (match && match[1]) {
-          const functionBody = match[1];
-          const functionStart = content.indexOf(match[0]);
-          const lines = content.substring(0, functionStart).split('\\n').length - 1;
-
-          // Accurate solc gas estimation
-          const gasEstimate = await this.solcGasEstimator.estimateGas(
-            functionBody,
-            func.signature,
-            document.uri.fsPath,
-            content
+        if (gasEstimate) {
+          processedCount++;
+          console.log(
+            `✅ [${processedCount}/${contractInfo.functions.length}] ${func.name}: ${gasEstimate.estimatedGas.average} gas`
           );
 
           gasEstimates.set(func.name, gasEstimate);
@@ -247,18 +253,42 @@ export class RealtimeAnalyzer {
             gasEstimate.complexity === 'very-high' ||
             gasEstimate.complexity === 'unbounded'
           ) {
-            const diagnostic = new vscode.Diagnostic(
-              new vscode.Range(lines, 0, lines, 1000),
-              `High gas cost (${avgGasString} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
-              gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
-                ? vscode.DiagnosticSeverity.Warning
-                : vscode.DiagnosticSeverity.Information
-            );
-            diagnostic.source = 'SigScan Gas';
-            diagnostics.push(diagnostic);
+            const funcPattern =
+              func.name === 'constructor'
+                ? new RegExp(`constructor\\s*\\([^)]*\\)`, 's')
+                : new RegExp(`function\\s+${func.name}\\s*\\([^)]*\\)`, 's');
+            const match = content.match(funcPattern);
+
+            if (match) {
+              const functionStart = content.indexOf(match[0]);
+              const lines = content.substring(0, functionStart).split('\n').length - 1;
+
+              const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(lines, 0, lines, 1000),
+                `High gas cost (${avgGasString} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
+                gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
+                  ? vscode.DiagnosticSeverity.Warning
+                  : vscode.DiagnosticSeverity.Information
+              );
+              diagnostic.source = 'SigScan Gas';
+              diagnostics.push(diagnostic);
+            }
           }
+
+          // Update diagnostics progressively (every 3 functions or last one)
+          if (processedCount % 3 === 0 || processedCount === contractInfo.functions.length) {
+            this.diagnosticCollection.set(document.uri, diagnostics);
+          }
+        } else {
+          console.log(
+            `⚠️  [${processedCount + 1}/${contractInfo.functions.length}] ${func.name}: No gas estimate available`
+          );
         }
       }
+
+      console.log(
+        `✨ Completed gas analysis for ${contractInfo.name} (${processedCount} functions)`
+      );
 
       // Contract size analysis
       const sizeInfo = this.sizeAnalyzer.analyzeContract(contractInfo.name, content);
@@ -972,6 +1002,35 @@ export class RealtimeAnalyzer {
    */
   public clearAllCaches(): void {
     this.analysisCache.clear();
+  }
+
+  /**
+   * Set up background compiler upgrade with re-compilation callback
+   */
+  private setupCompilerUpgrade(document: vscode.TextDocument): void {
+    const uri = document.uri.toString();
+
+    // This will trigger background download if needed
+    // The onUpgrade callback will fire when download completes
+    const onUpgrade = async (version: string) => {
+      console.log(`🔄 Compiler ${version} ready, re-compiling ${document.fileName}...`);
+
+      // Invalidate cache for this document
+      this.analysisCache.delete(uri);
+      const content = document.getText();
+      const contentHash = this.hashContent(content);
+      this.contentHashCache.delete(contentHash);
+
+      // Trigger re-analysis with new compiler
+      await this.runSolcAnalysis(document, contentHash);
+
+      // Notify user
+      vscode.window.showInformationMessage(`Gas estimates updated with Solidity ${version}`);
+    };
+
+    // Pass the callback to the gas estimator (which passes it to solc integration)
+    // This is already wired up in the version manager, just need to make sure it's called
+    this.solcGasEstimator.triggerCompilerUpgrade(document.getText(), onUpgrade);
   }
 
   private createEmptyAnalysis(): LiveAnalysis {
