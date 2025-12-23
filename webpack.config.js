@@ -15,7 +15,8 @@ module.exports = {
   externals: {
     vscode: 'commonjs vscode',
     sqlite3: 'commonjs sqlite3',
-    solc: 'commonjs solc'
+    solc: 'commonjs solc',
+    fsevents: 'commonjs fsevents'
   },
   resolve: {
     extensions: ['.ts', '.js'],
