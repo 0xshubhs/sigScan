@@ -201,6 +201,11 @@
           "default": false,
           "description": "Analyze code complexity metrics"
         },
+        "sigscan.realtimeAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time gas analysis and inline annotations as you type"
+        },
         "sigscan.realtime.solcIdleMs": {
           "type": "number",
           "default": 10000,

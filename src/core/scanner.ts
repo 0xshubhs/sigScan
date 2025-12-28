@@ -30,14 +30,14 @@ export class ProjectScanner {
       const fullPath = path.join(rootPath, contractDir);
       if (fs.existsSync(fullPath)) {
         const contractFiles = await this.findSolidityFiles(fullPath);
-        
+
         for (const filePath of contractFiles) {
           const contractInfo = this.parser.parseFile(filePath);
           if (contractInfo) {
             // Categorize the contract
             contractInfo.category = this.categorizeContract(filePath, rootPath);
             contracts.set(filePath, contractInfo);
-            
+
             // Add to category map
             const categoryContracts = contractsByCategory.get(contractInfo.category) || [];
             categoryContracts.push(contractInfo);
@@ -52,10 +52,12 @@ export class ProjectScanner {
 
     // Filter lib contracts to only include inherited ones
     const libContracts = contractsByCategory.get('libs') || [];
-    const filteredLibContracts = libContracts.filter(contract => {
+    const filteredLibContracts = libContracts.filter((contract) => {
       // Include contract if it's inherited or if it's imported by main contracts
-      return projectInfo.inheritedContracts.has(contract.name) || 
-             this.isContractImported(contract.name, contracts);
+      return (
+        projectInfo.inheritedContracts.has(contract.name) ||
+        this.isContractImported(contract.name, contracts)
+      );
     });
     contractsByCategory.set('libs', filteredLibContracts);
 
@@ -69,7 +71,7 @@ export class ProjectScanner {
     let totalEvents = 0;
     let totalErrors = 0;
 
-    contracts.forEach(contract => {
+    contracts.forEach((contract) => {
       totalFunctions += contract.functions.length;
       totalEvents += contract.events.length;
       totalErrors += contract.errors.length;
@@ -83,7 +85,7 @@ export class ProjectScanner {
       totalErrors,
       scanTime: new Date(),
       contractsByCategory,
-      uniqueSignatures
+      uniqueSignatures,
     };
   }
 
@@ -92,7 +94,7 @@ export class ProjectScanner {
    */
   private categorizeContract(filePath: string, rootPath: string): ContractCategory {
     const relativePath = path.relative(rootPath, filePath);
-    
+
     if (relativePath.includes('test') || relativePath.includes('Test')) {
       return 'tests';
     }
@@ -105,14 +107,17 @@ export class ProjectScanner {
   /**
    * Detect inherited contracts by parsing import statements
    */
-  private detectInheritedContracts(contracts: Map<string, ContractInfo>, projectInfo: ProjectInfo): void {
+  private detectInheritedContracts(
+    contracts: Map<string, ContractInfo>,
+    projectInfo: ProjectInfo
+  ): void {
     projectInfo.inheritedContracts = new Set<string>();
-    
+
     for (const [filePath, contract] of contracts) {
       if (contract.category === 'contracts') {
         const content = fs.readFileSync(filePath, 'utf-8');
         const imports = this.extractImports(content);
-        
+
         for (const importPath of imports) {
           if (importPath.includes('lib/')) {
             const contractName = this.extractContractNameFromImport(importPath);
@@ -132,11 +137,11 @@ export class ProjectScanner {
     const imports: string[] = [];
     const importRegex = /import\s+[^"]*"([^"]+)"/g;
     let match;
-    
+
     while ((match = importRegex.exec(content)) !== null) {
       imports.push(match[1]);
     }
-    
+
     return imports;
   }
 
@@ -152,7 +157,7 @@ export class ProjectScanner {
    * Collect unique signatures to avoid duplicates
    */
   private collectUniqueSignatures(
-    contracts: Map<string, ContractInfo>, 
+    contracts: Map<string, ContractInfo>,
     uniqueSignatures: Map<string, any>
   ): void {
     for (const [, contract] of contracts) {
@@ -160,12 +165,12 @@ export class ProjectScanner {
       for (const func of contract.functions) {
         uniqueSignatures.set(func.signature, func);
       }
-      
+
       // Collect unique event signatures
       for (const event of contract.events) {
         uniqueSignatures.set(event.signature, event);
       }
-      
+
       // Collect unique error signatures
       for (const error of contract.errors) {
         uniqueSignatures.set(error.signature, error);
@@ -184,14 +189,26 @@ export class ProjectScanner {
     let type: 'foundry' | 'hardhat' | 'unknown' = 'unknown';
     let contractDirs: string[] = [];
 
-    if (fs.existsSync(foundryConfig)) {
+    // Check for Foundry project
+    const isFoundry = fs.existsSync(foundryConfig);
+    // Check for Hardhat project
+    const isHardhat = fs.existsSync(hardhatConfigJs) || fs.existsSync(hardhatConfigTs);
+
+    if (isFoundry && isHardhat) {
+      // Hybrid project - check both Foundry and Hardhat directories
       type = 'foundry';
-      contractDirs = ['src', 'lib'];
-    } else if (fs.existsSync(hardhatConfigJs) || fs.existsSync(hardhatConfigTs)) {
+      contractDirs = ['src', 'lib', 'contracts'];
+    } else if (isFoundry) {
+      type = 'foundry';
+      // Also check for 'contracts' dir in case project uses non-standard Foundry layout
+      contractDirs = fs.existsSync(path.join(rootPath, 'contracts'))
+        ? ['src', 'lib', 'contracts']
+        : ['src', 'lib'];
+    } else if (isHardhat) {
       type = 'hardhat';
       contractDirs = ['contracts'];
     } else {
-      // Default fallback
+      // Default fallback - scan all common directories
       contractDirs = ['src', 'contracts'];
     }
 
@@ -200,7 +217,7 @@ export class ProjectScanner {
       rootPath,
       contractDirs,
       contracts: new Map(),
-      inheritedContracts: new Set()
+      inheritedContracts: new Set(),
     };
   }
 
@@ -236,9 +253,9 @@ export class ProjectScanner {
    * Scan only changed files
    */
   public async scanChangedFiles(
-    projectInfo: ProjectInfo, 
+    projectInfo: ProjectInfo,
     lastScanTime: Date
-  ): Promise<{ changed: ContractInfo[], removed: string[] }> {
+  ): Promise<{ changed: ContractInfo[]; removed: string[] }> {
     const changed: ContractInfo[] = [];
     const removed: string[] = [];
 
@@ -263,7 +280,7 @@ export class ProjectScanner {
       const fullPath = path.join(projectInfo.rootPath, contractDir);
       if (fs.existsSync(fullPath)) {
         const contractFiles = await this.findSolidityFiles(fullPath);
-        
+
         for (const filePath of contractFiles) {
           if (!projectInfo.contracts.has(filePath)) {
             const newContract = this.parser.parseFile(filePath);
@@ -277,7 +294,7 @@ export class ProjectScanner {
     }
 
     // Remove deleted files from project
-    removed.forEach(filePath => {
+    removed.forEach((filePath) => {
       projectInfo.contracts.delete(filePath);
     });
 

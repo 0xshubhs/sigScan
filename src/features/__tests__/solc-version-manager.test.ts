@@ -117,21 +117,18 @@ describe('SolcVersionManager', () => {
     it('should resolve simple caret version', () => {
       const pragma = parsePragma('pragma solidity ^0.8.20;');
       const version = resolveBestVersion(pragma);
-
       expect(version).toBe('v0.8.20+commit.a1b79de6');
     });
 
     it('should resolve exact version', () => {
       const pragma = parsePragma('pragma solidity 0.8.19;');
       const version = resolveBestVersion(pragma);
-
       expect(version).toBe('v0.8.19+commit.7dd6d404');
     });
 
     it('should resolve range with lower bound', () => {
       const pragma = parsePragma('pragma solidity >=0.8.15 <0.9.0;');
       const version = resolveBestVersion(pragma);
-
       expect(version).toBe('v0.8.15+commit.e14f2714');
     });
 
@@ -165,7 +162,6 @@ describe('SolcVersionManager', () => {
     it('should return true for compatible pragma', () => {
       const pragma = parsePragma('pragma solidity ^0.8.0;');
       const satisfies = bundledCompilerSatisfies(pragma);
-
       // 0.8.33 satisfies ^0.8.0
       expect(satisfies).toBe(true);
     });
@@ -173,7 +169,6 @@ describe('SolcVersionManager', () => {
     it('should return false for incompatible pragma', () => {
       const pragma = parsePragma('pragma solidity ^0.7.0;');
       const satisfies = bundledCompilerSatisfies(pragma);
-
       // 0.8.33 does not satisfy ^0.7.0
       expect(satisfies).toBe(false);
     });

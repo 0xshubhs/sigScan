@@ -632,7 +632,7 @@ export class RealtimeAnalyzer {
         // Add tooltip with detailed info including signature
         hint.tooltip = new vscode.MarkdownString(
           `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
-            `**Source**: ${estimate.source === 'solc' ? 'Solidity Compiler' : 'Heuristic Analysis'}\n\n` +
+            `**Source**: ${estimate.source === 'solc' ? 'solc compiler' : 'Heuristic Analysis'}\n\n` +
             `**Signature**: \`${estimate.signature}\`\n\n` +
             `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
             `**Average**: ${gasAmountStr} gas\n\n` +
@@ -866,7 +866,7 @@ export class RealtimeAnalyzer {
           },
           hoverMessage: new vscode.MarkdownString(
             `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
-              `**Source**: ${estimate.source === 'solc' ? 'Solidity Compiler' : 'Heuristic Analysis'}\n\n` +
+              `**Source**: ${estimate.source === 'solc' ? 'solc Compiler' : 'Heuristic Analysis'}\n\n` +
               `**Signature**: \`${estimate.signature}\`\n\n` +
               `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
               `**Average**: ${gasAmountStr} gas\n\n` +
@@ -947,7 +947,7 @@ export class RealtimeAnalyzer {
     if (gasEstimate) {
       markdown.appendMarkdown(`#### ⛽ Gas Analysis\n\n`);
       markdown.appendMarkdown(
-        `- **Source**: ${gasEstimate.source === 'solc' ? 'Solidity Compiler' : 'Heuristic'}\n`
+        `- **Source**: ${gasEstimate.source === 'solc' ? 'solc Compiler' : 'Heuristic'}\n`
       );
       markdown.appendMarkdown(`- **Signature**: \`${gasEstimate.signature}\`\n`);
       markdown.appendMarkdown(`- **Selector**: \`${gasEstimate.selector}\`\n`);
