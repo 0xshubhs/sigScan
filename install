@@ -1,1 +1,5 @@
+<<<<<<< HEAD
 npm run compile && vsce package && code --install-extension sigscan-0.0.2.vsix --force 
+=======
+pnpm run compile && npx @vscode/vsce package --no-dependencies && code --install-extension sigscan-0.0.2.vsix --force 
+>>>>>>> 61929c04e935c009dcd22d5c0d6e638627afc9ed
