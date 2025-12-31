@@ -4,11 +4,182 @@ import { glob } from 'glob';
 import { ProjectInfo, ContractInfo, ScanResult, ContractCategory } from '../types';
 import { SolidityParser } from './parser';
 
+export interface SubProject {
+  path: string;
+  type: 'foundry' | 'hardhat' | 'solidity';
+  scanResult?: ScanResult;
+}
+
 export class ProjectScanner {
   private parser: SolidityParser;
 
   constructor() {
     this.parser = new SolidityParser();
+  }
+
+  /**
+   * Find all subprojects recursively within a root directory
+   */
+  public async findAllSubProjects(rootPath: string): Promise<SubProject[]> {
+    const subProjects: SubProject[] = [];
+    const visited = new Set<string>();
+
+    await this.findSubProjectsRecursive(rootPath, subProjects, visited);
+
+    // If no subprojects found, treat root as a single project
+    if (subProjects.length === 0) {
+      const hasAnysolFiles = await this.hasSolidityFiles(rootPath);
+      if (hasAnysolFiles) {
+        subProjects.push({
+          path: rootPath,
+          type: 'solidity',
+        });
+      }
+    }
+
+    return subProjects;
+  }
+
+  /**
+   * Recursively find subprojects
+   */
+  private async findSubProjectsRecursive(
+    dirPath: string,
+    subProjects: SubProject[],
+    visited: Set<string>
+  ): Promise<void> {
+    const realPath = fs.realpathSync(dirPath);
+    if (visited.has(realPath)) {
+      return;
+    }
+    visited.add(realPath);
+
+    // Skip common non-project directories
+    const basename = path.basename(dirPath);
+    const skipDirs = [
+      'node_modules',
+      '.git',
+      'cache',
+      'out',
+      'artifacts',
+      'typechain-types',
+      'broadcast',
+      '.deps',
+    ];
+    if (skipDirs.includes(basename)) {
+      return;
+    }
+
+    // Check if this directory is a project root
+    const foundryConfig = path.join(dirPath, 'foundry.toml');
+    const hardhatConfigJs = path.join(dirPath, 'hardhat.config.js');
+    const hardhatConfigTs = path.join(dirPath, 'hardhat.config.ts');
+
+    const isFoundry = fs.existsSync(foundryConfig);
+    const isHardhat = fs.existsSync(hardhatConfigJs) || fs.existsSync(hardhatConfigTs);
+
+    if (isFoundry || isHardhat) {
+      subProjects.push({
+        path: dirPath,
+        type: isFoundry ? 'foundry' : 'hardhat',
+      });
+      // Don't recurse into project subdirectories for subprojects
+      // The project will scan its own contract dirs
+      return;
+    }
+
+    // Recurse into subdirectories
+    try {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const subDir = path.join(dirPath, entry.name);
+          await this.findSubProjectsRecursive(subDir, subProjects, visited);
+        }
+      }
+    } catch {
+      // Ignore permission errors
+    }
+  }
+
+  /**
+   * Check if directory contains any .sol files
+   */
+  private async hasSolidityFiles(dirPath: string): Promise<boolean> {
+    const files = await this.findSolidityFiles(dirPath);
+    return files.length > 0;
+  }
+
+  /**
+   * Scan all subprojects and return combined results with per-project exports
+   */
+  public async scanAllSubProjects(rootPath: string): Promise<{
+    subProjects: SubProject[];
+    combinedResult: ScanResult;
+  }> {
+    const subProjects = await this.findAllSubProjects(rootPath);
+
+    // Scan each subproject
+    for (const subProject of subProjects) {
+      subProject.scanResult = await this.scanProject(subProject.path);
+    }
+
+    // Create combined result for backwards compatibility
+    const combinedContracts = new Map<string, ContractInfo>();
+    const combinedByCategory = new Map<ContractCategory, ContractInfo[]>();
+    const combinedUniqueSignatures = new Map<string, any>();
+
+    combinedByCategory.set('contracts', []);
+    combinedByCategory.set('libs', []);
+    combinedByCategory.set('tests', []);
+
+    let totalFunctions = 0;
+    let totalEvents = 0;
+    let totalErrors = 0;
+
+    for (const subProject of subProjects) {
+      if (subProject.scanResult) {
+        // Merge contracts
+        for (const [filePath, contract] of subProject.scanResult.projectInfo.contracts) {
+          combinedContracts.set(filePath, contract);
+        }
+
+        // Merge by category
+        for (const category of ['contracts', 'libs', 'tests'] as ContractCategory[]) {
+          const existing = combinedByCategory.get(category) || [];
+          const newContracts = subProject.scanResult.contractsByCategory.get(category) || [];
+          combinedByCategory.set(category, [...existing, ...newContracts]);
+        }
+
+        // Merge unique signatures
+        for (const [sig, info] of subProject.scanResult.uniqueSignatures) {
+          combinedUniqueSignatures.set(sig, info);
+        }
+
+        totalFunctions += subProject.scanResult.totalFunctions;
+        totalEvents += subProject.scanResult.totalEvents;
+        totalErrors += subProject.scanResult.totalErrors;
+      }
+    }
+
+    const combinedResult: ScanResult = {
+      projectInfo: {
+        type: 'unknown',
+        rootPath,
+        contractDirs: [],
+        contracts: combinedContracts,
+        inheritedContracts: new Set(),
+      },
+      totalContracts: combinedContracts.size,
+      totalFunctions,
+      totalEvents,
+      totalErrors,
+      scanTime: new Date(),
+      contractsByCategory: combinedByCategory,
+      uniqueSignatures: combinedUniqueSignatures,
+    };
+
+    return { subProjects, combinedResult };
   }
 
   /**
@@ -260,7 +431,7 @@ export class ProjectScanner {
     const removed: string[] = [];
 
     // Check existing contracts for changes
-    for (const [filePath, contractInfo] of projectInfo.contracts) {
+    for (const [filePath] of projectInfo.contracts) {
       if (!fs.existsSync(filePath)) {
         removed.push(filePath);
         continue;

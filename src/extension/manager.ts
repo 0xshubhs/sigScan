@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { ProjectScanner } from '../core/scanner';
+import { ProjectScanner, SubProject } from '../core/scanner';
 import { SignatureExporter } from '../core/exporter';
 import { FileWatcher } from '../core/watcher';
 import { ScanResult, ExportOptions } from '../types';
@@ -18,6 +18,7 @@ export class SigScanManager {
   private watcher: FileWatcher;
   private context: vscode.ExtensionContext;
   private lastScanResult: ScanResult | null = null;
+  private subProjects: SubProject[] = [];
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -29,7 +30,7 @@ export class SigScanManager {
   }
 
   /**
-   * Scan the current workspace for contracts
+   * Scan the current workspace for contracts (including all subprojects)
    */
   public async scanProject(): Promise<void> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -48,24 +49,28 @@ export class SigScanManager {
           cancellable: false,
         },
         async (progress) => {
-          progress.report({ increment: 0, message: 'Initializing scan...' });
+          progress.report({ increment: 0, message: 'Finding subprojects...' });
 
-          this.lastScanResult = await this.scanner.scanProject(rootPath);
+          // Scan all subprojects
+          const { subProjects, combinedResult } = await this.scanner.scanAllSubProjects(rootPath);
+          this.subProjects = subProjects;
+          this.lastScanResult = combinedResult;
 
-          if (this.lastScanResult.totalContracts === 0) {
+          if (combinedResult.totalContracts === 0) {
             vscode.window.showWarningMessage('No Solidity contracts found in the workspace.');
             return;
           }
 
-          progress.report({ increment: 50, message: 'Exporting signatures...' });
+          progress.report({ increment: 50, message: 'Exporting signatures to subprojects...' });
 
-          // Auto-export signatures after scanning
-          await this.autoExportSignatures();
+          // Auto-export signatures to each subproject's own signatures folder
+          await this.autoExportSignaturesToSubProjects();
 
           progress.report({ increment: 100, message: 'Scan completed' });
 
+          const projectCount = subProjects.length;
           vscode.window.showInformationMessage(
-            `Scan completed: ${this.lastScanResult.totalContracts} contracts, ${this.lastScanResult.totalFunctions} functions. Signatures saved to 'signatures' folder.`
+            `Scan completed: ${projectCount} project(s), ${combinedResult.totalContracts} contracts, ${combinedResult.totalFunctions} functions. Signatures saved to each project's 'signatures' folder.`
           );
 
           // Auto-start watching if configured
@@ -90,7 +95,12 @@ export class SigScanManager {
       return;
     }
 
-    this.watcher.startWatching(this.lastScanResult.projectInfo);
+    // Watch each subproject
+    for (const subProject of this.subProjects) {
+      if (subProject.scanResult) {
+        this.watcher.startWatching(subProject.scanResult.projectInfo);
+      }
+    }
   }
 
   /**
@@ -101,15 +111,10 @@ export class SigScanManager {
   }
 
   /**
-   * Auto-export signatures with default settings
+   * Auto-export signatures to each subproject's folder
    */
-  private async autoExportSignatures(): Promise<void> {
-    if (!this.lastScanResult) {
-      return;
-    }
-
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
+  private async autoExportSignaturesToSubProjects(): Promise<void> {
+    if (this.subProjects.length === 0) {
       return;
     }
 
@@ -118,30 +123,44 @@ export class SigScanManager {
     const includeInternal = !config.get('excludeInternal', true);
     const includePrivate = config.get('includePrivate', false) as boolean;
 
-    // Use the project root path from scan result (where foundry.toml or hardhat.config.js exists)
-    const outputDir = path.join(this.lastScanResult.projectInfo.rootPath, 'signatures');
+    for (const subProject of this.subProjects) {
+      if (!subProject.scanResult || subProject.scanResult.totalContracts === 0) {
+        continue;
+      }
 
-    const exportOptions: ExportOptions = {
-      formats: formats as any,
-      outputDir,
-      includeInternal,
-      includePrivate,
-      includeEvents: true,
-      includeErrors: true,
-      separateByCategory: true,
-      updateExisting: true,
-      deduplicateSignatures: true,
-    };
+      // Create signatures folder in each subproject
+      const outputDir = path.join(subProject.path, 'signatures');
 
-    try {
-      await this.exporter.exportSignatures(this.lastScanResult, exportOptions);
-    } catch (error) {
-      console.error('Auto-export error:', error);
+      const exportOptions: ExportOptions = {
+        formats: formats as any,
+        outputDir,
+        includeInternal,
+        includePrivate,
+        includeEvents: true,
+        includeErrors: true,
+        separateByCategory: true,
+        updateExisting: true,
+        deduplicateSignatures: true,
+      };
+
+      try {
+        await this.exporter.exportSignatures(subProject.scanResult, exportOptions);
+      } catch (error) {
+        console.error(`Auto-export error for ${subProject.path}:`, error);
+      }
     }
   }
 
   /**
-   * Export signatures to files
+   * Auto-export signatures with default settings (legacy - uses combined result)
+   */
+  private async autoExportSignatures(): Promise<void> {
+    // Use subprojects export instead
+    await this.autoExportSignaturesToSubProjects();
+  }
+
+  /**
+   * Export signatures to files (exports to each subproject)
    */
   public async exportSignatures(): Promise<void> {
     if (!this.lastScanResult) {
@@ -159,32 +178,36 @@ export class SigScanManager {
     const includeInternal = !config.get<boolean>('excludeInternal', true);
     const includePrivate = !config.get<boolean>('excludePrivate', true);
 
-    // Use the project root path from scan result (where foundry.toml or hardhat.config.js exists)
-    const outputDir = path.join(this.lastScanResult.projectInfo.rootPath, 'signatures');
-
-    const exportOptions: ExportOptions = {
-      formats: formats as any,
-      outputDir,
-      includeInternal,
-      includePrivate,
-      includeEvents: true,
-      includeErrors: true,
-      separateByCategory: true,
-      updateExisting: true,
-      deduplicateSignatures: true,
-    };
-
     try {
-      await this.exporter.exportSignatures(this.lastScanResult, exportOptions);
+      // Export to each subproject
+      const exportedDirs: string[] = [];
 
-      const openFolder = await vscode.window.showInformationMessage(
-        'Signatures exported successfully!',
-        'Open Folder'
-      );
+      for (const subProject of this.subProjects) {
+        if (!subProject.scanResult || subProject.scanResult.totalContracts === 0) {
+          continue;
+        }
 
-      if (openFolder) {
-        vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(outputDir));
+        const outputDir = path.join(subProject.path, 'signatures');
+
+        const exportOptions: ExportOptions = {
+          formats: formats as any,
+          outputDir,
+          includeInternal,
+          includePrivate,
+          includeEvents: true,
+          includeErrors: true,
+          separateByCategory: true,
+          updateExisting: true,
+          deduplicateSignatures: true,
+        };
+
+        await this.exporter.exportSignatures(subProject.scanResult, exportOptions);
+        exportedDirs.push(outputDir);
       }
+
+      vscode.window.showInformationMessage(
+        `Signatures exported to ${exportedDirs.length} project(s)!`
+      );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       vscode.window.showErrorMessage(`Error exporting signatures: ${errorMessage}`);
