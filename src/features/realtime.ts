@@ -1,10 +1,18 @@
 /**
  * Real-time Analysis - Live gas profiling and diagnostics during code editing
  * Solc-only model: Shows signatures immediately, gas estimates when solc completes
+ *
+ * Architecture (mirrors Remix):
+ * - Solidity-specific logic is isolated
+ * - Compiler lifecycle is centralized via SolcManager
+ * - UI never triggers compilation directly
+ * - Every expensive operation is cached and debounced
  */
 
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { EventEmitter } from 'events';
 import { GasEstimator, GasEstimate } from './gas';
 import { ContractSizeAnalyzer, ContractSizeInfo } from './size';
@@ -15,6 +23,10 @@ import { CallGraphAnalyzer, CallGraph } from './call-graph';
 import { DeploymentCostEstimator, DeploymentCost } from './deployment';
 import { GasRegressionTracker, RegressionReport } from './regression';
 import { RuntimeProfiler, ProfilerReport } from './profiler';
+
+// New Remix-style compilation system
+import { GasInfo, CompilationOutput } from './SolcManager';
+import { compilationService, CompilationResult } from './compilation-service';
 
 export interface LiveAnalysis {
   gasEstimates: Map<string, GasEstimate>;
@@ -28,12 +40,21 @@ export interface LiveAnalysis {
   deploymentCost?: DeploymentCost;
   regressionReport?: RegressionReport;
   profilerReport?: ProfilerReport;
+  // New Remix-style gas info with AST locations
+  gasInfo?: GasInfo[];
 }
 
 // Event emitted when solc analysis completes
 export interface AnalysisReadyEvent {
   uri: string;
   analysis: LiveAnalysis;
+}
+
+// Event emitted when Remix-style compilation completes
+export interface RemixCompilationEvent {
+  uri: string;
+  output: CompilationOutput;
+  gasInfo: GasInfo[];
 }
 
 export class RealtimeAnalyzer extends EventEmitter {
@@ -483,6 +504,7 @@ export class RealtimeAnalyzer extends EventEmitter {
         complexityMetrics: new Map(),
         diagnostics,
         isPending: false,
+        gasInfo: [], // Will be populated by Remix-style analysis
       };
 
       this.solcResultsCache.set(contentHash, analysis);
@@ -499,6 +521,178 @@ export class RealtimeAnalyzer extends EventEmitter {
       this.activeSolcCompilations.set(uri, false);
       this.analysisInProgress = false;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW REMIX-STYLE COMPILATION SYSTEM
+  // Uses SolcManager for centralized compiler lifecycle
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Compile document using Remix-style system (AST-based gas mapping)
+   * Returns GasInfo with source locations for inline decorations
+   *
+   * This is the preferred method for new integrations.
+   * Uses the centralized CompilationService for caching and debouncing.
+   */
+  public async compileRemixStyle(
+    document: vscode.TextDocument,
+    trigger: 'file-save' | 'file-open' | 'optimizer-change' | 'pragma-change' | 'manual' = 'manual'
+  ): Promise<CompilationResult> {
+    const uri = document.uri.toString();
+    const source = document.getText();
+
+    // Use the centralized compilation service
+    const result = await compilationService.compile(uri, source, trigger, (importPath) => {
+      // Import resolver
+      return this.resolveImport(importPath, document);
+    });
+
+    // Emit event for UI update
+    if (result.success && result.gasInfo.length > 0) {
+      this.emit('remixCompilationReady', {
+        uri,
+        output: result,
+        gasInfo: result.gasInfo,
+      } as RemixCompilationEvent);
+    }
+
+    return result;
+  }
+
+  /**
+   * Get Remix-style gas info for a document
+   * Returns cached result if available
+   */
+  public getRemixGasInfo(document: vscode.TextDocument): GasInfo[] {
+    return compilationService.getGasInfo(document.uri.toString());
+  }
+
+  /**
+   * Resolve import path for solc compilation
+   */
+  private resolveImport(
+    importPath: string,
+    document: vscode.TextDocument
+  ): { contents: string } | { error: string } {
+    try {
+      const dir = path.dirname(document.uri.fsPath);
+      let fullPath = path.resolve(dir, importPath);
+
+      if (fs.existsSync(fullPath)) {
+        return { contents: fs.readFileSync(fullPath, 'utf-8') };
+      }
+
+      // Try node_modules
+      fullPath = path.resolve(dir, 'node_modules', importPath);
+      if (fs.existsSync(fullPath)) {
+        return { contents: fs.readFileSync(fullPath, 'utf-8') };
+      }
+
+      // Try lib folder (Foundry style)
+      fullPath = path.resolve(dir, 'lib', importPath);
+      if (fs.existsSync(fullPath)) {
+        return { contents: fs.readFileSync(fullPath, 'utf-8') };
+      }
+
+      // Look for workspace folder
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+      if (workspaceFolder) {
+        const wsPath = workspaceFolder.uri.fsPath;
+        const libPaths = [
+          path.resolve(wsPath, 'node_modules', importPath),
+          path.resolve(wsPath, 'lib', importPath),
+          path.resolve(wsPath, 'contracts', importPath),
+        ];
+
+        for (const libPath of libPaths) {
+          if (fs.existsSync(libPath)) {
+            return { contents: fs.readFileSync(libPath, 'utf-8') };
+          }
+        }
+      }
+
+      console.warn(`Import not found: ${importPath}`);
+      return { error: `Import not found: ${importPath}` };
+    } catch (error) {
+      return { error: `Failed to read import: ${importPath}` };
+    }
+  }
+
+  /**
+   * Update compiler optimizer settings
+   */
+  public updateCompilerSettings(settings: {
+    optimizer?: { enabled: boolean; runs: number };
+    evmVersion?: string;
+    viaIR?: boolean;
+  }): void {
+    compilationService.updateSettings(settings);
+  }
+
+  /**
+   * Get current compiler settings
+   */
+  public getCompilerSettings(): {
+    optimizer?: { enabled: boolean; runs: number };
+    evmVersion?: string;
+    viaIR?: boolean;
+  } {
+    return compilationService.getSettings();
+  }
+
+  /**
+   * Get compilation statistics
+   */
+  public getCompilationStats(): {
+    cacheSize: number;
+    cachedVersions: string[];
+    pendingCompilations: number;
+  } {
+    return compilationService.getStats();
+  }
+
+  /**
+   * Convert GasInfo to GasEstimate for backwards compatibility
+   */
+  public gasInfoToEstimate(info: GasInfo): GasEstimate {
+    const gasValue = info.gas === 'infinite' ? 'infinite' : info.gas;
+
+    return {
+      function: info.name,
+      signature: info.name + '(...)', // Simplified - full signature requires AST
+      selector: info.selector,
+      estimatedGas: {
+        min: gasValue,
+        max: gasValue,
+        average: gasValue,
+      },
+      complexity: this.classifyGasComplexity(info.gas),
+      factors: info.warnings.length > 0 ? info.warnings : ['Standard execution'],
+      warning: info.warnings.length > 0 ? info.warnings[0] : undefined,
+      source: 'solc',
+    };
+  }
+
+  /**
+   * Classify complexity based on gas value
+   */
+  private classifyGasComplexity(
+    gas: number | 'infinite'
+  ): 'low' | 'medium' | 'high' | 'very-high' | 'unbounded' {
+    if (gas === 'infinite') {
+      return 'unbounded';
+    }
+    if (gas < 50_000) {
+      return 'low';
+    }
+    if (gas < 150_000) {
+      return 'medium';
+    }
+    if (gas < 500_000) {
+      return 'high';
+    }
+    return 'very-high';
   }
 
   /**
@@ -521,6 +715,9 @@ export class RealtimeAnalyzer extends EventEmitter {
     this.analysisCache.clear();
     this.solcResultsCache.clear();
     this.signatureCache.clear();
+
+    // Dispose compilation service
+    compilationService.dispose();
   }
 
   /**
@@ -907,6 +1104,102 @@ export class RealtimeAnalyzer extends EventEmitter {
         decorations.push(decoration);
       }
     });
+
+    return decorations;
+  }
+
+  /**
+   * Create Remix-style gas decorations from GasInfo (AST-based)
+   * Uses precise source locations from AST for accurate inline display
+   *
+   * This is the preferred method for new integrations.
+   */
+  public createRemixStyleDecorations(
+    gasInfo: GasInfo[],
+    document: vscode.TextDocument
+  ): vscode.DecorationOptions[] {
+    const decorations: vscode.DecorationOptions[] = [];
+
+    for (const info of gasInfo) {
+      // Line numbers are 1-based from AST, VS Code uses 0-based
+      const line = info.loc.line - 1;
+      if (line < 0 || line >= document.lineCount) {
+        continue;
+      }
+
+      // Get end of line for decoration position
+      const lineText = document.lineAt(line).text;
+      const endPos = new vscode.Position(line, lineText.length);
+      const startPos = new vscode.Position(line, 0);
+      const range = new vscode.Range(startPos, endPos);
+
+      // Format gas value
+      const gasText =
+        info.gas === 'infinite'
+          ? '∞'
+          : info.gas >= 1_000_000
+            ? `${(info.gas / 1_000_000).toFixed(2)}M`
+            : info.gas >= 1_000
+              ? `${(info.gas / 1_000).toFixed(1)}k`
+              : info.gas.toString();
+
+      // Get color based on gas
+      const color = this.getGasGradientColor(info.gas);
+
+      // Build decoration text with warnings
+      const warningText = info.warnings.length > 0 ? ' ' + info.warnings.join(' ') : '';
+      const decorationText = ` ⛽ ${gasText} gas | ${info.selector}${warningText}`;
+
+      // Build detailed hover message
+      const hoverMd = new vscode.MarkdownString();
+      hoverMd.isTrusted = true;
+      hoverMd.appendMarkdown(`### ⛽ Gas Analysis: \`${info.name}\`\n\n`);
+
+      if (info.gas === 'infinite') {
+        hoverMd.appendMarkdown('**Estimated Gas:** ∞ (unbounded)\n\n');
+        hoverMd.appendMarkdown('> ⚠️ This function has unbounded gas consumption.\n\n');
+      } else {
+        hoverMd.appendMarkdown(`**Estimated Gas:** ${info.gas.toLocaleString()}\n\n`);
+
+        // Complexity classification
+        let complexity: string;
+        if (info.gas < 50_000) {
+          complexity = '🟢 Low';
+        } else if (info.gas < 150_000) {
+          complexity = '🟡 Medium';
+        } else if (info.gas < 500_000) {
+          complexity = '🟠 High';
+        } else {
+          complexity = '🔴 Very High';
+        }
+        hoverMd.appendMarkdown(`**Complexity:** ${complexity}\n\n`);
+      }
+
+      hoverMd.appendMarkdown(`**Selector:** \`${info.selector}\`\n\n`);
+      hoverMd.appendMarkdown(
+        `**Visibility:** ${info.visibility} | **Mutability:** ${info.stateMutability}\n\n`
+      );
+
+      if (info.warnings.length > 0) {
+        hoverMd.appendMarkdown('---\n\n**Warnings:**\n\n');
+        for (const warning of info.warnings) {
+          hoverMd.appendMarkdown(`- ${warning}\n`);
+        }
+      }
+
+      decorations.push({
+        range,
+        renderOptions: {
+          after: {
+            contentText: decorationText,
+            color,
+            fontStyle: 'normal',
+            margin: '0 0 0 0.5em',
+          },
+        },
+        hoverMessage: hoverMd,
+      });
+    }
 
     return decorations;
   }

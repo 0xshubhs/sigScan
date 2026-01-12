@@ -7,10 +7,16 @@ let signatureTreeProvider: SignatureTreeProvider;
 
 import { RealtimeAnalyzer, AnalysisReadyEvent } from '../features/realtime';
 
+// New Remix-style compilation imports
+import { compilationService } from '../features/compilation-service';
+import { GasDecorationManager } from '../features/gas-decorations';
+
 let realtimeAnalyzer: RealtimeAnalyzer;
 let gasDecorationType: vscode.TextEditorDecorationType;
 let complexityDecorationType: vscode.TextEditorDecorationType;
+let remixGasDecorationType: vscode.TextEditorDecorationType;
 let statusBarItem: vscode.StatusBarItem;
+let gasDecorationManager: GasDecorationManager;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('SigScan extension is now active!');
@@ -23,9 +29,18 @@ export function activate(context: vscode.ExtensionContext) {
   const diagnosticCollection = vscode.languages.createDiagnosticCollection('sigscan');
   realtimeAnalyzer = new RealtimeAnalyzer(diagnosticCollection);
 
+  // Initialize Remix-style gas decoration manager
+  gasDecorationManager = GasDecorationManager.getInstance(300); // 300ms debounce
+
   // Create decoration types for gas and complexity hints
   gasDecorationType = vscode.window.createTextEditorDecorationType({});
   complexityDecorationType = vscode.window.createTextEditorDecorationType({});
+  remixGasDecorationType = vscode.window.createTextEditorDecorationType({
+    after: {
+      color: '#6A9955',
+      margin: '0 0 0 1em',
+    },
+  });
 
   // Create status bar item
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -36,6 +51,42 @@ export function activate(context: vscode.ExtensionContext) {
   if (initialConfig.get('realtimeAnalysis', true)) {
     statusBarItem.show();
   }
+
+  // Listen for Remix-style compilation events
+  compilationService.on('compilation:start', ({ uri, version }) => {
+    console.log(`🔄 Compiling ${uri} with solc ${version}...`);
+    statusBarItem.text = '$(sync~spin) Compiling...';
+  });
+
+  compilationService.on('compilation:success', ({ uri, output }) => {
+    console.log(`✅ Compilation successful: ${output.gasInfo.length} functions analyzed`);
+    statusBarItem.text = '$(flame) Gas Analysis';
+
+    // Update decorations for the active editor
+    const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri);
+    if (editor && output.gasInfo.length > 0) {
+      const decorations = realtimeAnalyzer.createRemixStyleDecorations(
+        output.gasInfo,
+        editor.document
+      );
+      editor.setDecorations(gasDecorationType, decorations);
+    }
+  });
+
+  compilationService.on('compilation:error', ({ errors }) => {
+    console.error(`❌ Compilation failed: ${errors[0]}`);
+    statusBarItem.text = '$(flame) Gas Analysis';
+  });
+
+  compilationService.on('version:downloading', ({ version }) => {
+    statusBarItem.text = `$(cloud-download) Downloading solc ${version}...`;
+    vscode.window.setStatusBarMessage(`Downloading Solidity compiler ${version}...`, 5000);
+  });
+
+  compilationService.on('version:ready', ({ version }) => {
+    statusBarItem.text = '$(flame) Gas Analysis';
+    vscode.window.setStatusBarMessage(`Solidity compiler ${version} ready`, 3000);
+  });
 
   // Register tree view
   const treeView = vscode.window.createTreeView('sigScanExplorer', {
@@ -464,6 +515,7 @@ export function activate(context: vscode.ExtensionContext) {
     diagnosticCollection,
     gasDecorationType,
     complexityDecorationType,
+    remixGasDecorationType,
     statusBarItem,
     storageLayoutCommand,
     callGraphCommand,
@@ -487,4 +539,11 @@ export function deactivate() {
   if (sigScanManager) {
     sigScanManager.dispose();
   }
+  if (realtimeAnalyzer) {
+    realtimeAnalyzer.dispose();
+  }
+  if (gasDecorationManager) {
+    gasDecorationManager.dispose();
+  }
+  compilationService.dispose();
 }
