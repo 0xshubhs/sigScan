@@ -2,7 +2,7 @@
   "name": "sigscan",
   "displayName": "SigScan - Smart Contract Signature Scanner",
   "description": "Automatically scan and generate method signatures for Solidity contracts in Foundry/Hardhat projects",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "publisher": "0xshubhs",
   "icon": "icon.png",
   "engines": {

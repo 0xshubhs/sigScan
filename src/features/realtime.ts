@@ -1,12 +1,11 @@
 /**
  * Real-time Analysis - Live gas profiling and diagnostics during code editing
- * Two-tier analysis model:
- * - Tier 1: Instant heuristic analysis (<5ms)
- * - Tier 2: Full solc compilation after idle timeout (cancelable)
+ * Solc-only model: Shows signatures immediately, gas estimates when solc completes
  */
 
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import { EventEmitter } from 'events';
 import { GasEstimator, GasEstimate } from './gas';
 import { ContractSizeAnalyzer, ContractSizeInfo } from './size';
 import { ComplexityAnalyzer, ComplexityMetrics } from './complexity';
@@ -22,6 +21,7 @@ export interface LiveAnalysis {
   sizeInfo: ContractSizeInfo | null;
   complexityMetrics: Map<string, ComplexityMetrics>;
   diagnostics: vscode.Diagnostic[];
+  isPending?: boolean; // True if solc hasn't completed yet (showing signatures only)
   // Extended analysis (computed on-demand for performance)
   storageLayout?: StorageLayout;
   callGraph?: CallGraph;
@@ -30,14 +30,21 @@ export interface LiveAnalysis {
   profilerReport?: ProfilerReport;
 }
 
-export class RealtimeAnalyzer {
+// Event emitted when solc analysis completes
+export interface AnalysisReadyEvent {
+  uri: string;
+  analysis: LiveAnalysis;
+}
+
+export class RealtimeAnalyzer extends EventEmitter {
   private solcGasEstimator: GasEstimator; // Accurate, solc-based
   private sizeAnalyzer: ContractSizeAnalyzer;
   private complexityAnalyzer: ComplexityAnalyzer;
   private parser: SolidityParser;
   private diagnosticCollection: vscode.DiagnosticCollection;
   private analysisCache: Map<string, { timestamp: number; analysis: LiveAnalysis }>;
-  private contentHashCache: Map<string, LiveAnalysis>; // Hash-based cache for solc results
+  private solcResultsCache: Map<string, LiveAnalysis>; // Hash-based cache for solc results
+  private signatureCache: Map<string, LiveAnalysis>; // Signature-only cache (no gas)
   private idleTimers: Map<string, NodeJS.Timeout>; // Per-document idle timers
   private activeSolcCompilations: Map<string, boolean>; // Track active compilations to cancel
   private analysisInProgress = false; // Global flag to prevent parallel heavy operations
@@ -55,14 +62,16 @@ export class RealtimeAnalyzer {
   private runtimeProfiler: RuntimeProfiler;
 
   constructor(diagnosticCollection: vscode.DiagnosticCollection) {
-    // Solc estimator (accurate, always enabled)
+    super(); // Initialize EventEmitter
+    // Solc estimator (accurate, the ONLY estimator)
     this.solcGasEstimator = new GasEstimator(true);
     this.sizeAnalyzer = new ContractSizeAnalyzer();
     this.complexityAnalyzer = new ComplexityAnalyzer();
     this.parser = new SolidityParser();
     this.diagnosticCollection = diagnosticCollection;
     this.analysisCache = new Map();
-    this.contentHashCache = new Map();
+    this.solcResultsCache = new Map();
+    this.signatureCache = new Map();
     this.idleTimers = new Map();
     this.activeSolcCompilations = new Map();
 
@@ -75,7 +84,7 @@ export class RealtimeAnalyzer {
   }
 
   /**
-   * Analyze document on file open - immediately runs solc (no wait)
+   * Analyze document on file open - returns signatures immediately, runs solc in background
    */
   public async analyzeDocumentOnOpen(document: vscode.TextDocument): Promise<LiveAnalysis> {
     const content = document.getText();
@@ -85,38 +94,137 @@ export class RealtimeAnalyzer {
     // Clear old cache for this file
     this.analysisCache.delete(uri);
 
-    // Check hash-based cache first (exact content match)
-    const hashCached = this.contentHashCache.get(contentHash);
-    if (hashCached) {
-      return hashCached;
+    // Check if we have cached solc results (from previous compilation)
+    const solcCached = this.solcResultsCache.get(contentHash);
+    if (solcCached && !solcCached.isPending) {
+      return solcCached;
     }
 
-    // Run solc analysis immediately and wait for results
-    const solcAnalysis = await this.runSolcAnalysisSync(document, contentHash);
+    // Return immediate signature-only analysis (no gas yet)
+    const signatureAnalysis = this.createSignatureOnlyAnalysis(document, contentHash);
 
-    // Set up background compiler download with re-compilation callback
-    this.setupCompilerUpgrade(document);
+    // Start solc compilation IMMEDIATELY in background (non-blocking)
+    setImmediate(() => {
+      this.runSolcAnalysis(document, contentHash).catch((err) => {
+        console.error('Background solc compilation failed:', err);
+      });
+    });
 
-    return solcAnalysis;
+    return signatureAnalysis;
   }
 
   /**
-   * Analyze document on change - runs solc immediately
+   * Analyze document on change - returns cached results or signatures, schedules solc
    */
   public async analyzeDocumentOnChange(document: vscode.TextDocument): Promise<LiveAnalysis> {
     const content = document.getText();
     const contentHash = this.hashContent(content);
 
-    // Check hash-based cache first (exact content match)
-    const hashCached = this.contentHashCache.get(contentHash);
-    if (hashCached) {
-      return hashCached;
+    // Check if we have cached solc results
+    const solcCached = this.solcResultsCache.get(contentHash);
+    if (solcCached && !solcCached.isPending) {
+      return solcCached;
     }
 
-    // Run solc analysis immediately and wait for results
-    const solcAnalysis = await this.runSolcAnalysisSync(document, contentHash);
+    // Return signature-only analysis
+    const signatureAnalysis = this.createSignatureOnlyAnalysis(document, contentHash);
 
-    return solcAnalysis;
+    // Schedule solc analysis after idle timeout
+    this.scheduleIdleSolcAnalysis(document, contentHash);
+
+    return signatureAnalysis;
+  }
+
+  /**
+   * Get cached analysis without triggering new analysis - for hover provider
+   * Returns null if no cached analysis exists
+   */
+  public getCachedAnalysis(document: vscode.TextDocument): LiveAnalysis | null {
+    const content = document.getText();
+    const contentHash = this.hashContent(content);
+
+    // Check solc cache first (has gas data)
+    const solcCached = this.solcResultsCache.get(contentHash);
+    if (solcCached && !solcCached.isPending) {
+      return solcCached;
+    }
+
+    // Fall back to signature cache (no gas, but has selectors)
+    const sigCached = this.signatureCache.get(contentHash);
+    if (sigCached) {
+      return sigCached;
+    }
+
+    return null;
+  }
+
+  /**
+   * Create signature-only analysis (instant, no solc needed)
+   * Shows function signatures and selectors immediately
+   */
+  private createSignatureOnlyAnalysis(
+    document: vscode.TextDocument,
+    contentHash: string
+  ): LiveAnalysis {
+    // Check signature cache first
+    const cached = this.signatureCache.get(contentHash);
+    if (cached) {
+      return cached;
+    }
+
+    const content = document.getText();
+    const contractInfo = this.parser.parseContent(content, document.uri.fsPath);
+
+    if (!contractInfo) {
+      return this.createEmptyAnalysis(true);
+    }
+
+    const gasEstimates = new Map<string, GasEstimate>();
+
+    // Create signature-only estimates (no gas yet - use 0 as placeholder)
+    for (const func of contractInfo.functions) {
+      const estimate: GasEstimate = {
+        function: func.name,
+        signature: func.signature,
+        selector: func.selector,
+        estimatedGas: { min: 0, max: 0, average: 0 },
+        complexity: 'low',
+        factors: ['Waiting for solc...'],
+        source: 'heuristic',
+      };
+      gasEstimates.set(func.name, estimate);
+    }
+
+    const analysis: LiveAnalysis = {
+      gasEstimates,
+      sizeInfo: null,
+      complexityMetrics: new Map(),
+      diagnostics: [],
+      isPending: true,
+    };
+
+    // Cache signature results
+    this.signatureCache.set(contentHash, analysis);
+
+    return analysis;
+  }
+
+  /**
+   * Schedule solc analysis - deprecated, use scheduleIdleSolcAnalysis
+   * @deprecated Use scheduleIdleSolcAnalysis instead for proper debouncing
+   */
+  private scheduleBackgroundSolcAnalysis(document: vscode.TextDocument, contentHash: string): void {
+    this.scheduleIdleSolcAnalysis(document, contentHash);
+  }
+
+  /**
+   * Run solc analysis in background - deprecated wrapper
+   */
+  private async runSolcAnalysisBackground(
+    document: vscode.TextDocument,
+    contentHash: string
+  ): Promise<void> {
+    await this.runSolcAnalysis(document, contentHash);
   }
 
   /**
@@ -124,7 +232,6 @@ export class RealtimeAnalyzer {
    * @deprecated Use analyzeDocumentOnOpen or analyzeDocumentOnChange
    */
   public async analyzeDocument(document: vscode.TextDocument): Promise<LiveAnalysis> {
-    // Default to onChange behavior for backward compatibility
     return this.analyzeDocumentOnChange(document);
   }
 
@@ -141,7 +248,7 @@ export class RealtimeAnalyzer {
   private scheduleIdleSolcAnalysis(document: vscode.TextDocument, contentHash: string): void {
     const uri = document.uri.toString();
     const config = vscode.workspace.getConfiguration('sigscan');
-    const idleMs = config.get<number>('realtime.solcIdleMs', 10000);
+    const idleMs = config.get<number>('realtime.solcIdleMs', 1000); // 1 second default
 
     // Cancel previous timer
     const existingTimer = this.idleTimers.get(uri);
@@ -151,12 +258,14 @@ export class RealtimeAnalyzer {
 
     // Cancel any active compilation for this document
     if (this.activeSolcCompilations.get(uri)) {
-      this.activeSolcCompilations.set(uri, false); // Signal cancellation
+      this.activeSolcCompilations.set(uri, false);
     }
 
     // Schedule new timer
     const timer = setTimeout(async () => {
-      await this.runSolcAnalysis(document, contentHash);
+      if (this.hashContent(document.getText()) === contentHash) {
+        await this.runSolcAnalysis(document, contentHash);
+      }
     }, idleMs);
 
     this.idleTimers.set(uri, timer);
@@ -180,159 +289,18 @@ export class RealtimeAnalyzer {
       this.activeSolcCompilations.set(uri, false);
     }
 
-    // Run solc analysis immediately
     await this.runSolcAnalysis(document, contentHash);
   }
 
   /**
-   * Run solc analysis synchronously and return results
-   * Compiles once but shows results progressively
+   * Run solc analysis synchronously and return results (legacy wrapper)
    */
   private async runSolcAnalysisSync(
     document: vscode.TextDocument,
     contentHash: string
   ): Promise<LiveAnalysis> {
-    const uri = document.uri.toString();
-    const content = document.getText();
-
-    // Mark as active
-    this.activeSolcCompilations.set(uri, true);
-    this.analysisInProgress = true;
-
-    try {
-      // Parse contract
-      const contractInfo = this.parser.parseFile(document.uri.fsPath);
-      if (!contractInfo) {
-        return this.createEmptyAnalysis();
-      }
-
-      const gasEstimates = new Map<string, GasEstimate>();
-      const diagnostics: vscode.Diagnostic[] = [];
-
-      // Compile once to get all gas estimates from solc
-      console.log(`📊 Compiling ${contractInfo.name} with solc...`);
-      const compileResult = await this.solcGasEstimator.estimateContractGas(
-        content,
-        contractInfo.functions,
-        document.uri.fsPath
-      );
-
-      // Create a map of function name to gas estimate
-      const gasEstimateMap = new Map<string, GasEstimate>();
-      for (const estimate of compileResult) {
-        const funcName = estimate.signature.split('(')[0];
-        gasEstimateMap.set(funcName, estimate);
-      }
-
-      // Now process each function and show results progressively
-      let processedCount = 0;
-      for (const func of contractInfo.functions) {
-        // Check if cancelled
-        if (!this.activeSolcCompilations.get(uri)) {
-          console.log('Solc analysis cancelled for', uri);
-          return this.createEmptyAnalysis();
-        }
-
-        // Get the gas estimate for this function
-        const gasEstimate = gasEstimateMap.get(func.name);
-
-        if (gasEstimate) {
-          processedCount++;
-          console.log(
-            `✅ [${processedCount}/${contractInfo.functions.length}] ${func.name}: ${gasEstimate.estimatedGas.average} gas`
-          );
-
-          gasEstimates.set(func.name, gasEstimate);
-
-          // Add diagnostics for high gas functions
-          const avgGas = gasEstimate.estimatedGas.average;
-          const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
-
-          if (
-            gasEstimate.complexity === 'high' ||
-            gasEstimate.complexity === 'very-high' ||
-            gasEstimate.complexity === 'unbounded'
-          ) {
-            const funcPattern =
-              func.name === 'constructor'
-                ? new RegExp(`constructor\\s*\\([^)]*\\)`, 's')
-                : new RegExp(`function\\s+${func.name}\\s*\\([^)]*\\)`, 's');
-            const match = content.match(funcPattern);
-
-            if (match) {
-              const functionStart = content.indexOf(match[0]);
-              const lines = content.substring(0, functionStart).split('\n').length - 1;
-
-              const diagnostic = new vscode.Diagnostic(
-                new vscode.Range(lines, 0, lines, 1000),
-                `High gas cost (${avgGasString} gas): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
-                gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
-                  ? vscode.DiagnosticSeverity.Warning
-                  : vscode.DiagnosticSeverity.Information
-              );
-              diagnostic.source = 'SigScan Gas';
-              diagnostics.push(diagnostic);
-            }
-          }
-
-          // Update diagnostics progressively (every 3 functions or last one)
-          if (processedCount % 3 === 0 || processedCount === contractInfo.functions.length) {
-            this.diagnosticCollection.set(document.uri, diagnostics);
-          }
-        } else {
-          console.log(
-            `⚠️  [${processedCount + 1}/${contractInfo.functions.length}] ${func.name}: No gas estimate available`
-          );
-        }
-      }
-
-      console.log(
-        `✨ Completed gas analysis for ${contractInfo.name} (${processedCount} functions)`
-      );
-
-      // Contract size analysis
-      const sizeInfo = this.sizeAnalyzer.analyzeContract(contractInfo.name, content);
-      if (sizeInfo.status === 'critical' || sizeInfo.status === 'too-large') {
-        const diagnostic = new vscode.Diagnostic(
-          new vscode.Range(0, 0, 0, 1000),
-          `Contract size ${sizeInfo.sizeInKB} KB (${sizeInfo.percentage}% of 24KB limit): ${sizeInfo.recommendations[0]}`,
-          sizeInfo.status === 'too-large'
-            ? vscode.DiagnosticSeverity.Error
-            : vscode.DiagnosticSeverity.Warning
-        );
-        diagnostic.source = 'SigScan Size';
-        diagnostics.push(diagnostic);
-      }
-
-      // Set diagnostics
-      this.diagnosticCollection.set(document.uri, diagnostics);
-
-      // Create analysis result
-      const analysis: LiveAnalysis = {
-        gasEstimates,
-        sizeInfo,
-        complexityMetrics: new Map(),
-        diagnostics,
-      };
-
-      // Cache the result
-      this.contentHashCache.set(contentHash, analysis);
-
-      // Automatically run extended analysis if resources available
-      setImmediate(() => {
-        this.runExtendedAnalysisIfAvailable(document).catch((err) => {
-          console.error('Auto extended analysis failed:', err);
-        });
-      });
-
-      return analysis;
-    } catch (error) {
-      console.error('Solc analysis error:', error);
-      return this.createEmptyAnalysis();
-    } finally {
-      this.activeSolcCompilations.set(uri, false);
-      this.analysisInProgress = false;
-    }
+    await this.runSolcAnalysis(document, contentHash);
+    return this.solcResultsCache.get(contentHash) || this.createEmptyAnalysis();
   }
 
   /**
@@ -418,95 +386,116 @@ export class RealtimeAnalyzer {
   }
 
   /**
-   * Tier 2: Accurate solc analysis (runs after idle timeout)
+   * Solc analysis - compiles the contract ONCE and extracts all gas estimates
+   * NEVER clears decorations - only updates them when we have new results
    */
   private async runSolcAnalysis(document: vscode.TextDocument, contentHash: string): Promise<void> {
     const uri = document.uri.toString();
     const content = document.getText();
 
+    // Check if already cached with gas results
+    const cached = this.solcResultsCache.get(contentHash);
+    if (cached && !cached.isPending) {
+      return; // Already have solc results
+    }
+
     // Mark as active
     this.activeSolcCompilations.set(uri, true);
-    this.analysisInProgress = true; // Global flag for heavy operations
+    this.analysisInProgress = true;
 
     try {
-      // Parse contract
-      const contractInfo = this.parser.parseFile(document.uri.fsPath);
+      // Parse contract using in-memory content
+      const contractInfo = this.parser.parseContent(content, document.uri.fsPath);
       if (!contractInfo) {
         return;
       }
 
+      // Check if cancelled before expensive operation
+      if (!this.activeSolcCompilations.get(uri)) {
+        console.log('Solc analysis cancelled before compilation for', uri);
+        return;
+      }
+
+      console.log(`📊 Starting solc compilation for ${contractInfo.name}...`);
+
+      // SINGLE compilation for the whole contract
       const gasEstimates = new Map<string, GasEstimate>();
       const diagnostics: vscode.Diagnostic[] = [];
 
-      // Analyze each function with solc
-      for (const func of contractInfo.functions) {
-        // Check if cancelled
-        if (!this.activeSolcCompilations.get(uri)) {
-          console.log('Solc analysis cancelled for', uri);
-          return;
-        }
+      const compileResult = await this.solcGasEstimator.estimateContractGas(
+        content,
+        contractInfo.functions,
+        document.uri.fsPath
+      );
 
-        const isConstructor = func.name === 'constructor';
-        const funcPattern = isConstructor
-          ? new RegExp(`constructor\\\\s*\\\\([^)]*\\\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`, 's')
-          : new RegExp(
-              `function\\\\s+${func.name}\\\\s*\\\\([^)]*\\\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`,
-              's'
-            );
-        const match = content.match(funcPattern);
+      // Check if cancelled after compilation
+      if (!this.activeSolcCompilations.get(uri)) {
+        console.log('Solc analysis cancelled after compilation for', uri);
+        return;
+      }
 
-        if (match && match[1]) {
-          const functionBody = match[1];
-          const functionStart = content.indexOf(match[0]);
-          const lines = content.substring(0, functionStart).split('\\n').length - 1;
+      // Process results
+      for (const estimate of compileResult) {
+        const funcName = estimate.signature.split('(')[0];
+        gasEstimates.set(funcName, estimate);
 
-          // Tier 2: Accurate solc gas estimation
-          const gasEstimate = await this.solcGasEstimator.estimateGas(
-            functionBody,
-            func.signature,
-            document.uri.fsPath,
-            content
-          );
+        // Add diagnostics for high gas functions
+        const avgGas = estimate.estimatedGas.average;
+        const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
 
-          gasEstimates.set(func.name, gasEstimate);
+        if (
+          estimate.complexity === 'high' ||
+          estimate.complexity === 'very-high' ||
+          estimate.complexity === 'unbounded'
+        ) {
+          const funcPattern =
+            funcName === 'constructor'
+              ? /constructor\s*\([^)]*\)/s
+              : new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)`, 's');
+          const match = content.match(funcPattern);
 
-          // Add diagnostics for high gas functions
-          const avgGas = gasEstimate.estimatedGas.average;
-          const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+          if (match) {
+            const functionStart = content.indexOf(match[0]);
+            const lines = content.substring(0, functionStart).split('\n').length - 1;
 
-          if (
-            gasEstimate.complexity === 'high' ||
-            gasEstimate.complexity === 'very-high' ||
-            gasEstimate.complexity === 'unbounded'
-          ) {
             const diagnostic = new vscode.Diagnostic(
               new vscode.Range(lines, 0, lines, 1000),
-              `High gas cost (${avgGasString} gas - solc): ${gasEstimate.warning || gasEstimate.factors.join(', ')}`,
-              gasEstimate.complexity === 'very-high' || gasEstimate.complexity === 'unbounded'
+              `High gas cost (${avgGasString} gas): ${estimate.warning || estimate.factors.join(', ')}`,
+              estimate.complexity === 'very-high' || estimate.complexity === 'unbounded'
                 ? vscode.DiagnosticSeverity.Warning
                 : vscode.DiagnosticSeverity.Information
             );
-            diagnostic.source = 'SigScan Gas (solc)';
+            diagnostic.source = 'SigScan Gas';
             diagnostics.push(diagnostic);
           }
         }
       }
 
+      console.log(`✅ Solc compilation complete: ${gasEstimates.size} functions analyzed`);
+
       // Update diagnostics
       this.diagnosticCollection.set(document.uri, diagnostics);
 
-      // Cache by content hash
+      // Cache by content hash - this is the complete analysis with gas
       const analysis: LiveAnalysis = {
         gasEstimates,
         sizeInfo: null,
         complexityMetrics: new Map(),
         diagnostics,
+        isPending: false,
       };
 
-      this.contentHashCache.set(contentHash, analysis);
-      this.analysisInProgress = false; // Mark as complete
+      this.solcResultsCache.set(contentHash, analysis);
+
+      // Emit event so extension.ts can update decorations
+      this.emit('analysisReady', {
+        uri,
+        analysis,
+      } as AnalysisReadyEvent);
+    } catch (error) {
+      console.error('Solc analysis error:', error);
+      // DON'T clear decorations on error - keep showing what we have
     } finally {
-      // Mark as inactive
       this.activeSolcCompilations.set(uri, false);
       this.analysisInProgress = false;
     }
@@ -530,7 +519,8 @@ export class RealtimeAnalyzer {
 
     // Clear caches
     this.analysisCache.clear();
-    this.contentHashCache.clear();
+    this.solcResultsCache.clear();
+    this.signatureCache.clear();
   }
 
   /**
@@ -542,6 +532,7 @@ export class RealtimeAnalyzer {
   ): vscode.InlayHint[] {
     const hints: vscode.InlayHint[] = [];
     const content = document.getText();
+    const isPending = analysis.isPending === true;
 
     analysis.gasEstimates.forEach((estimate, funcName) => {
       // Handle different types: modifiers, events, structs, constructors, functions
@@ -611,34 +602,46 @@ export class RealtimeAnalyzer {
           hintPos = document.positionAt(match.index + braceIndex + 1);
         }
 
-        // Create inlay hint with colored gas amount and hash
+        // Handle pending state
         const gasAmount = estimate.estimatedGas.average;
-        const gasAmountStr = gasAmount === 'infinite' ? '∞' : gasAmount.toLocaleString();
-        const minGasStr =
-          estimate.estimatedGas.min === 'infinite'
+        const hasPendingGas = isPending || gasAmount === 0;
+        const gasAmountStr = hasPendingGas
+          ? '...'
+          : gasAmount === 'infinite'
             ? '∞'
-            : estimate.estimatedGas.min.toLocaleString();
-        const maxGasStr =
-          estimate.estimatedGas.max === 'infinite'
+            : (gasAmount as number).toLocaleString();
+        const minGasStr = hasPendingGas
+          ? '...'
+          : estimate.estimatedGas.min === 'infinite'
             ? '∞'
-            : estimate.estimatedGas.max.toLocaleString();
+            : (estimate.estimatedGas.min as number).toLocaleString();
+        const maxGasStr = hasPendingGas
+          ? '...'
+          : estimate.estimatedGas.max === 'infinite'
+            ? '∞'
+            : (estimate.estimatedGas.max as number).toLocaleString();
 
-        const hint = new vscode.InlayHint(
-          hintPos,
-          ` ⛽ ${gasAmountStr} gas | ${estimate.selector} `,
-          vscode.InlayHintKind.Parameter
-        );
+        const hintText = hasPendingGas
+          ? ` ⏳ ${estimate.selector} | compiling... `
+          : ` ⛽ ${gasAmountStr} gas | ${estimate.selector} `;
+
+        const hint = new vscode.InlayHint(hintPos, hintText, vscode.InlayHintKind.Parameter);
 
         // Add tooltip with detailed info including signature
         hint.tooltip = new vscode.MarkdownString(
-          `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
-            `**Source**: ${estimate.source === 'solc' ? 'solc compiler' : 'Heuristic Analysis'}\n\n` +
-            `**Signature**: \`${estimate.signature}\`\n\n` +
-            `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
-            `**Average**: ${gasAmountStr} gas\n\n` +
-            `**Complexity**: ${estimate.complexity}\n\n` +
-            `**Factors**: ${estimate.factors.join(', ')}` +
-            (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
+          hasPendingGas
+            ? `**⏳ Compiling ${displayName}...**\n\n` +
+                `**Selector**: \`${estimate.selector}\`\n\n` +
+                `**Signature**: \`${estimate.signature}\`\n\n` +
+                `*Gas estimate pending - solc is compiling...*`
+            : `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
+                `**Source**: ${estimate.source === 'solc' ? 'solc compiler' : 'Analysis'}\n\n` +
+                `**Signature**: \`${estimate.signature}\`\n\n` +
+                `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
+                `**Average**: ${gasAmountStr} gas\n\n` +
+                `**Complexity**: ${estimate.complexity}\n\n` +
+                `**Factors**: ${estimate.factors.join(', ')}` +
+                (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
         );
 
         hints.push(hint);
@@ -769,6 +772,7 @@ export class RealtimeAnalyzer {
 
   /**
    * Create gas decorations with gradient colors (green to red)
+   * Shows selector immediately, gas when available
    */
   public createGasDecorations(
     analysis: LiveAnalysis,
@@ -776,6 +780,7 @@ export class RealtimeAnalyzer {
   ): vscode.DecorationOptions[] {
     const decorations: vscode.DecorationOptions[] = [];
     const content = document.getText();
+    const isPending = analysis.isPending === true;
 
     analysis.gasEstimates.forEach((estimate, funcName) => {
       // Handle different types: modifiers, events, structs, constructors, functions
@@ -843,36 +848,59 @@ export class RealtimeAnalyzer {
         }
 
         const gasAmount = estimate.estimatedGas.average;
-        const gasAmountStr = gasAmount === 'infinite' ? '∞' : gasAmount.toLocaleString();
-        const minGasStr =
-          estimate.estimatedGas.min === 'infinite'
+        // Handle pending state - show "..." instead of gas
+        const hasPendingGas = isPending || gasAmount === 0;
+        const gasAmountStr = hasPendingGas
+          ? '...'
+          : gasAmount === 'infinite'
             ? '∞'
-            : estimate.estimatedGas.min.toLocaleString();
-        const maxGasStr =
-          estimate.estimatedGas.max === 'infinite'
+            : (gasAmount as number).toLocaleString();
+        const minGasStr = hasPendingGas
+          ? '...'
+          : estimate.estimatedGas.min === 'infinite'
             ? '∞'
-            : estimate.estimatedGas.max.toLocaleString();
-        const color = this.getGasGradientColor(gasAmount);
+            : (estimate.estimatedGas.min as number).toLocaleString();
+        const maxGasStr = hasPendingGas
+          ? '...'
+          : estimate.estimatedGas.max === 'infinite'
+            ? '∞'
+            : (estimate.estimatedGas.max as number).toLocaleString();
+        const color = hasPendingGas ? '#9E9E9E' : this.getGasGradientColor(gasAmount);
+
+        // Calculate the start position for the hover range (function/constructor keyword)
+        const startPos = document.positionAt(match.index);
+        // The range should cover from function keyword to opening brace for hover to work
+        const hoverRange = new vscode.Range(startPos, hintPos);
+
+        // Build the decoration text - always show selector, gas when available
+        const decorationText = hasPendingGas
+          ? ` ⏳ ${estimate.selector} | compiling...`
+          : ` ⛽ ${gasAmountStr} gas | ${estimate.selector}`;
 
         const decoration: vscode.DecorationOptions = {
-          range: new vscode.Range(hintPos, hintPos),
+          range: hoverRange,
           renderOptions: {
             after: {
-              contentText: ` ⛽ ${gasAmountStr} gas | ${estimate.selector}`,
+              contentText: decorationText,
               color: color,
               fontStyle: 'normal',
               margin: '0 0 0 0.5em',
             },
           },
           hoverMessage: new vscode.MarkdownString(
-            `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
-              `**Source**: ${estimate.source === 'solc' ? 'solc Compiler' : 'Heuristic Analysis'}\n\n` +
-              `**Signature**: \`${estimate.signature}\`\n\n` +
-              `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
-              `**Average**: ${gasAmountStr} gas\n\n` +
-              `**Complexity**: ${estimate.complexity}\n\n` +
-              `**Factors**: ${estimate.factors.join(', ')}` +
-              (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
+            hasPendingGas
+              ? `**⏳ Compiling ${displayName}...**\n\n` +
+                  `**Selector**: \`${estimate.selector}\`\n\n` +
+                  `**Signature**: \`${estimate.signature}\`\n\n` +
+                  `*Gas estimate pending - solc is compiling...*`
+              : `**⛽ Gas Estimate for ${displayName} \`${estimate.selector}\`**\n\n` +
+                  `**Source**: ${estimate.source === 'solc' ? 'solc Compiler' : 'Analysis'}\n\n` +
+                  `**Signature**: \`${estimate.signature}\`\n\n` +
+                  `**Range**: ${minGasStr} - ${maxGasStr} gas\n\n` +
+                  `**Average**: ${gasAmountStr} gas\n\n` +
+                  `**Complexity**: ${estimate.complexity}\n\n` +
+                  `**Factors**: ${estimate.factors.join(', ')}` +
+                  (estimate.warning ? `\n\n⚠️ **Warning**: ${estimate.warning}` : '')
           ),
         };
 
@@ -1019,7 +1047,8 @@ export class RealtimeAnalyzer {
       this.analysisCache.delete(uri);
       const content = document.getText();
       const contentHash = this.hashContent(content);
-      this.contentHashCache.delete(contentHash);
+      this.solcResultsCache.delete(contentHash);
+      this.signatureCache.delete(contentHash);
 
       // Trigger re-analysis with new compiler
       await this.runSolcAnalysis(document, contentHash);
@@ -1033,12 +1062,13 @@ export class RealtimeAnalyzer {
     this.solcGasEstimator.triggerCompilerUpgrade(document.getText(), onUpgrade);
   }
 
-  private createEmptyAnalysis(): LiveAnalysis {
+  private createEmptyAnalysis(isPending = false): LiveAnalysis {
     return {
       gasEstimates: new Map(),
       sizeInfo: null,
       complexityMetrics: new Map(),
       diagnostics: [],
+      isPending,
     };
   }
 

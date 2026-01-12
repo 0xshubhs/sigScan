@@ -21,13 +21,23 @@ export class SolidityParser {
   public parseFile(filePath: string): ContractInfo | null {
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
+      return this.parseContent(content, filePath);
+    } catch (error) {
+      console.error(`Error parsing file ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Parse Solidity content directly (for real-time analysis without disk reads)
+   */
+  public parseContent(content: string, filePath: string): ContractInfo | null {
+    try {
       const contractName = this.extractContractName(content) || getContractNameFromPath(filePath);
 
       const functions = this.extractFunctions(content, contractName, filePath);
       const events = this.extractEvents(content, contractName, filePath);
       const errors = this.extractErrors(content, contractName, filePath);
-
-      const stats = fs.statSync(filePath);
 
       return {
         name: contractName,
@@ -35,11 +45,11 @@ export class SolidityParser {
         functions,
         events,
         errors,
-        lastModified: stats.mtime,
+        lastModified: new Date(),
         category: 'contracts', // Default category, will be updated by scanner
       };
     } catch (error) {
-      console.error(`Error parsing file ${filePath}:`, error);
+      console.error(`Error parsing content for ${filePath}:`, error);
       return null;
     }
   }

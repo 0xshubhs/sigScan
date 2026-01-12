@@ -5,7 +5,7 @@ import { SignatureTreeProvider } from './providers/treeProvider';
 let sigScanManager: SigScanManager;
 let signatureTreeProvider: SignatureTreeProvider;
 
-import { RealtimeAnalyzer } from '../features/realtime';
+import { RealtimeAnalyzer, AnalysisReadyEvent } from '../features/realtime';
 
 let realtimeAnalyzer: RealtimeAnalyzer;
 let gasDecorationType: vscode.TextEditorDecorationType;
@@ -139,17 +139,31 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   ];
 
-  // Register providers
+  // Register combined hover provider (uses cached analysis to prevent flickering)
   const hoverProvider = vscode.languages.registerHoverProvider(
     { scheme: 'file', language: 'solidity' },
     {
       provideHover(document, position) {
+        // First try cached realtime analysis (doesn't trigger new analysis)
+        const cachedAnalysis = realtimeAnalyzer.getCachedAnalysis(document);
+        if (cachedAnalysis) {
+          const realtimeHover = realtimeAnalyzer.createHoverInfo(
+            position,
+            cachedAnalysis,
+            document
+          );
+          if (realtimeHover) {
+            return realtimeHover;
+          }
+        }
+        // Fall back to signature manager hover
         return sigScanManager.provideHover(document, position);
       },
     }
   );
 
   // Helper function to update decorations with colored gas hints
+  // NEVER clears decorations unless we have new ones to show
   async function updateDecorations(editor: vscode.TextEditor, isFileOpenEvent = false) {
     const config = vscode.workspace.getConfiguration('sigscan');
     if (!config.get('realtimeAnalysis', true)) {
@@ -161,6 +175,12 @@ export function activate(context: vscode.ExtensionContext) {
       const analysis = isFileOpenEvent
         ? await realtimeAnalyzer.analyzeDocumentOnOpen(editor.document)
         : await realtimeAnalyzer.analyzeDocumentOnChange(editor.document);
+
+      // CRITICAL: Don't clear decorations if we have no new data
+      if (analysis.gasEstimates.size === 0) {
+        console.log('No gas estimates yet, keeping existing decorations');
+        return;
+      }
 
       const gasDecorations = realtimeAnalyzer.createGasDecorations(analysis, editor.document);
       const complexityDecorations = realtimeAnalyzer.createComplexityDecorations(
@@ -175,6 +195,29 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Gas annotations now use colored decorations (gradient from green to red)
 
+  // Listen for background solc analysis completion - update decorations when ready
+  realtimeAnalyzer.on('analysisReady', (event: AnalysisReadyEvent) => {
+    const editor = vscode.window.visibleTextEditors.find(
+      (e) => e.document.uri.toString() === event.uri
+    );
+    if (editor && editor.document.languageId === 'solidity') {
+      // CRITICAL: Don't clear decorations if we have no new data
+      if (event.analysis.gasEstimates.size === 0) {
+        console.log('Solc returned empty results, keeping existing decorations');
+        return;
+      }
+
+      const gasDecorations = realtimeAnalyzer.createGasDecorations(event.analysis, editor.document);
+      const complexityDecorations = realtimeAnalyzer.createComplexityDecorations(
+        event.analysis,
+        editor.document
+      );
+      editor.setDecorations(gasDecorationType, gasDecorations);
+      editor.setDecorations(complexityDecorationType, complexityDecorations);
+      console.log('✨ Updated decorations with accurate solc analysis');
+    }
+  });
+
   // Real-time analysis on text change
   const textChangeDisposable = vscode.workspace.onDidChangeTextDocument(async (event) => {
     const editor = vscode.window.activeTextEditor;
@@ -183,10 +226,10 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // Update decorations when switching editors
+  // Update decorations when switching editors (treat as file open for immediate response)
   const editorChangeDisposable = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
     if (editor) {
-      await updateDecorations(editor);
+      await updateDecorations(editor, true); // true = treat as file open
     }
   });
 
@@ -202,17 +245,6 @@ export function activate(context: vscode.ExtensionContext) {
   if (vscode.window.activeTextEditor) {
     updateDecorations(vscode.window.activeTextEditor, true);
   }
-
-  // Real-time hover provider
-  const realtimeHoverProvider = vscode.languages.registerHoverProvider(
-    { scheme: 'file', language: 'solidity' },
-    {
-      async provideHover(document, position) {
-        const analysis = await realtimeAnalyzer.analyzeDocumentOnChange(document);
-        return realtimeAnalyzer.createHoverInfo(position, analysis, document);
-      },
-    }
-  );
 
   // Extended analysis commands (on-demand only, runs when idle - never parallel with solc)
   const storageLayoutCommand = vscode.commands.registerCommand(
@@ -426,7 +458,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     treeView,
     hoverProvider,
-    realtimeHoverProvider,
     textChangeDisposable,
     editorChangeDisposable,
     documentOpenDisposable,
