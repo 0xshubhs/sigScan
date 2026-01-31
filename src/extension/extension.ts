@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { SigScanManager } from './manager';
 import { SignatureTreeProvider } from './providers/treeProvider';
 
@@ -18,8 +20,25 @@ let remixGasDecorationType: vscode.TextEditorDecorationType;
 let statusBarItem: vscode.StatusBarItem;
 let gasDecorationManager: GasDecorationManager;
 
+// Output channel for debugging
+let outputChannel: vscode.OutputChannel;
+
+function log(message: string) {
+  const timestamp = new Date().toISOString().substring(11, 19);
+  outputChannel?.appendLine(`[${timestamp}] ${message}`);
+  console.log(`[SigScan] ${message}`);
+}
+
 export function activate(context: vscode.ExtensionContext) {
-  console.log('SigScan extension is now active!');
+  // Create output channel first
+  outputChannel = vscode.window.createOutputChannel('SigScan Gas Analysis');
+  outputChannel.show(true); // Show the output panel immediately
+  log('🚀 SigScan extension activated!');
+
+  // Show visible notification
+  vscode.window.showInformationMessage(
+    '⛽ SigScan Gas Analysis activated! Open a .sol file to see gas estimates.'
+  );
 
   // Initialize manager
   sigScanManager = new SigScanManager(context);
@@ -33,8 +52,18 @@ export function activate(context: vscode.ExtensionContext) {
   gasDecorationManager = GasDecorationManager.getInstance(300); // 300ms debounce
 
   // Create decoration types for gas and complexity hints
-  gasDecorationType = vscode.window.createTextEditorDecorationType({});
-  complexityDecorationType = vscode.window.createTextEditorDecorationType({});
+  // IMPORTANT: Need at least an empty 'after' object for dynamic renderOptions to work
+  gasDecorationType = vscode.window.createTextEditorDecorationType({
+    after: {
+      margin: '0 0 0 1em',
+    },
+    isWholeLine: false,
+  });
+  complexityDecorationType = vscode.window.createTextEditorDecorationType({
+    after: {
+      margin: '0 0 0 1em',
+    },
+  });
   remixGasDecorationType = vscode.window.createTextEditorDecorationType({
     after: {
       color: '#6A9955',
@@ -214,33 +243,94 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Helper function to update decorations with colored gas hints
-  // NEVER clears decorations unless we have new ones to show
+  // Uses Remix-style compilation with AST-based gas mapping
   async function updateDecorations(editor: vscode.TextEditor, isFileOpenEvent = false) {
     const config = vscode.workspace.getConfiguration('sigscan');
     if (!config.get('realtimeAnalysis', true)) {
+      log('Realtime analysis disabled in settings');
       return;
     }
 
     if (editor.document.languageId === 'solidity') {
-      // Use appropriate analysis method based on event type
-      const analysis = isFileOpenEvent
-        ? await realtimeAnalyzer.analyzeDocumentOnOpen(editor.document)
-        : await realtimeAnalyzer.analyzeDocumentOnChange(editor.document);
+      const uri = editor.document.uri.toString();
+      const source = editor.document.getText();
+      const fileName = path.basename(editor.document.uri.fsPath);
 
-      // CRITICAL: Don't clear decorations if we have no new data
-      if (analysis.gasEstimates.size === 0) {
-        console.log('No gas estimates yet, keeping existing decorations');
-        return;
+      log(`Compiling ${fileName}...`);
+
+      // Use Remix-style compilation service directly
+      const trigger = isFileOpenEvent ? 'file-open' : 'manual';
+
+      try {
+        const result = await compilationService.compile(uri, source, trigger, (importPath) => {
+          // Import resolver - tries multiple common paths
+          const fileDir = path.dirname(editor.document.uri.fsPath);
+
+          // Find project root (look for foundry.toml or hardhat.config.js)
+          let projectRoot = fileDir;
+          let current = fileDir;
+          while (current !== path.dirname(current)) {
+            if (
+              fs.existsSync(path.join(current, 'foundry.toml')) ||
+              fs.existsSync(path.join(current, 'hardhat.config.js')) ||
+              fs.existsSync(path.join(current, 'hardhat.config.ts'))
+            ) {
+              projectRoot = current;
+              break;
+            }
+            current = path.dirname(current);
+          }
+
+          // Paths to try in order
+          const pathsToTry = [
+            // 1. Relative to file's directory (handles "../lib/X.sol")
+            path.resolve(fileDir, importPath),
+            // 2. From project root (handles "lib/X.sol")
+            path.resolve(projectRoot, importPath),
+            // 3. Foundry lib folder (handles "openzeppelin/X.sol")
+            path.resolve(projectRoot, 'lib', importPath),
+            // 4. Hardhat node_modules
+            path.resolve(projectRoot, 'node_modules', importPath),
+            // 5. node_modules relative to file
+            path.resolve(fileDir, 'node_modules', importPath),
+          ];
+
+          for (const fullPath of pathsToTry) {
+            if (fs.existsSync(fullPath)) {
+              log(`  Resolved import: ${importPath}`);
+              return { contents: fs.readFileSync(fullPath, 'utf-8') };
+            }
+          }
+
+          log(`  Import not found: ${importPath}`);
+          return { error: `Import not found: ${importPath}` };
+        });
+
+        if (result.success && result.gasInfo.length > 0) {
+          // Use Remix-style decorations with AST-based source locations
+          const decorations = realtimeAnalyzer.createRemixStyleDecorations(
+            result.gasInfo,
+            editor.document
+          );
+          editor.setDecorations(gasDecorationType, decorations);
+          log(`✅ Applied ${decorations.length} gas decorations (solc ${result.version})`);
+
+          // Log all gas info
+          for (const info of result.gasInfo) {
+            const gasStr = info.gas === 'infinite' ? '∞' : info.gas.toLocaleString();
+            log(`  ${info.name}() @ line ${info.loc.line}: ${gasStr} gas`);
+          }
+
+          // Show output channel on first successful analysis
+          outputChannel.show(true);
+        } else if (!result.success) {
+          log(`❌ Compilation failed: ${result.errors[0]}`);
+        } else {
+          log('⚠️ Compilation succeeded but no gas info extracted');
+        }
+      } catch (error) {
+        log(`❌ Error: ${error}`);
       }
-
-      const gasDecorations = realtimeAnalyzer.createGasDecorations(analysis, editor.document);
-      const complexityDecorations = realtimeAnalyzer.createComplexityDecorations(
-        analysis,
-        editor.document
-      );
-
-      editor.setDecorations(gasDecorationType, gasDecorations);
-      editor.setDecorations(complexityDecorationType, complexityDecorations);
     }
   }
 

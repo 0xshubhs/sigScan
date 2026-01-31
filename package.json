@@ -24,6 +24,7 @@
     "blockchain"
   ],
   "activationEvents": [
+    "onLanguage:solidity",
     "workspaceContains:**/*.sol",
     "workspaceContains:foundry.toml",
     "workspaceContains:hardhat.config.js",
@@ -31,6 +32,14 @@
   ],
   "main": "./dist/extension/extension.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "solidity",
+        "aliases": ["Solidity", "solidity"],
+        "extensions": [".sol"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
     "commands": [
       {
         "command": "sigscan.scanProject",
