@@ -244,10 +244,18 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Helper function to update decorations with colored gas hints
   // Uses Remix-style compilation with AST-based gas mapping
+  let lastDisabledLogTime = 0;
   async function updateDecorations(editor: vscode.TextEditor, isFileOpenEvent = false) {
     const config = vscode.workspace.getConfiguration('sigscan');
     if (!config.get('realtimeAnalysis', true)) {
-      log('Realtime analysis disabled in settings');
+      // Only log once per 5 seconds to avoid spam
+      const now = Date.now();
+      if (now - lastDisabledLogTime > 5000) {
+        log(
+          'Realtime analysis disabled in settings - enable with "SigScan: Toggle Real-time Gas Analysis"'
+        );
+        lastDisabledLogTime = now;
+      }
       return;
     }
 

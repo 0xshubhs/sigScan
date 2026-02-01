@@ -9,7 +9,7 @@ import "./GovernanceToken.sol";
  */
 contract GovernorAlpha {
     string public constant name = "Governor Alpha";
-    
+      
     GovernanceToken public governanceToken;
     address public guardian;
     address public timelock;

@@ -577,6 +577,10 @@ export function mapGasToAst(
   const results: GasInfo[] = [];
   const lines = sourceCode.split('\n');
 
+  console.log(
+    `[mapGasToAst] AST nodeType: ${ast?.nodeType}, gasEstimates: ${JSON.stringify(gasEstimates).substring(0, 200)}`
+  );
+
   // Build line offset map for src parsing
   const lineOffsets: number[] = [0];
   for (let i = 0; i < lines.length; i++) {
@@ -618,15 +622,15 @@ export function mapGasToAst(
       }
 
       // Detect infinite gas scenarios (Remix logic)
-      const warnings = detectInfiniteGasWarnings(
-        fnNode,
-        sourceCode.substring(startOffset, startOffset + length)
-      );
+      // DISABLED: Too many false positives - trust solc's gas estimates instead
+      // const warnings = detectInfiniteGasWarnings(
+      //   fnNode,
+      //   sourceCode.substring(startOffset, startOffset + length)
+      // );
+      const warnings: string[] = [];
 
-      if (warnings.length > 0 && gas !== 'infinite') {
-        // If we detected unbounded patterns but gas isn't infinite, mark it
-        gas = 'infinite';
-      }
+      // Only mark as infinite if solc explicitly said so
+      // Don't override solc's judgment with heuristics
 
       results.push({
         name: fnNode.name,
@@ -827,13 +831,21 @@ export async function compileWithGasAnalysis(
     const contracts = output.contracts?.[fileName] || {};
     const ast = output.sources?.[fileName]?.ast;
 
-    for (const [, contractData] of Object.entries(contracts)) {
+    console.log(`[SolcManager] Contracts found: ${Object.keys(contracts).length}`);
+    console.log(`[SolcManager] AST present: ${!!ast}`);
+
+    for (const [contractName, contractData] of Object.entries(contracts)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = contractData as any;
       const gasEstimates = data.evm?.gasEstimates || {};
 
+      console.log(
+        `[SolcManager] Contract: ${contractName}, gasEstimates keys: ${Object.keys(gasEstimates).join(', ')}`
+      );
+
       if (ast) {
         const mappedGas = mapGasToAst(ast, gasEstimates, source);
+        console.log(`[SolcManager] Mapped ${mappedGas.length} functions for ${contractName}`);
         gasInfo.push(...mappedGas);
       }
     }

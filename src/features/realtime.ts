@@ -1133,10 +1133,10 @@ export class RealtimeAnalyzer extends EventEmitter {
       const startPos = new vscode.Position(line, 0);
       const range = new vscode.Range(startPos, endPos);
 
-      // Format gas value
+      // Format gas value - show "var" for variable/infinite gas (clearer than just ∞)
       const gasText =
         info.gas === 'infinite'
-          ? '∞'
+          ? 'var'
           : info.gas >= 1_000_000
             ? `${(info.gas / 1_000_000).toFixed(2)}M`
             : info.gas >= 1_000
@@ -1146,9 +1146,8 @@ export class RealtimeAnalyzer extends EventEmitter {
       // Get color based on gas
       const color = this.getGasGradientColor(info.gas);
 
-      // Build decoration text with warnings
-      const warningText = info.warnings.length > 0 ? ' ' + info.warnings.join(' ') : '';
-      const decorationText = ` ⛽ ${gasText} gas | ${info.selector}${warningText}`;
+      // Build clean decoration text - just gas and selector, no warnings
+      const decorationText = ` ⛽ ${gasText} gas | ${info.selector}`;
 
       // Build detailed hover message
       const hoverMd = new vscode.MarkdownString();
@@ -1156,8 +1155,20 @@ export class RealtimeAnalyzer extends EventEmitter {
       hoverMd.appendMarkdown(`### ⛽ Gas Analysis: \`${info.name}\`\n\n`);
 
       if (info.gas === 'infinite') {
-        hoverMd.appendMarkdown('**Estimated Gas:** ∞ (unbounded)\n\n');
-        hoverMd.appendMarkdown('> ⚠️ This function has unbounded gas consumption.\n\n');
+        hoverMd.appendMarkdown('**Estimated Gas:** ∞ (variable)\n\n');
+
+        // Provide context based on function characteristics
+        if (info.stateMutability === 'pure' || info.stateMutability === 'view') {
+          hoverMd.appendMarkdown('> ℹ️ Solc reports variable gas for this function.\n');
+          hoverMd.appendMarkdown(
+            '> This may be due to dynamic data (arrays, strings) or a solc estimation quirk.\n\n'
+          );
+        } else {
+          hoverMd.appendMarkdown(
+            '> ℹ️ Gas depends on execution path, external calls, or dynamic data.\n'
+          );
+          hoverMd.appendMarkdown('> Common causes: loops, external calls, storage iterations.\n\n');
+        }
       } else {
         hoverMd.appendMarkdown(`**Estimated Gas:** ${info.gas.toLocaleString()}\n\n`);
 

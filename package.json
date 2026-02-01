@@ -2,7 +2,7 @@
   "name": "sigscan",
   "displayName": "SigScan - Smart Contract Signature Scanner",
   "description": "Automatically scan and generate method signatures for Solidity contracts in Foundry/Hardhat projects",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "0xshubhs",
   "icon": "icon.png",
   "engines": {
@@ -192,17 +192,17 @@
         },
         "sigscan.generateABI": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically generate ABI files alongside signatures"
         },
         "sigscan.estimateGas": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Include gas estimation in reports"
         },
         "sigscan.checkSize": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Check contract size against 24KB limit"
         },
         "sigscan.analyzeComplexity": {
