@@ -18,6 +18,7 @@ import { GasEstimator, GasEstimate } from './gas';
 import { ContractSizeAnalyzer, ContractSizeInfo } from './size';
 import { ComplexityAnalyzer, ComplexityMetrics } from './complexity';
 import { SolidityParser } from '../core/parser';
+import { FunctionSignature } from '../types';
 import { StorageLayoutAnalyzer, StorageLayout } from './storage-layout';
 import { CallGraphAnalyzer, CallGraph } from './call-graph';
 import { DeploymentCostEstimator, DeploymentCost } from './deployment';
@@ -216,11 +217,52 @@ export class RealtimeAnalyzer extends EventEmitter {
       gasEstimates.set(func.name, estimate);
     }
 
+    // Detect selector collisions within this contract
+    const diagnostics: vscode.Diagnostic[] = [];
+    const selectorMap = new Map<string, FunctionSignature[]>();
+    for (const func of contractInfo.functions) {
+      // Only check public/external functions (internal/private don't get selectors in the ABI)
+      if (func.visibility === 'internal' || func.visibility === 'private') {
+        continue;
+      }
+      if (func.name.startsWith('modifier:')) {
+        continue;
+      }
+      const existing = selectorMap.get(func.selector) || [];
+      existing.push(func);
+      selectorMap.set(func.selector, existing);
+    }
+
+    for (const [selector, funcs] of selectorMap) {
+      if (funcs.length < 2) {
+        continue;
+      }
+      const names = funcs.map((f) => f.signature).join(', ');
+      for (const func of funcs) {
+        const pattern = new RegExp(`function\\s+${func.name}\\s*\\(`);
+        const match = content.match(pattern);
+        if (match && match.index !== undefined) {
+          const line = content.substring(0, match.index).split('\n').length - 1;
+          const diag = new vscode.Diagnostic(
+            new vscode.Range(line, 0, line, 1000),
+            `Selector collision: ${selector} is shared by ${names}`,
+            vscode.DiagnosticSeverity.Warning
+          );
+          diag.source = 'SigScan';
+          diagnostics.push(diag);
+        }
+      }
+    }
+
+    if (diagnostics.length > 0) {
+      this.diagnosticCollection.set(document.uri, diagnostics);
+    }
+
     const analysis: LiveAnalysis = {
       gasEstimates,
       sizeInfo: null,
       complexityMetrics: new Map(),
-      diagnostics: [],
+      diagnostics,
       isPending: true,
     };
 

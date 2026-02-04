@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SigScanManager } from './manager';
 import { SignatureTreeProvider } from './providers/treeProvider';
+import { logger } from '../utils/logger';
 
 let sigScanManager: SigScanManager;
 let signatureTreeProvider: SignatureTreeProvider;
@@ -20,20 +21,10 @@ let remixGasDecorationType: vscode.TextEditorDecorationType;
 let statusBarItem: vscode.StatusBarItem;
 let gasDecorationManager: GasDecorationManager;
 
-// Output channel for debugging
-let outputChannel: vscode.OutputChannel;
-
-function log(message: string) {
-  const timestamp = new Date().toISOString().substring(11, 19);
-  outputChannel?.appendLine(`[${timestamp}] ${message}`);
-  console.log(`[SigScan] ${message}`);
-}
-
 export function activate(context: vscode.ExtensionContext) {
-  // Create output channel first
-  outputChannel = vscode.window.createOutputChannel('SigScan Gas Analysis');
-  outputChannel.show(true); // Show the output panel immediately
-  log('🚀 SigScan extension activated!');
+  // Initialize structured logger
+  logger.init(context);
+  logger.info('SigScan extension activated');
 
   // Show visible notification
   vscode.window.showInformationMessage(
@@ -83,12 +74,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Listen for Remix-style compilation events
   compilationService.on('compilation:start', ({ uri, version }) => {
-    console.log(`🔄 Compiling ${uri} with solc ${version}...`);
+    logger.info(`Compiling ${uri} with solc ${version}`);
     statusBarItem.text = '$(sync~spin) Compiling...';
   });
 
   compilationService.on('compilation:success', ({ uri, output }) => {
-    console.log(`✅ Compilation successful: ${output.gasInfo.length} functions analyzed`);
+    logger.info(`Compilation successful: ${output.gasInfo.length} functions analyzed`);
     statusBarItem.text = '$(flame) Gas Analysis';
 
     // Update decorations for the active editor
@@ -103,7 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   compilationService.on('compilation:error', ({ uri, errors, output }) => {
-    console.error(` Compilation failed: ${errors[0]}`);
+    logger.error(`Compilation failed: ${errors[0]}`);
     statusBarItem.text = '$(flame) Gas Analysis';
 
     // Even on error, we may have fallback gasInfo with selectors
@@ -119,8 +110,8 @@ export function activate(context: vscode.ExtensionContext) {
           editor.document
         );
         editor.setDecorations(gasDecorationType, decorations);
-        console.log(
-          `⚠️ Applied ${decorations.length} selector-only decorations (fallback from compilation error)`
+        logger.warn(
+          `Applied ${decorations.length} selector-only decorations (fallback from compilation error)`
         );
       }
     }
@@ -270,7 +261,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Only log once per 5 seconds to avoid spam
       const now = Date.now();
       if (now - lastDisabledLogTime > 5000) {
-        log(
+        logger.debug(
           'Realtime analysis disabled in settings - enable with "SigScan: Toggle Real-time Gas Analysis"'
         );
         lastDisabledLogTime = now;
@@ -283,7 +274,7 @@ export function activate(context: vscode.ExtensionContext) {
       const source = editor.document.getText();
       const fileName = path.basename(editor.document.uri.fsPath);
 
-      log(`Compiling ${fileName}...`);
+      logger.info(`Compiling ${fileName}...`);
 
       // Use Remix-style compilation service directly
       const trigger = isFileOpenEvent ? 'file-open' : 'manual';
@@ -324,12 +315,12 @@ export function activate(context: vscode.ExtensionContext) {
 
           for (const fullPath of pathsToTry) {
             if (fs.existsSync(fullPath)) {
-              log(`  Resolved import: ${importPath}`);
+              logger.debug(`Resolved import: ${importPath}`);
               return { contents: fs.readFileSync(fullPath, 'utf-8') };
             }
           }
 
-          log(`  Import not found: ${importPath}`);
+          logger.warn(`Import not found: ${importPath}`);
           return { error: `Import not found: ${importPath}` };
         });
 
@@ -343,10 +334,10 @@ export function activate(context: vscode.ExtensionContext) {
           editor.setDecorations(gasDecorationType, decorations);
 
           if (result.success) {
-            log(`✅ Applied ${decorations.length} gas decorations (solc ${result.version})`);
+            logger.info(`Applied ${decorations.length} gas decorations (solc ${result.version})`);
           } else {
-            log(
-              `⚠️ Applied ${decorations.length} selector-only decorations (compilation failed, using fallback)`
+            logger.warn(
+              `Applied ${decorations.length} selector-only decorations (compilation failed, using fallback)`
             );
           }
 
@@ -354,18 +345,15 @@ export function activate(context: vscode.ExtensionContext) {
           for (const info of result.gasInfo) {
             const gasStr =
               info.gas === 'infinite' ? '∞' : info.gas === 0 ? 'N/A' : info.gas.toLocaleString();
-            log(`  ${info.name}() @ line ${info.loc.line}: ${gasStr} gas`);
+            logger.debug(`${info.name}() @ line ${info.loc.line}: ${gasStr} gas`);
           }
-
-          // Show output channel on first successful analysis
-          outputChannel.show(true);
         } else if (!result.success) {
-          log(`❌ Compilation failed and no functions extracted: ${result.errors[0]}`);
+          logger.error(`Compilation failed and no functions extracted: ${result.errors[0]}`);
         } else {
-          log('⚠️ Compilation succeeded but no gas info extracted');
+          logger.warn('Compilation succeeded but no gas info extracted');
         }
       } catch (error) {
-        log(`❌ Error: ${error}`);
+        logger.error(`Decoration update error: ${error}`);
       }
     }
   }
@@ -380,7 +368,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (editor && editor.document.languageId === 'solidity') {
       // CRITICAL: Don't clear decorations if we have no new data
       if (event.analysis.gasEstimates.size === 0) {
-        console.log('Solc returned empty results, keeping existing decorations');
+        logger.debug('Solc returned empty results, keeping existing decorations');
         return;
       }
 
@@ -391,7 +379,7 @@ export function activate(context: vscode.ExtensionContext) {
       );
       editor.setDecorations(gasDecorationType, gasDecorations);
       editor.setDecorations(complexityDecorationType, complexityDecorations);
-      console.log('✨ Updated decorations with accurate solc analysis');
+      logger.info('Updated decorations with solc analysis');
     }
   });
 
