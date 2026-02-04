@@ -57,11 +57,11 @@ export class ABIGenerator {
     const outputs = func.returns ? this.parseParameters(func.returns) : [];
 
     let stateMutability: 'pure' | 'view' | 'nonpayable' | 'payable' = 'nonpayable';
-    if (func.visibility === 'pure') {
+    if (func.stateMutability === 'pure') {
       stateMutability = 'pure';
-    } else if (func.visibility === 'view') {
+    } else if (func.stateMutability === 'view') {
       stateMutability = 'view';
-    } else if (func.isPayable) {
+    } else if (func.stateMutability === 'payable' || func.isPayable) {
       stateMutability = 'payable';
     }
 

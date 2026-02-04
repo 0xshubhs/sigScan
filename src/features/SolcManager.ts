@@ -776,7 +776,132 @@ function detectInfiniteGasWarnings(fnNode: ASTFunctionNode, functionSource: stri
 }
 
 /**
+ * Extract function info from source using regex (fallback when compilation fails)
+ * This provides selectors even when imports are missing or code doesn't compile
+ */
+function extractFunctionsWithRegex(source: string): GasInfo[] {
+  const results: GasInfo[] = [];
+  const lines = source.split('\n');
+
+  // Build line offset map for finding line numbers
+  const lineOffsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
+  }
+
+  function offsetToLine(offset: number): number {
+    for (let i = 0; i < lineOffsets.length - 1; i++) {
+      if (offset >= lineOffsets[i] && offset < lineOffsets[i + 1]) {
+        return i + 1;
+      }
+    }
+    return lines.length;
+  }
+
+  // Regex to match function declarations
+  const functionRegex =
+    /function\s+(\w+)\s*\(([^)]*)\)\s*(public|external|internal|private)?\s*(pure|view|payable|nonpayable)?\s*(?:virtual)?\s*(?:override(?:\([^)]*\))?)?\s*(?:returns\s*\([^)]*\))?\s*[{;]/gs;
+
+  let match;
+  while ((match = functionRegex.exec(source)) !== null) {
+    const [fullMatch, name, paramsStr, visibility = 'internal', stateMutability = 'nonpayable'] =
+      match;
+    const startOffset = match.index;
+
+    // Find the end of the function (simplified - look for matching brace or semicolon)
+    let endOffset = startOffset + fullMatch.length;
+    if (fullMatch.endsWith('{')) {
+      let braceCount = 1;
+      let i = endOffset;
+      while (i < source.length && braceCount > 0) {
+        if (source[i] === '{') {
+          braceCount++;
+        } else if (source[i] === '}') {
+          braceCount--;
+        }
+        i++;
+      }
+      endOffset = i;
+    }
+
+    // Parse parameters and normalize types
+    const params = paramsStr
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((param) => {
+        const parts = param.split(/\s+/).filter((p) => p.length > 0);
+        if (parts.length >= 1) {
+          // Extract type, handling memory/storage/calldata keywords
+          let type = parts[0];
+          // Remove memory/storage/calldata if it's the second part
+          if (parts.length > 1 && ['memory', 'storage', 'calldata'].includes(parts[1])) {
+            // Type is already correct
+          }
+          // Normalize type
+          type = type.replace(/^(contract|struct|enum)\s+/, '');
+          return type;
+        }
+        return 'unknown';
+      });
+
+    const signature = `${name}(${params.join(',')})`;
+    const hash = keccak256(signature);
+    const selector = '0x' + hash.substring(0, 8);
+
+    const startLine = offsetToLine(startOffset);
+    const endLine = offsetToLine(endOffset);
+
+    results.push({
+      name,
+      selector,
+      gas: 0, // Unknown - compilation failed
+      loc: { line: startLine, endLine },
+      visibility: visibility || 'internal',
+      stateMutability: stateMutability || 'nonpayable',
+      warnings: ['⚠️ Gas unavailable - compilation failed (check imports)'],
+    });
+  }
+
+  // Also extract constructor
+  const constructorRegex = /constructor\s*\(([^)]*)\)\s*(public|internal)?\s*(payable)?\s*[{]/gs;
+  let constructorMatch;
+  while ((constructorMatch = constructorRegex.exec(source)) !== null) {
+    const [fullMatch, paramsStr, visibility = 'public', payable] = constructorMatch;
+    const startOffset = constructorMatch.index;
+
+    const params = paramsStr
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((param) => {
+        const parts = param.split(/\s+/).filter((p) => p.length > 0);
+        return parts[0] || 'unknown';
+      });
+
+    const signature = `constructor(${params.join(',')})`;
+    const hash = keccak256(signature);
+    const selector = '0x' + hash.substring(0, 8);
+
+    const startLine = offsetToLine(startOffset);
+
+    results.push({
+      name: 'constructor',
+      selector,
+      gas: 0,
+      loc: { line: startLine, endLine: startLine + 5 },
+      visibility: visibility || 'public',
+      stateMutability: payable === 'payable' ? 'payable' : 'nonpayable',
+      warnings: ['⚠️ Gas unavailable - compilation failed (check imports)'],
+    });
+  }
+
+  return results;
+}
+
+/**
  * Compile and get full gas analysis (Remix-style)
+ * Falls back to regex-based parsing when compilation fails to still provide selectors
  */
 export async function compileWithGasAnalysis(
   source: string,
@@ -817,10 +942,17 @@ export async function compileWithGasAnalysis(
     }
 
     if (errors.length > 0) {
+      // Compilation failed - fall back to regex-based extraction for selectors
+      console.warn(
+        `⚠️ Compilation failed, falling back to regex-based selector extraction for ${fileName}`
+      );
+      const fallbackGasInfo = extractFunctionsWithRegex(source);
+      console.log(`📝 Extracted ${fallbackGasInfo.length} functions via regex fallback`);
+
       return {
         success: false,
         version,
-        gasInfo: [],
+        gasInfo: fallbackGasInfo, // Still provide selectors even though compilation failed
         errors,
         warnings,
       };

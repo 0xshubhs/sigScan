@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Show visible notification
   vscode.window.showInformationMessage(
-    '⛽ SigScan Gas Analysis activated! Open a .sol file to see gas estimates.'
+    ' SigScan Gas and Signature Analysis activated! Open a .sol file to see gas estimates.'
   );
 
   // Initialize manager
@@ -102,9 +102,28 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  compilationService.on('compilation:error', ({ errors }) => {
-    console.error(`❌ Compilation failed: ${errors[0]}`);
+  compilationService.on('compilation:error', ({ uri, errors, output }) => {
+    console.error(` Compilation failed: ${errors[0]}`);
     statusBarItem.text = '$(flame) Gas Analysis';
+
+    // Even on error, we may have fallback gasInfo with selectors
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fallbackOutput = output as any;
+    if (fallbackOutput?.gasInfo?.length > 0) {
+      const editor = vscode.window.visibleTextEditors.find(
+        (e) => e.document.uri.toString() === uri
+      );
+      if (editor) {
+        const decorations = realtimeAnalyzer.createRemixStyleDecorations(
+          fallbackOutput.gasInfo,
+          editor.document
+        );
+        editor.setDecorations(gasDecorationType, decorations);
+        console.log(
+          `⚠️ Applied ${decorations.length} selector-only decorations (fallback from compilation error)`
+        );
+      }
+    }
   });
 
   compilationService.on('version:downloading', ({ version }) => {
@@ -314,25 +333,34 @@ export function activate(context: vscode.ExtensionContext) {
           return { error: `Import not found: ${importPath}` };
         });
 
-        if (result.success && result.gasInfo.length > 0) {
+        if (result.gasInfo.length > 0) {
           // Use Remix-style decorations with AST-based source locations
+          // This works for both successful compilation AND fallback regex extraction
           const decorations = realtimeAnalyzer.createRemixStyleDecorations(
             result.gasInfo,
             editor.document
           );
           editor.setDecorations(gasDecorationType, decorations);
-          log(`✅ Applied ${decorations.length} gas decorations (solc ${result.version})`);
+
+          if (result.success) {
+            log(`✅ Applied ${decorations.length} gas decorations (solc ${result.version})`);
+          } else {
+            log(
+              `⚠️ Applied ${decorations.length} selector-only decorations (compilation failed, using fallback)`
+            );
+          }
 
           // Log all gas info
           for (const info of result.gasInfo) {
-            const gasStr = info.gas === 'infinite' ? '∞' : info.gas.toLocaleString();
+            const gasStr =
+              info.gas === 'infinite' ? '∞' : info.gas === 0 ? 'N/A' : info.gas.toLocaleString();
             log(`  ${info.name}() @ line ${info.loc.line}: ${gasStr} gas`);
           }
 
           // Show output channel on first successful analysis
           outputChannel.show(true);
         } else if (!result.success) {
-          log(`❌ Compilation failed: ${result.errors[0]}`);
+          log(`❌ Compilation failed and no functions extracted: ${result.errors[0]}`);
         } else {
           log('⚠️ Compilation succeeded but no gas info extracted');
         }
@@ -411,7 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      vscode.window.withProgress(
+      await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Analyzing storage layout...',
@@ -444,7 +472,7 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    vscode.window.withProgress(
+    await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         title: 'Building call graph...',
@@ -478,7 +506,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      vscode.window.withProgress(
+      await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Estimating deployment cost...',
@@ -530,7 +558,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      vscode.window.withProgress(
+      await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Comparing gas usage...',
@@ -574,7 +602,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      vscode.window.withProgress(
+      await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Loading profiler data...',

@@ -42,7 +42,7 @@ export class SigScanManager {
     const rootPath = workspaceFolders[0].uri.fsPath;
 
     try {
-      vscode.window.withProgress(
+      await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: 'Scanning contracts...',
@@ -66,7 +66,7 @@ export class SigScanManager {
           // Auto-export signatures to each subproject's own signatures folder
           await this.autoExportSignaturesToSubProjects();
 
-          progress.report({ increment: 100, message: 'Scan completed' });
+          progress.report({ increment: 50, message: 'Scan completed' });
 
           const projectCount = subProjects.length;
           vscode.window.showInformationMessage(
@@ -342,7 +342,7 @@ export class SigScanManager {
             fs.writeFileSync(abiPath, JSON.stringify(abi, null, 2));
 
             processed++;
-            progress.report({ increment: (processed / total) * 100 });
+            progress.report({ increment: total > 0 ? 100 / total : 100 });
           }
         }
       );
@@ -377,11 +377,17 @@ export class SigScanManager {
           let processed = 0;
           const total = this.lastScanResult?.projectInfo.contracts.size || 0;
 
-          for (const [, contract] of this.lastScanResult?.projectInfo.contracts || []) {
+          for (const [contractPath, contract] of this.lastScanResult?.projectInfo.contracts || []) {
+            const contractCode = fs.existsSync(contractPath)
+              ? fs.readFileSync(contractPath, 'utf-8')
+              : '';
             for (const func of contract.functions) {
-              // Get function code - in real scenario, read from file
-              const funcCode = ''; // TODO: Extract function body from source
-              const gasEstimate = await estimator.estimateGas(funcCode, func.signature);
+              const gasEstimate = await estimator.estimateGas(
+                '',
+                func.signature,
+                contractPath,
+                contractCode
+              );
               results.push({
                 contract: contract.name,
                 function: func.signature,
@@ -392,7 +398,7 @@ export class SigScanManager {
               });
             }
             processed++;
-            progress.report({ increment: (processed / total) * 100 });
+            progress.report({ increment: 100 / total });
           }
         }
       );
@@ -587,17 +593,16 @@ export class SigScanManager {
     }
 
     // Get network
-    const network = await vscode.window.showQuickPick(
-      ['mainnet', 'goerli', 'sepolia', 'polygon', 'mumbai', 'arbitrum', 'optimism'],
-      { placeHolder: 'Select network' }
-    );
+    const network = await vscode.window.showQuickPick(['mainnet', 'sepolia', 'polygon', 'bsc'], {
+      placeHolder: 'Select network',
+    });
 
     if (!network) {
       return;
     }
 
     try {
-      const config = { apiKey, network: network as 'mainnet' | 'goerli' | 'sepolia' };
+      const config = { apiKey, network: network as 'mainnet' | 'sepolia' | 'polygon' | 'bsc' };
       const verifier = new EtherscanVerifier(config);
 
       await vscode.window.withProgress(
@@ -690,13 +695,13 @@ export class SigScanManager {
           progress.report({ message: 'Estimating gas...', increment: 25 });
           await this.estimateGas();
 
-          progress.report({ message: 'Checking sizes...', increment: 50 });
+          progress.report({ message: 'Checking sizes...', increment: 25 });
           await this.checkContractSize();
 
-          progress.report({ message: 'Analyzing complexity...', increment: 75 });
+          progress.report({ message: 'Analyzing complexity...', increment: 25 });
           await this.analyzeComplexity();
 
-          progress.report({ message: 'Complete!', increment: 100 });
+          progress.report({ message: 'Complete!', increment: 25 });
         }
       );
 

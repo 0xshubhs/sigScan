@@ -6,7 +6,7 @@ import * as https from 'https';
 
 export interface EtherscanConfig {
   apiKey: string;
-  network: 'mainnet' | 'goerli' | 'sepolia' | 'polygon' | 'bsc';
+  network: 'mainnet' | 'sepolia' | 'polygon' | 'bsc';
 }
 
 export interface VerificationResult {
@@ -22,9 +22,8 @@ export interface VerificationResult {
 }
 
 export class EtherscanVerifier {
-  private readonly API_ENDPOINTS = {
+  private readonly API_ENDPOINTS: Record<string, string> = {
     mainnet: 'https://api.etherscan.io/api',
-    goerli: 'https://api-goerli.etherscan.io/api',
     sepolia: 'https://api-sepolia.etherscan.io/api',
     polygon: 'https://api.polygonscan.com/api',
     bsc: 'https://api.bscscan.com/api',

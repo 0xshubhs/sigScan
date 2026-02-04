@@ -45,6 +45,10 @@ export class SignatureCache {
       return null;
     }
 
+    // Move to end for LRU behavior (Map preserves insertion order)
+    this.cache.delete(filePath);
+    this.cache.set(filePath, entry);
+
     return entry;
   }
 

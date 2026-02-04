@@ -228,7 +228,7 @@ export class CompilationService extends EventEmitter {
     contentHash: string,
     importCallback?: (path: string) => { contents: string } | { error: string }
   ): Promise<CompilationResult> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       // Clear existing timer
       const existingTimer = this.debounceTimers.get(uri);
       if (existingTimer) {
@@ -238,8 +238,12 @@ export class CompilationService extends EventEmitter {
       // Set new timer
       const timer = setTimeout(async () => {
         this.debounceTimers.delete(uri);
-        const result = await this.compileNow(uri, source, trigger, contentHash, importCallback);
-        resolve(result);
+        try {
+          const result = await this.compileNow(uri, source, trigger, contentHash, importCallback);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
       }, this.debounceMs);
 
       this.debounceTimers.set(uri, timer);
@@ -295,11 +299,12 @@ export class CompilationService extends EventEmitter {
       this.cacheResult(contentHash, result, pragma);
       this.uriToHashCache.set(uri, contentHash);
 
-      // Emit success event
+      // Emit events - even on error, we may have fallback gasInfo
       if (result.success) {
         this.emit('compilation:success', { uri, output: result });
       } else {
-        this.emit('compilation:error', { uri, errors: result.errors });
+        // Emit error event but also include the output (which may have fallback gasInfo)
+        this.emit('compilation:error', { uri, errors: result.errors, output: result });
       }
 
       return result;

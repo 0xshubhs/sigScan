@@ -1,2 +1,2 @@
 
-npm run compile && vsce package && code --install-extension sigscan-0.0.2.vsix --force
+pnpm run compile && vsce package && code --install-extension sigscan-0.0.2.vsix --force

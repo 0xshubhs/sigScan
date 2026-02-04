@@ -432,7 +432,7 @@ contract TestExact {
 
       const result = await solc.compileAndGetGasEstimates(tempFile);
 
-      // When bundled doesn't match exact pragma (0.8.19 vs 0.8.33),
+      // When bundled doesn't match exact pragma (0.8.19 vs 0.8.28),
       // it will fail with bundled but trigger background download
       // This is expected behavior
       expect(result.version).toBeDefined();
@@ -512,7 +512,7 @@ contract TestNoPragma {
         return;
       }
 
-      // Use a version that bundled 0.8.33 doesn't satisfy
+      // Use a version that bundled 0.8.28 doesn't satisfy
       const contract70 = `
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.0;

@@ -272,9 +272,10 @@ export class RuntimeProfiler {
     md += `### Estimation Quality\n\n`;
     md += `| Status | Count | % |\n`;
     md += `|--------|-------|---|\n`;
-    md += `| ✅ Accurate (±10%) | ${accurate} | ${((accurate / profilerReport.comparisons.length) * 100).toFixed(1)}% |\n`;
-    md += `| ⚠️ Underestimated | ${under} | ${((under / profilerReport.comparisons.length) * 100).toFixed(1)}% |\n`;
-    md += `| 📉 Overestimated | ${over} | ${((over / profilerReport.comparisons.length) * 100).toFixed(1)}% |\n\n`;
+    const total = profilerReport.comparisons.length || 1;
+    md += `| ✅ Accurate (±10%) | ${accurate} | ${((accurate / total) * 100).toFixed(1)}% |\n`;
+    md += `| ⚠️ Underestimated | ${under} | ${((under / total) * 100).toFixed(1)}% |\n`;
+    md += `| 📉 Overestimated | ${over} | ${((over / total) * 100).toFixed(1)}% |\n\n`;
 
     // Top deviations
     if (profilerReport.comparisons.length > 0) {

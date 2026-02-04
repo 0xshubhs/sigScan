@@ -231,24 +231,6 @@ export class RealtimeAnalyzer extends EventEmitter {
   }
 
   /**
-   * Schedule solc analysis - deprecated, use scheduleIdleSolcAnalysis
-   * @deprecated Use scheduleIdleSolcAnalysis instead for proper debouncing
-   */
-  private scheduleBackgroundSolcAnalysis(document: vscode.TextDocument, contentHash: string): void {
-    this.scheduleIdleSolcAnalysis(document, contentHash);
-  }
-
-  /**
-   * Run solc analysis in background - deprecated wrapper
-   */
-  private async runSolcAnalysisBackground(
-    document: vscode.TextDocument,
-    contentHash: string
-  ): Promise<void> {
-    await this.runSolcAnalysis(document, contentHash);
-  }
-
-  /**
    * Analyze document using solc only
    * @deprecated Use analyzeDocumentOnOpen or analyzeDocumentOnChange
    */
@@ -290,38 +272,6 @@ export class RealtimeAnalyzer extends EventEmitter {
     }, idleMs);
 
     this.idleTimers.set(uri, timer);
-  }
-
-  /**
-   * Run solc analysis immediately (for file open)
-   */
-  private async runSolcAnalysisImmediate(
-    document: vscode.TextDocument,
-    contentHash: string
-  ): Promise<void> {
-    const uri = document.uri.toString();
-
-    // Cancel any existing timer or compilation
-    const existingTimer = this.idleTimers.get(uri);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-    if (this.activeSolcCompilations.get(uri)) {
-      this.activeSolcCompilations.set(uri, false);
-    }
-
-    await this.runSolcAnalysis(document, contentHash);
-  }
-
-  /**
-   * Run solc analysis synchronously and return results (legacy wrapper)
-   */
-  private async runSolcAnalysisSync(
-    document: vscode.TextDocument,
-    contentHash: string
-  ): Promise<LiveAnalysis> {
-    await this.runSolcAnalysis(document, contentHash);
-    return this.solcResultsCache.get(contentHash) || this.createEmptyAnalysis();
   }
 
   /**
@@ -1113,6 +1063,7 @@ export class RealtimeAnalyzer extends EventEmitter {
    * Uses precise source locations from AST for accurate inline display
    *
    * This is the preferred method for new integrations.
+   * Handles both successful compilation (with gas) and fallback (selectors only).
    */
   public createRemixStyleDecorations(
     gasInfo: GasInfo[],
@@ -1133,28 +1084,44 @@ export class RealtimeAnalyzer extends EventEmitter {
       const startPos = new vscode.Position(line, 0);
       const range = new vscode.Range(startPos, endPos);
 
-      // Format gas value - show "var" for variable/infinite gas (clearer than just ∞)
-      const gasText =
-        info.gas === 'infinite'
-          ? 'var'
-          : info.gas >= 1_000_000
-            ? `${(info.gas / 1_000_000).toFixed(2)}M`
-            : info.gas >= 1_000
-              ? `${(info.gas / 1_000).toFixed(1)}k`
-              : info.gas.toString();
+      // Check if this is a fallback extraction (gas unavailable due to compilation failure)
+      const isCompilationFallback =
+        info.gas === 0 &&
+        info.warnings.some((w) => w.includes('compilation failed') || w.includes('unavailable'));
 
-      // Get color based on gas
-      const color = this.getGasGradientColor(info.gas);
+      // Format gas value
+      let gasText: string;
+      if (isCompilationFallback) {
+        gasText = 'N/A';
+      } else if (info.gas === 'infinite') {
+        gasText = 'var';
+      } else if (info.gas >= 1_000_000) {
+        gasText = `${(info.gas / 1_000_000).toFixed(2)}M`;
+      } else if (info.gas >= 1_000) {
+        gasText = `${(info.gas / 1_000).toFixed(1)}k`;
+      } else {
+        gasText = info.gas.toString();
+      }
 
-      // Build clean decoration text - just gas and selector, no warnings
-      const decorationText = ` ⛽ ${gasText} gas | ${info.selector}`;
+      // Get color based on gas (gray for unavailable)
+      const color = isCompilationFallback ? '#888888' : this.getGasGradientColor(info.gas);
+
+      // Build clean decoration text - show selector prominently when gas unavailable
+      const decorationText = isCompilationFallback
+        ? ` 🔍 ${info.selector} | ⛽ ${gasText}`
+        : ` ⛽ ${gasText} gas | ${info.selector}`;
 
       // Build detailed hover message
       const hoverMd = new vscode.MarkdownString();
       hoverMd.isTrusted = true;
-      hoverMd.appendMarkdown(`### ⛽ Gas Analysis: \`${info.name}\`\n\n`);
+      hoverMd.appendMarkdown(`### ${isCompilationFallback ? '🔍' : '⛽'} \`${info.name}\`\n\n`);
 
-      if (info.gas === 'infinite') {
+      if (isCompilationFallback) {
+        hoverMd.appendMarkdown('**Estimated Gas:** ⚠️ Unavailable (compilation failed)\n\n');
+        hoverMd.appendMarkdown('> The contract has import errors or other compilation issues.\n');
+        hoverMd.appendMarkdown('> Function selector was extracted via regex fallback.\n');
+        hoverMd.appendMarkdown('> Fix compilation errors to see accurate gas estimates.\n\n');
+      } else if (info.gas === 'infinite') {
         hoverMd.appendMarkdown('**Estimated Gas:** ∞ (variable)\n\n');
 
         // Provide context based on function characteristics
@@ -1336,36 +1303,6 @@ export class RealtimeAnalyzer extends EventEmitter {
     this.analysisCache.clear();
   }
 
-  /**
-   * Set up background compiler upgrade with re-compilation callback
-   */
-  private setupCompilerUpgrade(document: vscode.TextDocument): void {
-    const uri = document.uri.toString();
-
-    // This will trigger background download if needed
-    // The onUpgrade callback will fire when download completes
-    const onUpgrade = async (version: string) => {
-      console.log(`🔄 Compiler ${version} ready, re-compiling ${document.fileName}...`);
-
-      // Invalidate cache for this document
-      this.analysisCache.delete(uri);
-      const content = document.getText();
-      const contentHash = this.hashContent(content);
-      this.solcResultsCache.delete(contentHash);
-      this.signatureCache.delete(contentHash);
-
-      // Trigger re-analysis with new compiler
-      await this.runSolcAnalysis(document, contentHash);
-
-      // Notify user
-      vscode.window.showInformationMessage(`Gas estimates updated with Solidity ${version}`);
-    };
-
-    // Pass the callback to the gas estimator (which passes it to solc integration)
-    // This is already wired up in the version manager, just need to make sure it's called
-    this.solcGasEstimator.triggerCompilerUpgrade(document.getText(), onUpgrade);
-  }
-
   private createEmptyAnalysis(isPending = false): LiveAnalysis {
     return {
       gasEstimates: new Map(),
@@ -1374,21 +1311,6 @@ export class RealtimeAnalyzer extends EventEmitter {
       diagnostics: [],
       isPending,
     };
-  }
-
-  private getGasColor(complexity: string): string {
-    switch (complexity) {
-      case 'low':
-        return '#4CAF50'; // Green
-      case 'medium':
-        return '#FFC107'; // Amber
-      case 'high':
-        return '#FF9800'; // Orange
-      case 'very-high':
-        return '#F44336'; // Red
-      default:
-        return '#9E9E9E'; // Gray
-    }
   }
 
   /**

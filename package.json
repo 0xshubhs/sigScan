@@ -7,7 +7,7 @@
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0",
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
   "categories": [
     "Programming Languages",
@@ -316,8 +316,7 @@
     "glob": "^8.0.3",
     "js-sha3": "^0.8.0",
     "semver": "^7.7.3",
-    "solc": "^0.8.33",
-    "sqlite3": "^5.1.6"
+    "solc": "^0.8.28"
   },
   "bin": {
     "sigscan": "./dist/cli/index.js"
