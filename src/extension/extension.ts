@@ -74,7 +74,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Listen for Remix-style compilation events
   compilationService.on('compilation:start', ({ uri, version }) => {
-    if (version === 'forge') {
+    if (version === 'runner') {
+      logger.info(`Analyzing ${uri} with sigscan-runner`);
+      statusBarItem.text = '$(zap~spin) Running EVM...';
+    } else if (version === 'forge') {
       logger.info(`Building ${uri} with forge`);
       statusBarItem.text = '$(tools~spin) Forge building...';
     } else {

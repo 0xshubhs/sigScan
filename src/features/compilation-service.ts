@@ -25,6 +25,7 @@ import {
   resolveSolcVersion,
 } from './SolcManager';
 import { isForgeAvailable, findFoundryRoot, compileWithForge } from './forge-backend';
+import { isRunnerAvailable, compileWithRunner } from './runner-backend';
 
 /**
  * Compilation event types
@@ -265,18 +266,30 @@ export class CompilationService extends EventEmitter {
     const fileName = this.getFileName(uri);
 
     try {
-      let output: CompilationOutput;
+      let output: CompilationOutput | null = null;
 
-      // --- Forge path: Foundry projects with forge installed ---
       const filePath = this.uriToFilePath(uri);
       const foundryRoot = filePath ? findFoundryRoot(filePath) : null;
 
-      if (foundryRoot && (await isForgeAvailable())) {
-        // Forge backend
+      // --- Priority 1: Runner backend (EVM-executed gas, fastest) ---
+      if (filePath && (await isRunnerAvailable())) {
+        this.emit('compilation:start', { uri, version: 'runner' });
+        try {
+          output = await compileWithRunner(filePath, source);
+        } catch {
+          // Runner failed — fall through to forge/solc
+          output = null;
+        }
+      }
+
+      // --- Priority 2: Forge backend (Foundry projects) ---
+      if (!output && foundryRoot && (await isForgeAvailable())) {
         this.emit('compilation:start', { uri, version: 'forge' });
         output = await compileWithForge(filePath!, foundryRoot);
-      } else {
-        // --- Solc-js path: Hardhat / generic projects ---
+      }
+
+      // --- Priority 3: Solc-js (WASM, universal fallback) ---
+      if (!output) {
         this.emit('compilation:start', { uri, version: pragma || 'bundled' });
 
         if (pragma) {
