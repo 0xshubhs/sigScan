@@ -1,0 +1,19 @@
+[package]
+name = "sigscan-runner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+alloy-dyn-abi = "1.5.4"
+alloy-json-abi = "1.5.4"
+alloy-primitives = "1.5.4"
+alloy-sol-types = "1.5.4"
+clap = { version = "4.5.57", features = ["derive"] }
+color-eyre = "0.6.5"
+eyre = "0.6.12"
+hex = "0.4.3"
+revm = { version = "34.0.0", features = ["std"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tempfile = "3.24.0"
+toml = "0.9.11"

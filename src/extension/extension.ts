@@ -74,8 +74,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Listen for Remix-style compilation events
   compilationService.on('compilation:start', ({ uri, version }) => {
-    logger.info(`Compiling ${uri} with solc ${version}`);
-    statusBarItem.text = '$(sync~spin) Compiling...';
+    if (version === 'forge') {
+      logger.info(`Building ${uri} with forge`);
+      statusBarItem.text = '$(tools~spin) Forge building...';
+    } else {
+      logger.info(`Compiling ${uri} with solc ${version}`);
+      statusBarItem.text = '$(sync~spin) Compiling...';
+    }
   });
 
   compilationService.on('compilation:success', ({ uri, output }) => {

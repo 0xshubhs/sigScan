@@ -24,6 +24,7 @@ import {
   parsePragmaFromSource,
   resolveSolcVersion,
 } from './SolcManager';
+import { isForgeAvailable, findFoundryRoot, compileWithForge } from './forge-backend';
 
 /**
  * Compilation event types
@@ -263,28 +264,37 @@ export class CompilationService extends EventEmitter {
     const pragma = parsePragmaFromSource(source);
     const fileName = this.getFileName(uri);
 
-    // Emit start event
-    this.emit('compilation:start', { uri, version: pragma || 'bundled' });
-
     try {
-      // Check if we need to download a version
-      if (pragma) {
-        const availableVersions = await SolcManager.getAvailableVersions();
-        try {
-          const targetVersion = resolveSolcVersion(pragma, availableVersions);
-          if (!SolcManager.isCached(targetVersion)) {
-            this.emit('version:downloading', { version: targetVersion });
-            // Load will cache it
-            await SolcManager.load(targetVersion);
-            this.emit('version:ready', { version: targetVersion });
-          }
-        } catch {
-          // Will fall back to bundled
-        }
-      }
+      let output: CompilationOutput;
 
-      // Compile
-      const output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
+      // --- Forge path: Foundry projects with forge installed ---
+      const filePath = this.uriToFilePath(uri);
+      const foundryRoot = filePath ? findFoundryRoot(filePath) : null;
+
+      if (foundryRoot && (await isForgeAvailable())) {
+        // Forge backend
+        this.emit('compilation:start', { uri, version: 'forge' });
+        output = await compileWithForge(filePath!, foundryRoot);
+      } else {
+        // --- Solc-js path: Hardhat / generic projects ---
+        this.emit('compilation:start', { uri, version: pragma || 'bundled' });
+
+        if (pragma) {
+          const availableVersions = await SolcManager.getAvailableVersions();
+          try {
+            const targetVersion = resolveSolcVersion(pragma, availableVersions);
+            if (!SolcManager.isCached(targetVersion)) {
+              this.emit('version:downloading', { version: targetVersion });
+              await SolcManager.load(targetVersion);
+              this.emit('version:ready', { version: targetVersion });
+            }
+          } catch {
+            // Will fall back to bundled
+          }
+        }
+
+        output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
+      }
 
       const result: CompilationResult = {
         ...output,
@@ -326,6 +336,21 @@ export class CompilationService extends EventEmitter {
       this.emit('compilation:error', { uri, errors: result.errors });
       return result;
     }
+  }
+
+  /**
+   * Try to convert a URI string to a local file path.
+   * Returns null for non-file URIs.
+   */
+  private uriToFilePath(uri: string): string | null {
+    if (uri.startsWith('file://')) {
+      return decodeURIComponent(uri.replace('file://', ''));
+    }
+    // Already a path (no scheme)
+    if (uri.startsWith('/') || /^[a-zA-Z]:/.test(uri)) {
+      return uri;
+    }
+    return null;
   }
 
   /**
