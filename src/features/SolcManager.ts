@@ -934,7 +934,7 @@ function extractFunctionsWithRegex(source: string): GasInfo[] {
   const constructorRegex = /constructor\s*\(([^)]*)\)\s*(public|internal)?\s*(payable)?\s*[{]/gs;
   let constructorMatch;
   while ((constructorMatch = constructorRegex.exec(source)) !== null) {
-    const [fullMatch, paramsStr, visibility = 'public', payable] = constructorMatch;
+    const [paramsStr, visibility = 'public', payable] = constructorMatch;
     const startOffset = constructorMatch.index;
 
     const params = paramsStr
