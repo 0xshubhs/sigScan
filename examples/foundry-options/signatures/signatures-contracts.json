@@ -1,0 +1,784 @@
+{
+  "metadata": {
+    "category": "contracts",
+    "generatedAt": "2026-02-09T19:35:37.210Z",
+    "projectType": "foundry",
+    "projectPath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options",
+    "totalContractsInCategory": 2,
+    "uniqueFunctions": 21,
+    "uniqueEvents": 12,
+    "uniqueErrors": 10,
+    "lastUpdated": "2026-02-09T19:35:37.332Z",
+    "note": "Previous content replaced"
+  },
+  "signatures": {
+    "functions": [
+      {
+        "name": "writeOption",
+        "signature": "writeOption(OptionType,address,uint256,uint256,uint256)",
+        "selector": "0x3caaf537",
+        "visibility": "external",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "type": "OptionType",
+            "name": "optionType"
+          },
+          {
+            "type": "address",
+            "name": "underlying"
+          },
+          {
+            "type": "uint256",
+            "name": "strikePrice"
+          },
+          {
+            "type": "uint256",
+            "name": "expiry"
+          },
+          {
+            "type": "uint256",
+            "name": "amount"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "uint256",
+            "name": ""
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "buyOption",
+        "signature": "buyOption(uint256)",
+        "selector": "0xfba225b9",
+        "visibility": "external",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "exerciseOption",
+        "signature": "exerciseOption(uint256)",
+        "selector": "0xf52f2526",
+        "visibility": "external",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "expireOption",
+        "signature": "expireOption(uint256)",
+        "selector": "0x02f126e8",
+        "visibility": "external",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "cancelOption",
+        "signature": "cancelOption(uint256)",
+        "selector": "0xde6bf635",
+        "visibility": "external",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "depositCollateral",
+        "signature": "depositCollateral(address)",
+        "selector": "0x97d475d7",
+        "visibility": "external",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "withdrawCollateral",
+        "signature": "withdrawCollateral(address,uint256)",
+        "selector": "0x350c35e9",
+        "visibility": "external",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          },
+          {
+            "type": "uint256",
+            "name": "amount"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "calculatePremium",
+        "signature": "calculatePremium(address,uint256,uint256,uint256,OptionType)",
+        "selector": "0x30dc552c",
+        "visibility": "public",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "underlying"
+          },
+          {
+            "type": "uint256",
+            "name": "strikePrice"
+          },
+          {
+            "type": "uint256",
+            "name": "expiry"
+          },
+          {
+            "type": "uint256",
+            "name": "amount"
+          },
+          {
+            "type": "OptionType",
+            "name": "optionType"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "uint256",
+            "name": ""
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "updateVolatility",
+        "signature": "updateVolatility(address,uint256)",
+        "selector": "0x50ca2516",
+        "visibility": "external",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          },
+          {
+            "type": "uint256",
+            "name": "newVolatility"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "getOption",
+        "signature": "getOption(uint256)",
+        "selector": "0x1ce5e9a6",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "Option",
+            "name": "memory"
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "getUserOptions",
+        "signature": "getUserOptions(address)",
+        "selector": "0xbb2fb90a",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "user"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "uint256[]",
+            "name": "memory"
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "getIntrinsicValue",
+        "signature": "getIntrinsicValue(uint256)",
+        "selector": "0xb2600f7d",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "uint256",
+            "name": ""
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "getTimeValue",
+        "signature": "getTimeValue(uint256)",
+        "selector": "0xb3bfa98d",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "optionId"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "uint256",
+            "name": ""
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "constructor",
+        "signature": "constructor(address,address)",
+        "selector": "0x4525f804",
+        "visibility": "public",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "_priceOracle"
+          },
+          {
+            "type": "address",
+            "name": "_feeCollector"
+          }
+        ],
+        "outputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "updatePrice",
+        "signature": "updatePrice(address,uint256)",
+        "selector": "0x457972de",
+        "visibility": "public",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          },
+          {
+            "type": "uint256",
+            "name": "price)"
+          }
+        ],
+        "outputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "calculateHistoricalVolatility",
+        "signature": "calculateHistoricalVolatility(address)",
+        "selector": "0x9c17422b",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "uint256",
+            "name": ""
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "authorizeUpdater",
+        "signature": "authorizeUpdater(address)",
+        "selector": "0x9cbe6097",
+        "visibility": "public",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "updater)"
+          }
+        ],
+        "outputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "revokeUpdater",
+        "signature": "revokeUpdater(address)",
+        "selector": "0x3c932bef",
+        "visibility": "public",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "updater)"
+          }
+        ],
+        "outputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "getVolatilityData",
+        "signature": "getVolatilityData(address)",
+        "selector": "0x7afb4381",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "VolatilityData",
+            "name": "memory"
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "getPriceHistory",
+        "signature": "getPriceHistory(address)",
+        "selector": "0x988d594c",
+        "visibility": "external",
+        "stateMutability": "view",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "token"
+          }
+        ],
+        "outputs": [
+          {
+            "type": "PricePoint[]",
+            "name": "memory"
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "constructor",
+        "signature": "constructor()",
+        "selector": "0x90fa17bb",
+        "visibility": "public",
+        "stateMutability": "nonpayable",
+        "inputs": [],
+        "outputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      }
+    ],
+    "events": [
+      {
+        "name": "OptionWritten",
+        "signature": "OptionWritten(uint256,address,OptionType,uint256,uint256,uint256)",
+        "selector": "0xc659564e9b1548d37829379b0fad20ba84bb72e7a6c0bbaea8d852e149174f15",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "OptionType",
+            "name": "optionType",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "strikePrice",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "premium",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "expiry",
+            "indexed": false
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionPurchased",
+        "signature": "OptionPurchased(uint256,address,uint256)",
+        "selector": "0x2817d4d24c9bf2a000a920b5dc026716e4e03e69619522be61549dacfa752cbd",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "uint256",
+            "name": "premium",
+            "indexed": false
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionExercised",
+        "signature": "OptionExercised(uint256,address,uint256)",
+        "selector": "0x4596c154c182e8f70aa23d7334caf575c608e8bb46b16ba48782961cbca9312e",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "uint256",
+            "name": "payout",
+            "indexed": false
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionExpired",
+        "signature": "OptionExpired(uint256)",
+        "selector": "0x04d03607ff2d12a2aef0938dbebbfbb423182f741164e646928a49a5a728f9c6",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "indexed",
+            "indexed": true
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionCancelled",
+        "signature": "OptionCancelled(uint256)",
+        "selector": "0x7621a0eef8c39766512e6fd0e8f1bc133ec9b9b2ade3f1732962a1905002f1f9",
+        "inputs": [
+          {
+            "type": "uint256",
+            "name": "indexed",
+            "indexed": true
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "CollateralDeposited",
+        "signature": "CollateralDeposited(address,address,uint256)",
+        "selector": "0xf1c0dd7e9b98bbff859029005ef89b127af049cd18df1a8d79f0b7e019911e56",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "address",
+            "name": "token",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "amount",
+            "indexed": false
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "CollateralWithdrawn",
+        "signature": "CollateralWithdrawn(address,address,uint256)",
+        "selector": "0x45892a46e6cef329bb642da6d69846d324db43d19008edc141ed82382eda1bee",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "address",
+            "name": "token",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "amount",
+            "indexed": false
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "VolatilityUpdated",
+        "signature": "VolatilityUpdated(address,uint256)",
+        "selector": "0x4c1edb2651828fe431662e0cd5bed7c8ad35e7ee373ecc15bf9a726089579c5a",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "uint256",
+            "name": "newVolatility",
+            "indexed": false
+          }
+        ],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "PriceUpdated",
+        "signature": "PriceUpdated(address,uint256,uint256)",
+        "selector": "0xb556fac599c3c70efb9ab1fa725ecace6c81cc48d1455f886607def065f3e0c0",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "uint256",
+            "name": "price",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "timestamp",
+            "indexed": false
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "VolatilityCalculated",
+        "signature": "VolatilityCalculated(address,uint256,uint256)",
+        "selector": "0xade9e58b661c0ff688054a9b73ea5eec3627eca812796a18dbb21856da2d3b2b",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          },
+          {
+            "type": "uint256",
+            "name": "historical",
+            "indexed": false
+          },
+          {
+            "type": "uint256",
+            "name": "implied",
+            "indexed": false
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "UpdaterAuthorized",
+        "signature": "UpdaterAuthorized(address)",
+        "selector": "0xfbc99308a04b9b530a8dbc7eb620a7597c4b92ff15390ab23ffdd979b9c592e4",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "UpdaterRevoked",
+        "signature": "UpdaterRevoked(address)",
+        "selector": "0x27e810a75a9534f49f3874cd6aef1cd8ccd4fd9e24acb4c3813ba552851ef796",
+        "inputs": [
+          {
+            "type": "address",
+            "name": "indexed",
+            "indexed": true
+          }
+        ],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      }
+    ],
+    "errors": [
+      {
+        "name": "InsufficientCollateral",
+        "signature": "InsufficientCollateral()",
+        "selector": "0x3a23d825",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionNotActive",
+        "signature": "OptionNotActive()",
+        "selector": "0x557f7b94",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionExpired",
+        "signature": "OptionExpired()",
+        "selector": "0x7676819d",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "Unauthorized",
+        "signature": "Unauthorized()",
+        "selector": "0x82b42900",
+        "inputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "InvalidStrike",
+        "signature": "InvalidStrike()",
+        "selector": "0x9a5818d8",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "InvalidExpiry",
+        "signature": "InvalidExpiry()",
+        "selector": "0xd36c8500",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "InsufficientPremium",
+        "signature": "InsufficientPremium()",
+        "selector": "0x30cc5d5d",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "OptionNotExpired",
+        "signature": "OptionNotExpired()",
+        "selector": "0x29be7398",
+        "inputs": [],
+        "contractName": "OptionsMarket",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/OptionsMarket.sol"
+      },
+      {
+        "name": "InvalidPrice",
+        "signature": "InvalidPrice()",
+        "selector": "0x00bfc921",
+        "inputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      },
+      {
+        "name": "InsufficientData",
+        "signature": "InsufficientData()",
+        "selector": "0xf7f78816",
+        "inputs": [],
+        "contractName": "VolatilityOracle",
+        "filePath": "/home/madhav/Desktop/projs/sigScan/examples/foundry-options/src/VolatilityOracle.sol"
+      }
+    ]
+  }
+}
