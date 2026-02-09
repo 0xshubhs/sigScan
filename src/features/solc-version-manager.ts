@@ -14,12 +14,11 @@ const compilerCache = new Map<string, any>();
 const downloading = new Set<string>();
 
 // Bundled compiler version
-const BUNDLED_VERSION = '0.8.33';
+const BUNDLED_VERSION = '0.8.28';
 
 // Map of version patterns to actual available solc releases
 // These are known stable releases that exist in the solc-bin repository
 const VERSION_RELEASES: Record<string, string> = {
-  '0.8.33': 'v0.8.28+commit.7893614a',
   '0.8.28': 'v0.8.28+commit.7893614a',
   '0.8.27': 'v0.8.27+commit.40a35a09',
   '0.8.26': 'v0.8.26+commit.8a97fa7a',

@@ -17,6 +17,22 @@ import { keccak256 } from 'js-sha3';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const solc = require('solc');
 
+/**
+ * Internal debug logger for SolcManager.
+ * Avoids dependency on VS Code logger so this module works in CLI too.
+ * Set SIGSCAN_DEBUG=1 to enable verbose output.
+ */
+const debug = {
+  log: (msg: string, ...args: unknown[]) => {
+    if (process.env.SIGSCAN_DEBUG) {
+      console.log(`[SolcManager] ${msg}`, ...args);
+    }
+  },
+  warn: (msg: string, ...args: unknown[]) => {
+    console.warn(`[SolcManager] ${msg}`, ...args);
+  },
+};
+
 // Type alias for solc instance
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SolcInstance = any;
@@ -108,7 +124,7 @@ export class SolcManager {
 
     // Start loading
     const loadPromise = new Promise<SolcInstance>((resolve, reject) => {
-      console.log(`⬇️  Loading solc ${normalizedVersion}...`);
+      debug.log(`Downloading solc ${normalizedVersion}...`);
 
       solc.loadRemoteVersion(normalizedVersion, (err: Error | null, solcInstance: SolcInstance) => {
         this.loading.delete(normalizedVersion);
@@ -119,7 +135,7 @@ export class SolcManager {
           return;
         }
 
-        console.log(`✅ Loaded solc ${normalizedVersion}`);
+        debug.log(`Loaded solc ${normalizedVersion}`);
         this.cache.set(normalizedVersion, solcInstance);
         resolve(solcInstance);
       });
@@ -163,7 +179,7 @@ export class SolcManager {
   static clearCache(): void {
     this.cache.clear();
     this.loading.clear();
-    console.log('🗑️  SolcManager cache cleared');
+    debug.log('Cache cleared');
   }
 
   /**
@@ -522,18 +538,38 @@ export function computeSelector(fnNode: ASTFunctionNode): string {
  * Normalize Solidity type for selector computation
  */
 function normalizeType(type: string): string {
-  // Remove 'contract ', 'struct ', 'enum ' prefixes
+  // Remove 'contract ', 'struct ', 'enum ' prefixes (including library-qualified names)
+  // e.g. "contract IERC20" → "IERC20", "struct MyLib.MyStruct" → "MyLib.MyStruct"
   type = type.replace(/^(contract|struct|enum)\s+/, '');
+
+  // Strip library/contract qualifier from struct names: "MyLib.MyStruct" → "MyStruct"
+  // But preserve array brackets if present: "MyLib.MyStruct[]" → "MyStruct[]"
+  type = type.replace(/^(\w+\.)+/, '');
 
   // Handle memory/storage/calldata
   type = type.replace(/\s+(memory|storage|calldata)$/, '');
+
+  // "address payable" → "address"
+  type = type.replace(/^address\s+payable$/, 'address');
+
+  // Normalize shorthand integer types: "uint" → "uint256", "int" → "int256"
+  // Must be exact matches, not substrings like "uint8"
+  type = type.replace(/^uint$/, 'uint256');
+  type = type.replace(/^int$/, 'int256');
+
+  // Same for array variants: "uint[]" → "uint256[]"
+  type = type.replace(/^uint(\[)/, 'uint256$1');
+  type = type.replace(/^int(\[)/, 'int256$1');
 
   // Handle mappings (shouldn't appear in function params, but just in case)
   if (type.startsWith('mapping(')) {
     return 'mapping';
   }
 
-  // Handle arrays
+  // Handle tuple types from AST: "tuple(uint256,address)" stays as-is
+  // These come from struct parameters that solc expands
+
+  // Collapse remaining whitespace (e.g. inside array dimensions)
   type = type.replace(/\s+/g, '');
 
   return type;
@@ -572,13 +608,14 @@ interface ASTNode {
 export function mapGasToAst(
   ast: ASTNode,
   gasEstimates: Record<string, unknown>,
-  sourceCode: string
+  sourceCode: string,
+  contractName?: string
 ): GasInfo[] {
   const results: GasInfo[] = [];
   const lines = sourceCode.split('\n');
 
-  console.log(
-    `[mapGasToAst] AST nodeType: ${ast?.nodeType}, gasEstimates: ${JSON.stringify(gasEstimates).substring(0, 200)}`
+  debug.log(
+    `mapGasToAst: nodeType=${ast?.nodeType}, contract=${contractName || '(all)'}, keys=${JSON.stringify(gasEstimates).substring(0, 200)}`
   );
 
   // Build line offset map for src parsing
@@ -596,9 +633,26 @@ export function mapGasToAst(
     return lines.length;
   }
 
+  // Track the current contract name as we walk the AST
+  let currentContract: string | null = null;
+
   function walk(node: ASTNode): void {
     if (!node || typeof node !== 'object') {
       return;
+    }
+
+    // Track which ContractDefinition we're inside
+    const isContractNode = node.nodeType === 'ContractDefinition' && typeof node.name === 'string';
+    const previousContract = currentContract;
+    if (isContractNode) {
+      currentContract = node.name as string;
+      // If caller specified a contractName, skip contracts that don't match
+      if (contractName && currentContract !== contractName) {
+        // Still recurse past this contract in case of nested types,
+        // but restore contract name after
+        currentContract = previousContract;
+        return;
+      }
     }
 
     if (node.nodeType === 'FunctionDefinition' && node.name) {
@@ -621,16 +675,7 @@ export function mapGasToAst(
         gas = gasData;
       }
 
-      // Detect infinite gas scenarios (Remix logic)
-      // DISABLED: Too many false positives - trust solc's gas estimates instead
-      // const warnings = detectInfiniteGasWarnings(
-      //   fnNode,
-      //   sourceCode.substring(startOffset, startOffset + length)
-      // );
       const warnings: string[] = [];
-
-      // Only mark as infinite if solc explicitly said so
-      // Don't override solc's judgment with heuristics
 
       results.push({
         name: fnNode.name,
@@ -654,6 +699,11 @@ export function mapGasToAst(
         }
       }
     }
+
+    // Restore contract context when leaving a ContractDefinition
+    if (isContractNode) {
+      currentContract = previousContract;
+    }
   }
 
   walk(ast);
@@ -661,7 +711,29 @@ export function mapGasToAst(
 }
 
 /**
- * Find gas estimate for a function from solc output
+ * Parse a gas value from solc output (string number, literal "infinite", or number)
+ */
+function parseGasValue(value: unknown): number | 'infinite' | null {
+  if (value === 'infinite') {
+    return 'infinite';
+  }
+  if (typeof value === 'string') {
+    const parsed = parseInt(value, 10);
+    return isNaN(parsed) ? null : parsed;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  return null;
+}
+
+/**
+ * Find gas estimate for a function from solc output.
+ *
+ * Matching strategy (in order):
+ * 1. Exact signature match
+ * 2. Case-insensitive signature match
+ * 3. Name-only match (only when there's exactly one match to avoid overload ambiguity)
  */
 function findGasForFunction(
   fnNode: ASTFunctionNode,
@@ -672,23 +744,21 @@ function findGasForFunction(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internal = (gasEstimates as any)?.internal || {};
 
-  // Build function signature
+  // Build function signature from AST types
   const args = fnNode.parameters.parameters
     .map((p: ASTParameter) => normalizeType(p.typeDescriptions?.typeString || 'unknown'))
     .join(',');
   const signature = `${fnNode.name}(${args})`;
 
-  // Check external first (for public/external functions)
-  if (external[signature] !== undefined) {
-    const value = external[signature];
-    if (value === 'infinite') {
-      return 'infinite';
-    }
-    if (typeof value === 'string') {
-      return parseInt(value, 10);
-    }
-    if (typeof value === 'number') {
-      return value;
+  const pools = [external, internal];
+
+  // Strategy 1: Exact match
+  for (const pool of pools) {
+    if (pool[signature] !== undefined) {
+      const result = parseGasValue(pool[signature]);
+      if (result !== null) {
+        return result;
+      }
     }
     // Handle object format with min/max properties
     if (typeof value === 'object' && value !== null) {
@@ -706,17 +776,16 @@ function findGasForFunction(
     }
   }
 
-  // Check internal (for internal/private functions)
-  if (internal[signature] !== undefined) {
-    const value = internal[signature];
-    if (value === 'infinite') {
-      return 'infinite';
-    }
-    if (typeof value === 'string') {
-      return parseInt(value, 10);
-    }
-    if (typeof value === 'number') {
-      return value;
+  // Strategy 2: Case-insensitive signature match
+  const sigLower = signature.toLowerCase();
+  for (const pool of pools) {
+    for (const [key, value] of Object.entries(pool)) {
+      if (key.toLowerCase() === sigLower) {
+        const result = parseGasValue(value);
+        if (result !== null) {
+          return result;
+        }
+      }
     }
     // Handle object format with min/max properties
     if (typeof value === 'object' && value !== null) {
@@ -734,17 +803,15 @@ function findGasForFunction(
     }
   }
 
-  // Try matching by name only (for overloads)
-  for (const [sig, value] of Object.entries(external)) {
-    if (sig.startsWith(fnNode.name + '(')) {
-      if (value === 'infinite') {
-        return 'infinite';
-      }
-      if (typeof value === 'string') {
-        return parseInt(value, 10);
-      }
-      if (typeof value === 'number') {
-        return value as number;
+  // Strategy 3: Name-only match — only if exactly one entry matches the name
+  // This avoids ambiguity with overloaded functions
+  const namePrefix = fnNode.name + '(';
+  for (const pool of pools) {
+    const nameMatches = Object.entries(pool).filter(([sig]) => sig.startsWith(namePrefix));
+    if (nameMatches.length === 1) {
+      const result = parseGasValue(nameMatches[0][1]);
+      if (result !== null) {
+        return result;
       }
       // Handle object format with min/max properties
       if (typeof value === 'object' && value !== null) {
@@ -818,7 +885,132 @@ function detectInfiniteGasWarnings(fnNode: ASTFunctionNode, functionSource: stri
 }
 
 /**
+ * Extract function info from source using regex (fallback when compilation fails)
+ * This provides selectors even when imports are missing or code doesn't compile
+ */
+function extractFunctionsWithRegex(source: string): GasInfo[] {
+  const results: GasInfo[] = [];
+  const lines = source.split('\n');
+
+  // Build line offset map for finding line numbers
+  const lineOffsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
+  }
+
+  function offsetToLine(offset: number): number {
+    for (let i = 0; i < lineOffsets.length - 1; i++) {
+      if (offset >= lineOffsets[i] && offset < lineOffsets[i + 1]) {
+        return i + 1;
+      }
+    }
+    return lines.length;
+  }
+
+  // Regex to match function declarations
+  const functionRegex =
+    /function\s+(\w+)\s*\(([^)]*)\)\s*(public|external|internal|private)?\s*(pure|view|payable|nonpayable)?\s*(?:virtual)?\s*(?:override(?:\([^)]*\))?)?\s*(?:returns\s*\([^)]*\))?\s*[{;]/gs;
+
+  let match;
+  while ((match = functionRegex.exec(source)) !== null) {
+    const [fullMatch, name, paramsStr, visibility = 'internal', stateMutability = 'nonpayable'] =
+      match;
+    const startOffset = match.index;
+
+    // Find the end of the function (simplified - look for matching brace or semicolon)
+    let endOffset = startOffset + fullMatch.length;
+    if (fullMatch.endsWith('{')) {
+      let braceCount = 1;
+      let i = endOffset;
+      while (i < source.length && braceCount > 0) {
+        if (source[i] === '{') {
+          braceCount++;
+        } else if (source[i] === '}') {
+          braceCount--;
+        }
+        i++;
+      }
+      endOffset = i;
+    }
+
+    // Parse parameters and normalize types
+    const params = paramsStr
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((param) => {
+        const parts = param.split(/\s+/).filter((p) => p.length > 0);
+        if (parts.length >= 1) {
+          // Extract type, handling memory/storage/calldata keywords
+          let type = parts[0];
+          // Remove memory/storage/calldata if it's the second part
+          if (parts.length > 1 && ['memory', 'storage', 'calldata'].includes(parts[1])) {
+            // Type is already correct
+          }
+          // Normalize type
+          type = type.replace(/^(contract|struct|enum)\s+/, '');
+          return type;
+        }
+        return 'unknown';
+      });
+
+    const signature = `${name}(${params.join(',')})`;
+    const hash = keccak256(signature);
+    const selector = '0x' + hash.substring(0, 8);
+
+    const startLine = offsetToLine(startOffset);
+    const endLine = offsetToLine(endOffset);
+
+    results.push({
+      name,
+      selector,
+      gas: 0, // Unknown - compilation failed
+      loc: { line: startLine, endLine },
+      visibility: visibility || 'internal',
+      stateMutability: stateMutability || 'nonpayable',
+      warnings: ['⚠️ Gas unavailable - compilation failed (check imports)'],
+    });
+  }
+
+  // Also extract constructor
+  const constructorRegex = /constructor\s*\(([^)]*)\)\s*(public|internal)?\s*(payable)?\s*[{]/gs;
+  let constructorMatch;
+  while ((constructorMatch = constructorRegex.exec(source)) !== null) {
+    const [paramsStr, visibility = 'public', payable] = constructorMatch;
+    const startOffset = constructorMatch.index;
+
+    const params = paramsStr
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((param) => {
+        const parts = param.split(/\s+/).filter((p) => p.length > 0);
+        return parts[0] || 'unknown';
+      });
+
+    const signature = `constructor(${params.join(',')})`;
+    const hash = keccak256(signature);
+    const selector = '0x' + hash.substring(0, 8);
+
+    const startLine = offsetToLine(startOffset);
+
+    results.push({
+      name: 'constructor',
+      selector,
+      gas: 0,
+      loc: { line: startLine, endLine: startLine + 5 },
+      visibility: visibility || 'public',
+      stateMutability: payable === 'payable' ? 'payable' : 'nonpayable',
+      warnings: ['⚠️ Gas unavailable - compilation failed (check imports)'],
+    });
+  }
+
+  return results;
+}
+
+/**
  * Compile and get full gas analysis (Remix-style)
+ * Falls back to regex-based parsing when compilation fails to still provide selectors
  */
 export async function compileWithGasAnalysis(
   source: string,
@@ -859,10 +1051,17 @@ export async function compileWithGasAnalysis(
     }
 
     if (errors.length > 0) {
+      // Compilation failed - fall back to regex-based extraction for selectors
+      console.warn(
+        `⚠️ Compilation failed, falling back to regex-based selector extraction for ${fileName}`
+      );
+      const fallbackGasInfo = extractFunctionsWithRegex(source);
+      debug.log(`Extracted ${fallbackGasInfo.length} functions via regex fallback`);
+
       return {
         success: false,
         version,
-        gasInfo: [],
+        gasInfo: fallbackGasInfo, // Still provide selectors even though compilation failed
         errors,
         warnings,
       };
@@ -873,21 +1072,18 @@ export async function compileWithGasAnalysis(
     const contracts = output.contracts?.[fileName] || {};
     const ast = output.sources?.[fileName]?.ast;
 
-    console.log(`[SolcManager] Contracts found: ${Object.keys(contracts).length}`);
-    console.log(`[SolcManager] AST present: ${!!ast}`);
+    debug.log(`Contracts found: ${Object.keys(contracts).length}, AST present: ${!!ast}`);
 
-    for (const [contractName, contractData] of Object.entries(contracts)) {
+    for (const [cName, contractData] of Object.entries(contracts)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = contractData as any;
       const gasEstimates = data.evm?.gasEstimates || {};
 
-      console.log(
-        `[SolcManager] Contract: ${contractName}, gasEstimates keys: ${Object.keys(gasEstimates).join(', ')}`
-      );
+      debug.log(`Contract: ${cName}, gasEstimates keys: ${Object.keys(gasEstimates).join(', ')}`);
 
       if (ast) {
-        const mappedGas = mapGasToAst(ast, gasEstimates, source);
-        console.log(`[SolcManager] Mapped ${mappedGas.length} functions for ${contractName}`);
+        const mappedGas = mapGasToAst(ast, gasEstimates, source, cName);
+        debug.log(`Mapped ${mappedGas.length} functions for ${cName}`);
         gasInfo.push(...mappedGas);
       }
     }

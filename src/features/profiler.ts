@@ -55,18 +55,26 @@ export class RuntimeProfiler {
     const reports: ForgeGasReport[] = [];
 
     try {
-      // Look for .gas-snapshot file (forge-std gas reporting)
+      // Look for .gas-snapshot file (forge snapshot / forge-std gas reporting)
       const snapshotPath = path.join(workspaceRoot, '.gas-snapshot');
       if (fs.existsSync(snapshotPath)) {
         const content = fs.readFileSync(snapshotPath, 'utf-8');
         reports.push(...this.parseGasSnapshot(content));
       }
 
-      // Also look for forge test output
-      const testOutputPath = path.join(workspaceRoot, 'forge-test-output.txt');
-      if (fs.existsSync(testOutputPath)) {
-        const content = fs.readFileSync(testOutputPath, 'utf-8');
-        reports.push(...this.parseForgeTestOutput(content));
+      // Look for forge test gas report output in common locations
+      const gasReportPaths = [
+        path.join(workspaceRoot, 'forge-test-output.txt'),
+        path.join(workspaceRoot, 'gas-report.txt'),
+        path.join(workspaceRoot, 'out', 'gas-report.txt'),
+      ];
+
+      for (const reportPath of gasReportPaths) {
+        if (fs.existsSync(reportPath)) {
+          const content = fs.readFileSync(reportPath, 'utf-8');
+          reports.push(...this.parseForgeTestOutput(content));
+          break; // Use the first one found
+        }
       }
     } catch (error) {
       // Fail silently - user might not have run tests yet
@@ -77,108 +85,175 @@ export class RuntimeProfiler {
 
   /**
    * Parse .gas-snapshot file
+   *
+   * Forge snapshot format examples:
+   *   CounterTest:testIncrement() (gas: 30381)
+   *   CounterTest:testSetNumber(uint256) (gas: 32164)
+   *   CounterTest:test_Fails_IfNotOwner() (gas: 8521)
    */
   private parseGasSnapshot(content: string): ForgeGasReport[] {
-    const reports: ForgeGasReport[] = [];
+    const contractMap = new Map<string, Map<string, TestGasData>>();
     const lines = content.split('\n');
-
-    let currentContract = '';
-    const tests = new Map<string, TestGasData>();
 
     for (const line of lines) {
       if (line.trim().length === 0) {
         continue;
       }
 
-      // Format: ContractTest:testFunction() (gas: 123456)
-      const match = line.match(/^(\w+):(\w+)\(\)\s+\(gas:\s+(\d+)\)$/);
-      if (match) {
-        const [, contract, testName, gas] = match;
-
-        if (contract !== currentContract) {
-          if (currentContract && tests.size > 0) {
-            reports.push({
-              contract: currentContract,
-              tests: new Map(tests),
-              deploymentCost: 0,
-            });
-            tests.clear();
-          }
-          currentContract = contract;
-        }
-
-        tests.set(testName, {
-          testName,
-          functionsCalled: [],
-          totalGas: parseInt(gas),
-          avgGas: parseInt(gas),
-          calls: 1,
-        });
+      // Match: ContractName:functionSignature (gas: 123456)
+      // The function signature can include parameters like (uint256,address)
+      const match = line.match(/^(\w+):(.+?)\s+\(gas:\s+(\d+)\)$/);
+      if (!match) {
+        continue;
       }
-    }
 
-    // Add last contract
-    if (currentContract && tests.size > 0) {
-      reports.push({
-        contract: currentContract,
-        tests: new Map(tests),
-        deploymentCost: 0,
+      const [, contract, fullSignature, gas] = match;
+      // Extract just the function name from the signature
+      const funcName = fullSignature.replace(/\(.*\)$/, '');
+      const gasValue = parseInt(gas);
+
+      if (!contractMap.has(contract)) {
+        contractMap.set(contract, new Map());
+      }
+
+      const tests = contractMap.get(contract)!;
+      tests.set(fullSignature, {
+        testName: funcName,
+        functionsCalled: [
+          {
+            name: funcName,
+            actualGas: gasValue,
+          },
+        ],
+        totalGas: gasValue,
+        avgGas: gasValue,
+        calls: 1,
       });
     }
+
+    const reports: ForgeGasReport[] = [];
+    contractMap.forEach((tests, contract) => {
+      reports.push({ contract, tests, deploymentCost: 0 });
+    });
 
     return reports;
   }
 
   /**
    * Parse forge test --gas-report output
+   *
+   * Real Forge gas report format:
+   *   | src/Counter.sol:Counter contract |                 |       |        |       |         |
+   *   |----------------------------------|-----------------|-------|--------|-------|---------|
+   *   | Deployment Cost                  | Deployment Size |       |        |       |         |
+   *   | 53705                            | 300             |       |        |       |         |
+   *   | Function Name                    | min             | avg   | median | max   | # calls |
+   *   | increment()                      | 43305           | 43305 | 43305  | 43305 | 1       |
+   *   | setNumber(uint256)               | 5346            | 15246 | 15246  | 25146 | 2       |
    */
   private parseForgeTestOutput(content: string): ForgeGasReport[] {
     const reports: ForgeGasReport[] = [];
+    const lines = content.split('\n');
 
-    // Extract gas report tables
-    const gasReportPattern = /\|\s+Contract\s+\|\s+Function.*?\n([\s\S]*?)(?:\n\n|\n\|)/g;
-    let match;
+    let currentContract = '';
+    let deploymentCost = 0;
+    let inFunctionSection = false;
+    let tests = new Map<string, TestGasData>();
 
-    while ((match = gasReportPattern.exec(content)) !== null) {
-      const tableContent = match[1];
-      const lines = tableContent.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
 
-      const tests = new Map<string, TestGasData>();
+      // Match contract header: | src/Counter.sol:Counter contract |
+      const contractMatch = line.match(/^\|\s+(?:\S+:)?(\w+)\s+contract\s+\|/);
+      if (contractMatch) {
+        // Flush previous contract
+        if (currentContract && tests.size > 0) {
+          reports.push({ contract: currentContract, tests, deploymentCost });
+          tests = new Map();
+        }
+        currentContract = contractMatch[1];
+        deploymentCost = 0;
+        inFunctionSection = false;
+        continue;
+      }
 
-      for (const line of lines) {
-        if (line.includes('|')) {
-          // Parse: | ContractName | functionName | 123 | 456 | 789 | 10 |
-          const parts = line
+      // Skip separator lines
+      if (line.match(/^\|[-|]+\|$/)) {
+        continue;
+      }
+
+      if (!line.startsWith('|') || !currentContract) {
+        continue;
+      }
+
+      const parts = line
+        .split('|')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
+
+      if (parts.length < 2) {
+        continue;
+      }
+
+      // Match deployment cost row (row after "Deployment Cost" header)
+      if (parts[0] === 'Deployment Cost') {
+        // Next non-separator row has the actual numbers
+        for (let j = i + 1; j < lines.length; j++) {
+          const nextLine = lines[j].trim();
+          if (nextLine.match(/^\|[-|]+\|$/)) {
+            continue;
+          }
+          const nextParts = nextLine
             .split('|')
             .map((p) => p.trim())
             .filter((p) => p.length > 0);
-
-          if (parts.length >= 4 && !parts[0].includes('Contract')) {
-            const [contract, funcName, min, avg, max, calls] = parts;
-
-            tests.set(funcName, {
-              testName: funcName,
-              functionsCalled: [
-                {
-                  name: funcName,
-                  actualGas: parseInt(avg) || 0,
-                },
-              ],
-              totalGas: parseInt(avg) || 0,
-              avgGas: parseInt(avg) || 0,
-              calls: parseInt(calls) || 1,
-            });
-
-            if (reports.length === 0 || reports[reports.length - 1].contract !== contract) {
-              reports.push({
-                contract,
-                tests,
-                deploymentCost: 0,
-              });
-            }
+          if (nextParts.length >= 1 && /^\d+$/.test(nextParts[0])) {
+            deploymentCost = parseInt(nextParts[0]);
+            i = j;
+            break;
           }
+          break;
         }
+        continue;
       }
+
+      // Detect function section header
+      if (parts[0] === 'Function Name') {
+        inFunctionSection = true;
+        continue;
+      }
+
+      // Parse function rows: | funcName(params) | min | avg | median | max | # calls |
+      if (inFunctionSection && parts.length >= 6) {
+        const funcSignature = parts[0];
+        const avg = parseInt(parts[2]);
+        const calls = parseInt(parts[5]);
+
+        if (isNaN(avg)) {
+          continue;
+        }
+
+        // Extract clean function name without params
+        const funcName = funcSignature.replace(/\(.*\)$/, '');
+
+        tests.set(funcSignature, {
+          testName: funcName,
+          functionsCalled: [
+            {
+              name: funcName,
+              actualGas: avg,
+            },
+          ],
+          totalGas: avg,
+          avgGas: avg,
+          calls: isNaN(calls) ? 1 : calls,
+        });
+      }
+    }
+
+    // Flush last contract
+    if (currentContract && tests.size > 0) {
+      reports.push({ contract: currentContract, tests, deploymentCost });
     }
 
     return reports;
@@ -272,9 +347,10 @@ export class RuntimeProfiler {
     md += `### Estimation Quality\n\n`;
     md += `| Status | Count | % |\n`;
     md += `|--------|-------|---|\n`;
-    md += `| ✅ Accurate (±10%) | ${accurate} | ${((accurate / profilerReport.comparisons.length) * 100).toFixed(1)}% |\n`;
-    md += `| ⚠️ Underestimated | ${under} | ${((under / profilerReport.comparisons.length) * 100).toFixed(1)}% |\n`;
-    md += `| 📉 Overestimated | ${over} | ${((over / profilerReport.comparisons.length) * 100).toFixed(1)}% |\n\n`;
+    const total = profilerReport.comparisons.length || 1;
+    md += `| ✅ Accurate (±10%) | ${accurate} | ${((accurate / total) * 100).toFixed(1)}% |\n`;
+    md += `| ⚠️ Underestimated | ${under} | ${((under / total) * 100).toFixed(1)}% |\n`;
+    md += `| 📉 Overestimated | ${over} | ${((over / total) * 100).toFixed(1)}% |\n\n`;
 
     // Top deviations
     if (profilerReport.comparisons.length > 0) {

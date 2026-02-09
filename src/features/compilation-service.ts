@@ -24,6 +24,8 @@ import {
   parsePragmaFromSource,
   resolveSolcVersion,
 } from './SolcManager';
+import { isForgeAvailable, findFoundryRoot, compileWithForge } from './forge-backend';
+import { isRunnerAvailable, compileWithRunner } from './runner-backend';
 
 /**
  * Compilation event types
@@ -228,7 +230,7 @@ export class CompilationService extends EventEmitter {
     contentHash: string,
     importCallback?: (path: string) => { contents: string } | { error: string }
   ): Promise<CompilationResult> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       // Clear existing timer
       const existingTimer = this.debounceTimers.get(uri);
       if (existingTimer) {
@@ -238,8 +240,12 @@ export class CompilationService extends EventEmitter {
       // Set new timer
       const timer = setTimeout(async () => {
         this.debounceTimers.delete(uri);
-        const result = await this.compileNow(uri, source, trigger, contentHash, importCallback);
-        resolve(result);
+        try {
+          const result = await this.compileNow(uri, source, trigger, contentHash, importCallback);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
       }, this.debounceMs);
 
       this.debounceTimers.set(uri, timer);
@@ -259,28 +265,49 @@ export class CompilationService extends EventEmitter {
     const pragma = parsePragmaFromSource(source);
     const fileName = this.getFileName(uri);
 
-    // Emit start event
-    this.emit('compilation:start', { uri, version: pragma || 'bundled' });
-
     try {
-      // Check if we need to download a version
-      if (pragma) {
-        const availableVersions = await SolcManager.getAvailableVersions();
+      let output: CompilationOutput | null = null;
+
+      const filePath = this.uriToFilePath(uri);
+      const foundryRoot = filePath ? findFoundryRoot(filePath) : null;
+
+      // --- Priority 1: Runner backend (EVM-executed gas, fastest) ---
+      if (filePath && (await isRunnerAvailable())) {
+        this.emit('compilation:start', { uri, version: 'runner' });
         try {
-          const targetVersion = resolveSolcVersion(pragma, availableVersions);
-          if (!SolcManager.isCached(targetVersion)) {
-            this.emit('version:downloading', { version: targetVersion });
-            // Load will cache it
-            await SolcManager.load(targetVersion);
-            this.emit('version:ready', { version: targetVersion });
-          }
+          output = await compileWithRunner(filePath, source);
         } catch {
-          // Will fall back to bundled
+          // Runner failed — fall through to forge/solc
+          output = null;
         }
       }
 
-      // Compile
-      const output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
+      // --- Priority 2: Forge backend (Foundry projects) ---
+      if (!output && foundryRoot && (await isForgeAvailable())) {
+        this.emit('compilation:start', { uri, version: 'forge' });
+        output = await compileWithForge(filePath!, foundryRoot);
+      }
+
+      // --- Priority 3: Solc-js (WASM, universal fallback) ---
+      if (!output) {
+        this.emit('compilation:start', { uri, version: pragma || 'bundled' });
+
+        if (pragma) {
+          const availableVersions = await SolcManager.getAvailableVersions();
+          try {
+            const targetVersion = resolveSolcVersion(pragma, availableVersions);
+            if (!SolcManager.isCached(targetVersion)) {
+              this.emit('version:downloading', { version: targetVersion });
+              await SolcManager.load(targetVersion);
+              this.emit('version:ready', { version: targetVersion });
+            }
+          } catch {
+            // Will fall back to bundled
+          }
+        }
+
+        output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
+      }
 
       const result: CompilationResult = {
         ...output,
@@ -295,11 +322,12 @@ export class CompilationService extends EventEmitter {
       this.cacheResult(contentHash, result, pragma);
       this.uriToHashCache.set(uri, contentHash);
 
-      // Emit success event
+      // Emit events - even on error, we may have fallback gasInfo
       if (result.success) {
         this.emit('compilation:success', { uri, output: result });
       } else {
-        this.emit('compilation:error', { uri, errors: result.errors });
+        // Emit error event but also include the output (which may have fallback gasInfo)
+        this.emit('compilation:error', { uri, errors: result.errors, output: result });
       }
 
       return result;
@@ -321,6 +349,21 @@ export class CompilationService extends EventEmitter {
       this.emit('compilation:error', { uri, errors: result.errors });
       return result;
     }
+  }
+
+  /**
+   * Try to convert a URI string to a local file path.
+   * Returns null for non-file URIs.
+   */
+  private uriToFilePath(uri: string): string | null {
+    if (uri.startsWith('file://')) {
+      return decodeURIComponent(uri.replace('file://', ''));
+    }
+    // Already a path (no scheme)
+    if (uri.startsWith('/') || /^[a-zA-Z]:/.test(uri)) {
+      return uri;
+    }
+    return null;
   }
 
   /**

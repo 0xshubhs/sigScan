@@ -162,14 +162,14 @@ describe('SolcVersionManager', () => {
     it('should return true for compatible pragma', () => {
       const pragma = parsePragma('pragma solidity ^0.8.0;');
       const satisfies = bundledCompilerSatisfies(pragma);
-      // 0.8.33 satisfies ^0.8.0
+      // 0.8.28 satisfies ^0.8.0
       expect(satisfies).toBe(true);
     });
 
     it('should return false for incompatible pragma', () => {
       const pragma = parsePragma('pragma solidity ^0.7.0;');
       const satisfies = bundledCompilerSatisfies(pragma);
-      // 0.8.33 does not satisfy ^0.7.0
+      // 0.8.28 does not satisfy ^0.7.0
       expect(satisfies).toBe(false);
     });
 
@@ -179,17 +179,17 @@ describe('SolcVersionManager', () => {
     });
 
     it('should handle exact version that matches', () => {
-      const pragma = parsePragma('pragma solidity 0.8.33;');
+      const pragma = parsePragma('pragma solidity 0.8.28;');
       const satisfies = bundledCompilerSatisfies(pragma);
       expect(satisfies).toBe(true);
     });
 
     it('should handle range pragmas', () => {
       const testCases = [
-        { pragma: '>=0.8.0 <0.9.0', expected: true }, // 0.8.33 is in range
-        { pragma: '>=0.8.20 <0.9.0', expected: true }, // 0.8.33 is in range
-        { pragma: '>=0.9.0 <1.0.0', expected: false }, // 0.8.33 is not in range
-        { pragma: '>=0.6.0 <0.8.0', expected: false }, // 0.8.33 is not in range
+        { pragma: '>=0.8.0 <0.9.0', expected: true }, // 0.8.28 is in range
+        { pragma: '>=0.8.20 <0.9.0', expected: true }, // 0.8.28 is in range
+        { pragma: '>=0.9.0 <1.0.0', expected: false }, // 0.8.28 is not in range
+        { pragma: '>=0.6.0 <0.8.0', expected: false }, // 0.8.28 is not in range
       ];
 
       testCases.forEach(({ pragma, expected }) => {
@@ -204,7 +204,7 @@ describe('SolcVersionManager', () => {
     it('should return initial status with bundled version', () => {
       const status = getCompilerStatus();
 
-      expect(status.bundled).toBe('0.8.33');
+      expect(status.bundled).toBe('0.8.28');
       expect(status.cached).toEqual([]);
       expect(status.downloading).toEqual([]);
     });

@@ -7,7 +7,7 @@
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0",
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   },
   "categories": [
     "Programming Languages",
@@ -231,6 +231,16 @@
           "type": "string",
           "default": "",
           "description": "Etherscan API key for contract verification"
+        },
+        "sigscan.runnerBinaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the sigscan-runner binary. Leave empty for auto-discovery (bundled, PATH, or workspace)."
+        },
+        "sigscan.preferRunner": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use sigscan-runner (EVM execution) as the primary gas backend when available. Disable to use forge/solc instead."
         }
       }
     },
@@ -291,9 +301,9 @@
     "@commitlint/config-conventional": "^20.0.0",
     "@types/glob": "^8.1.0",
     "@types/jest": "^29.5.14",
-    "@types/node": "^18.0.0",
+    "@types/node": "^25.0.6",
     "@types/semver": "^7.7.1",
-    "@types/vscode": "^1.74.0",
+    "@types/vscode": "^1.109.0",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
     "@vscode/vsce": "^3.7.1",
@@ -301,7 +311,7 @@
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "lint-staged": "^16.2.7",
-    "prettier": "^3.7.3",
+    "prettier": "^3.8.1",
     "standard-version": "^9.5.0",
     "ts-jest": "^29.4.5",
     "ts-loader": "^9.0.0",
@@ -316,8 +326,7 @@
     "glob": "^8.0.3",
     "js-sha3": "^0.8.0",
     "semver": "^7.7.3",
-    "solc": "^0.8.33",
-    "sqlite3": "^5.1.6"
+    "solc": "^0.8.28"
   },
   "bin": {
     "sigscan": "./dist/cli/index.js"

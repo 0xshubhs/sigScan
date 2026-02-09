@@ -298,7 +298,7 @@ export class SolcIntegration {
       if (!isExactMatch && pragma) {
         const resolvedVersion = resolveBestVersion(pragma);
         console.log(
-          `ℹ️  Pragma ${pragma.range} needs ${resolvedVersion || 'unresolved'}, compiling with bundled 0.8.33 initially...`
+          `ℹ️  Pragma ${pragma.range} needs ${resolvedVersion || 'unresolved'}, compiling with bundled 0.8.28 initially...`
         );
       }
 
