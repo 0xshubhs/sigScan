@@ -1,0 +1,67 @@
+# Updated: 2026-02-09T19:35:37.332Z
+# Previous content replaced
+
+# Smart Contract Signatures
+# Category: CONTRACTS
+# Generated: 2026-02-09T19:35:37.210Z
+# Project: foundry (/home/madhav/Desktop/projs/sigScan/examples/foundry-options)
+# Total Contracts in Category: 2
+
+## Contract: OptionsMarket (OptionsMarket.sol)
+
+### Functions:
+writeOption(OptionType,address,uint256,uint256,uint256) --> 0x3caaf537
+buyOption(uint256)                       --> 0xfba225b9
+exerciseOption(uint256)                  --> 0xf52f2526
+expireOption(uint256)                    --> 0x02f126e8
+cancelOption(uint256)                    --> 0xde6bf635
+depositCollateral(address)               --> 0x97d475d7
+withdrawCollateral(address,uint256)      --> 0x350c35e9
+calculatePremium(address,uint256,uint256,uint256,OptionType) --> 0x30dc552c
+updateVolatility(address,uint256)        --> 0x50ca2516
+getOption(uint256)                       --> 0x1ce5e9a6
+getUserOptions(address)                  --> 0xbb2fb90a
+getIntrinsicValue(uint256)               --> 0xb2600f7d
+getTimeValue(uint256)                    --> 0xb3bfa98d
+constructor(address,address)             --> 0x4525f804
+
+### Events:
+OptionWritten(uint256,address,OptionType,uint256,uint256,uint256) --> 0xc659564e9b1548d37829379b0fad20ba84bb72e7a6c0bbaea8d852e149174f15
+OptionPurchased(uint256,address,uint256) --> 0x2817d4d24c9bf2a000a920b5dc026716e4e03e69619522be61549dacfa752cbd
+OptionExercised(uint256,address,uint256) --> 0x4596c154c182e8f70aa23d7334caf575c608e8bb46b16ba48782961cbca9312e
+OptionExpired(uint256)                   --> 0x04d03607ff2d12a2aef0938dbebbfbb423182f741164e646928a49a5a728f9c6
+OptionCancelled(uint256)                 --> 0x7621a0eef8c39766512e6fd0e8f1bc133ec9b9b2ade3f1732962a1905002f1f9
+CollateralDeposited(address,address,uint256) --> 0xf1c0dd7e9b98bbff859029005ef89b127af049cd18df1a8d79f0b7e019911e56
+CollateralWithdrawn(address,address,uint256) --> 0x45892a46e6cef329bb642da6d69846d324db43d19008edc141ed82382eda1bee
+VolatilityUpdated(address,uint256)       --> 0x4c1edb2651828fe431662e0cd5bed7c8ad35e7ee373ecc15bf9a726089579c5a
+
+### Errors:
+InsufficientCollateral()                 --> 0x3a23d825
+OptionNotActive()                        --> 0x557f7b94
+OptionExpired()                          --> 0x7676819d
+Unauthorized()                           --> 0x82b42900
+InvalidStrike()                          --> 0x9a5818d8
+InvalidExpiry()                          --> 0xd36c8500
+InsufficientPremium()                    --> 0x30cc5d5d
+OptionNotExpired()                       --> 0x29be7398
+
+## Contract: VolatilityOracle (VolatilityOracle.sol)
+
+### Functions:
+updatePrice(address,uint256)             --> 0x457972de
+calculateHistoricalVolatility(address)   --> 0x9c17422b
+authorizeUpdater(address)                --> 0x9cbe6097
+revokeUpdater(address)                   --> 0x3c932bef
+getVolatilityData(address)               --> 0x7afb4381
+getPriceHistory(address)                 --> 0x988d594c
+constructor()                            --> 0x90fa17bb
+
+### Events:
+PriceUpdated(address,uint256,uint256)    --> 0xb556fac599c3c70efb9ab1fa725ecace6c81cc48d1455f886607def065f3e0c0
+VolatilityCalculated(address,uint256,uint256) --> 0xade9e58b661c0ff688054a9b73ea5eec3627eca812796a18dbb21856da2d3b2b
+UpdaterAuthorized(address)               --> 0xfbc99308a04b9b530a8dbc7eb620a7597c4b92ff15390ab23ffdd979b9c592e4
+UpdaterRevoked(address)                  --> 0x27e810a75a9534f49f3874cd6aef1cd8ccd4fd9e24acb4c3813ba552851ef796
+
+### Errors:
+InvalidPrice()                           --> 0x00bfc921
+InsufficientData()                       --> 0xf7f78816

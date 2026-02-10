@@ -760,6 +760,20 @@ function findGasForFunction(
         return result;
       }
     }
+    // Handle object format with min/max properties
+    if (typeof value === 'object' && value !== null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const gasObj = value as any;
+      // Return average of min and max
+      if (gasObj.min !== undefined && gasObj.max !== undefined) {
+        const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
+        const max = gasObj.max === 'infinite' ? Infinity : Number(gasObj.max);
+        if (min === Infinity || max === Infinity) {
+          return 'infinite';
+        }
+        return Math.round((min + max) / 2);
+      }
+    }
   }
 
   // Strategy 2: Case-insensitive signature match
@@ -773,6 +787,20 @@ function findGasForFunction(
         }
       }
     }
+    // Handle object format with min/max properties
+    if (typeof value === 'object' && value !== null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const gasObj = value as any;
+      // Return average of min and max
+      if (gasObj.min !== undefined && gasObj.max !== undefined) {
+        const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
+        const max = gasObj.max === 'infinite' ? Infinity : Number(gasObj.max);
+        if (min === Infinity || max === Infinity) {
+          return 'infinite';
+        }
+        return Math.round((min + max) / 2);
+      }
+    }
   }
 
   // Strategy 3: Name-only match — only if exactly one entry matches the name
@@ -784,6 +812,20 @@ function findGasForFunction(
       const result = parseGasValue(nameMatches[0][1]);
       if (result !== null) {
         return result;
+      }
+      // Handle object format with min/max properties
+      if (typeof value === 'object' && value !== null) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const gasObj = value as any;
+        // Return average of min and max
+        if (gasObj.min !== undefined && gasObj.max !== undefined) {
+          const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
+          const max = gasObj.max === 'infinite' ? Infinity : Number(gasObj.max);
+          if (min === Infinity || max === Infinity) {
+            return 'infinite';
+          }
+          return Math.round((min + max) / 2);
+        }
       }
     }
   }
