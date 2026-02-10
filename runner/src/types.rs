@@ -16,10 +16,14 @@ pub struct FunctionReport {
     pub signature: String,
     pub gas: u64,
     pub status: ExecutionStatus,
+    /// Which calldata strategy produced this result.
+    /// Omitted from JSON when None for backward compatibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
 }
 
 /// Whether the function call succeeded or reverted.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ExecutionStatus {
     Success,

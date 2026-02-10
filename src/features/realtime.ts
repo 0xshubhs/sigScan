@@ -1126,84 +1126,73 @@ export class RealtimeAnalyzer extends EventEmitter {
       const startPos = new vscode.Position(line, 0);
       const range = new vscode.Range(startPos, endPos);
 
-      // Check if this is a fallback extraction (gas unavailable due to compilation failure)
-      const isCompilationFallback =
-        info.gas === 0 &&
-        info.warnings.some((w) => w.includes('compilation failed') || w.includes('unavailable'));
+      // Classify result
+      const isEvent = info.visibility === 'event';
+      const isReverted = info.warnings.some((w) => w.includes('reverted'));
+      const noGas = info.gas === 0;
 
-      // Format gas value
-      let gasText: string;
-      if (isCompilationFallback) {
-        gasText = 'N/A';
+      // Format gas (events never have gas)
+      let gasText = '';
+      if (!noGas && !isEvent && info.gas !== 'infinite') {
+        gasText =
+          info.gas >= 1_000_000
+            ? `${(info.gas / 1_000_000).toFixed(2)}M`
+            : info.gas >= 1_000
+              ? `${(info.gas / 1_000).toFixed(1)}k`
+              : info.gas.toString();
       } else if (info.gas === 'infinite') {
         gasText = 'var';
-      } else if (info.gas >= 1_000_000) {
-        gasText = `${(info.gas / 1_000_000).toFixed(2)}M`;
-      } else if (info.gas >= 1_000) {
-        gasText = `${(info.gas / 1_000).toFixed(1)}k`;
-      } else {
-        gasText = info.gas.toString();
       }
 
-      // Get color based on gas (gray for unavailable)
-      const color = isCompilationFallback ? '#888888' : this.getGasGradientColor(info.gas);
+      // Theme-aware colors — adapts to light/dark themes automatically
+      const color: string | vscode.ThemeColor = !gasText
+        ? new vscode.ThemeColor('editorCodeLens.foreground') // subtle, theme-native
+        : isReverted
+          ? new vscode.ThemeColor('editorGutter.commentRangeForeground')
+          : this.getGasGradientColor(info.gas);
 
-      // Build clean decoration text - show selector prominently when gas unavailable
-      const decorationText = isCompilationFallback
-        ? ` 🔍 ${info.selector} | ⛽ ${gasText}`
-        : ` ⛽ ${gasText} gas | ${info.selector}`;
+      // Build inline text — selector always visible
+      let decorationText: string;
+      if (isEvent) {
+        decorationText = ` event ${info.selector}`;
+      } else if (!gasText) {
+        decorationText = ` ${info.selector}`;
+      } else if (isReverted) {
+        decorationText = ` ~${gasText} gas | ${info.selector}`;
+      } else {
+        decorationText = ` ${gasText} gas | ${info.selector}`;
+      }
 
-      // Build detailed hover message
+      // Hover tooltip
       const hoverMd = new vscode.MarkdownString();
       hoverMd.isTrusted = true;
-      hoverMd.appendMarkdown(`### ${isCompilationFallback ? '🔍' : '⛽'} \`${info.name}\`\n\n`);
+      hoverMd.appendMarkdown(`### \`${info.name}\` \`${info.selector}\`\n\n`);
 
-      if (isCompilationFallback) {
-        hoverMd.appendMarkdown('**Estimated Gas:** ⚠️ Unavailable (compilation failed)\n\n');
-        hoverMd.appendMarkdown('> The contract has import errors or other compilation issues.\n');
-        hoverMd.appendMarkdown('> Function selector was extracted via regex fallback.\n');
-        hoverMd.appendMarkdown('> Fix compilation errors to see accurate gas estimates.\n\n');
+      if (isEvent) {
+        hoverMd.appendMarkdown(`**Type:** event\n\n**Topic:** \`${info.selector}\`\n\n`);
+      } else if (!gasText) {
+        hoverMd.appendMarkdown('**Gas:** unavailable\n\n');
+      } else if (isReverted) {
+        hoverMd.appendMarkdown(`**Gas:** ~${gasText} (reverted with default args)\n\n`);
       } else if (info.gas === 'infinite') {
-        hoverMd.appendMarkdown('**Estimated Gas:** ∞ (variable)\n\n');
-
-        // Provide context based on function characteristics
-        if (info.stateMutability === 'pure' || info.stateMutability === 'view') {
-          hoverMd.appendMarkdown('> ℹ️ Solc reports variable gas for this function.\n');
-          hoverMd.appendMarkdown(
-            '> This may be due to dynamic data (arrays, strings) or a solc estimation quirk.\n\n'
-          );
-        } else {
-          hoverMd.appendMarkdown(
-            '> ℹ️ Gas depends on execution path, external calls, or dynamic data.\n'
-          );
-          hoverMd.appendMarkdown('> Common causes: loops, external calls, storage iterations.\n\n');
-        }
+        hoverMd.appendMarkdown('**Gas:** variable (depends on execution path)\n\n');
       } else {
-        hoverMd.appendMarkdown(`**Estimated Gas:** ${info.gas.toLocaleString()}\n\n`);
-
-        // Complexity classification
-        let complexity: string;
-        if (info.gas < 50_000) {
-          complexity = '🟢 Low';
-        } else if (info.gas < 150_000) {
-          complexity = '🟡 Medium';
-        } else if (info.gas < 500_000) {
-          complexity = '🟠 High';
-        } else {
-          complexity = '🔴 Very High';
-        }
-        hoverMd.appendMarkdown(`**Complexity:** ${complexity}\n\n`);
+        const complexity =
+          info.gas < 50_000
+            ? 'Low'
+            : info.gas < 150_000
+              ? 'Medium'
+              : info.gas < 500_000
+                ? 'High'
+                : 'Very High';
+        hoverMd.appendMarkdown(`**Gas:** ${info.gas.toLocaleString()} (${complexity})\n\n`);
       }
 
-      hoverMd.appendMarkdown(`**Selector:** \`${info.selector}\`\n\n`);
-      hoverMd.appendMarkdown(
-        `**Visibility:** ${info.visibility} | **Mutability:** ${info.stateMutability}\n\n`
-      );
+      hoverMd.appendMarkdown(`${info.visibility} | ${info.stateMutability}\n\n`);
 
       if (info.warnings.length > 0) {
-        hoverMd.appendMarkdown('---\n\n**Warnings:**\n\n');
-        for (const warning of info.warnings) {
-          hoverMd.appendMarkdown(`- ${warning}\n`);
+        for (const w of info.warnings) {
+          hoverMd.appendMarkdown(`> ${w}\n`);
         }
       }
 
@@ -1359,35 +1348,22 @@ export class RealtimeAnalyzer extends EventEmitter {
    * Get color gradient from green to red based on gas amount
    */
   private getGasGradientColor(gasAmount: number | 'infinite'): string {
-    // Infinite gas is always red
     if (gasAmount === 'infinite') {
-      return '#FF0000'; // Red
+      return '#E06C75';
     }
-
-    // Gas thresholds for color gradient
-    // 0-5K: Green
-    // 5K-20K: Yellow-Green
-    // 20K-50K: Yellow
-    // 50K-100K: Orange
-    // 100K+: Red
-
-    if (gasAmount < 5000) {
-      return '#00FF00'; // Bright Green
-    } else if (gasAmount < 10000) {
-      return '#7FFF00'; // Chartreuse
-    } else if (gasAmount < 20000) {
-      return '#BFFF00'; // Yellow-Green
-    } else if (gasAmount < 35000) {
-      return '#FFFF00'; // Yellow
-    } else if (gasAmount < 50000) {
-      return '#FFD700'; // Gold
-    } else if (gasAmount < 75000) {
-      return '#FFA500'; // Orange
-    } else if (gasAmount < 100000) {
-      return '#FF6347'; // Tomato
-    } else {
-      return '#FF0000'; // Red
+    if (gasAmount < 5_000) {
+      return '#98C379';
     }
+    if (gasAmount < 20_000) {
+      return '#B5BD68';
+    }
+    if (gasAmount < 50_000) {
+      return '#E5C07B';
+    }
+    if (gasAmount < 100_000) {
+      return '#D19A66';
+    }
+    return '#E06C75';
   }
 
   private getComplexityColor(rating: string): string {

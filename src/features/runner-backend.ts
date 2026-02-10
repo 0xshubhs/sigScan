@@ -26,6 +26,7 @@ interface RunnerFunctionReport {
   signature: string;
   gas: number;
   status: 'success' | 'revert' | 'halt';
+  strategy?: string;
 }
 
 interface RunnerContractReport {
@@ -105,7 +106,7 @@ function discoverRunnerPath(): string | null {
       return configPath;
     }
 
-    const ext = vscode.extensions.getExtension('sigscan.sigscan');
+    const ext = vscode.extensions.getExtension('0xshubhs.sigscan');
     if (ext) {
       const bundledPath = path.join(ext.extensionPath, 'bin', binName);
       if (fs.existsSync(bundledPath)) {
@@ -123,12 +124,19 @@ function discoverRunnerPath(): string | null {
   }
 
   // 4. Development fallback — look relative to this file's location
-  // Walk up from src/features/ to project root, then check runner/target/release/
+  // Walk up to project root, then check runner/target/release/ and runner/target/debug/
   let dir = __dirname;
-  for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, 'runner', 'target', 'release', binName);
-    if (fs.existsSync(candidate)) {
-      return candidate;
+  for (let i = 0; i < 8; i++) {
+    for (const profile of ['release', 'debug']) {
+      const candidate = path.join(dir, 'runner', 'target', profile, binName);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    // Also check bin/ directory (for development with copied binary)
+    const binCandidate = path.join(dir, 'bin', binName);
+    if (fs.existsSync(binCandidate)) {
+      return binCandidate;
     }
     dir = path.dirname(dir);
   }
@@ -196,7 +204,8 @@ export async function compileWithRunner(
         let gas: number | 'infinite' = func.gas;
 
         if (func.status === 'revert') {
-          warnings.push('Function reverted with default arguments');
+          const strategyNote = func.strategy ? ` (strategy: ${func.strategy})` : '';
+          warnings.push(`Function reverted with default arguments${strategyNote}`);
         } else if (func.status === 'halt') {
           gas = 'infinite';
           warnings.push('Execution halted - possible unbounded gas');
@@ -214,10 +223,8 @@ export async function compileWithRunner(
       }
     }
 
-    // Log any runner stderr warnings
-    if (stderr.trim()) {
-      // stderr has diagnostic info — not an error
-    }
+    // Append event topic decorations
+    gasInfo.push(...extractEventMetadata(source));
 
     return {
       success: true,
@@ -299,8 +306,10 @@ function extractFunctionMetadata(source: string): Map<
     return lines.length;
   }
 
+  // Matches function declarations including those with custom modifiers (onlyOwner, nonReentrant, etc.)
+  // The [^{;]* wildcard after visibility/mutability catches everything up to { or ;
   const fnRegex =
-    /function\s+(\w+)\s*\(([^)]*)\)\s*(public|external|internal|private)?\s*(pure|view|payable|nonpayable)?\s*(?:virtual)?\s*(?:override(?:\([^)]*\))?)?\s*(?:returns\s*\([^)]*\))?\s*[{;]/gs;
+    /function\s+(\w+)\s*\(([^)]*)\)\s*(public|external|internal|private)?\s*(pure|view|payable|nonpayable)?[^{;]*[{;]/gs;
 
   let match;
   while ((match = fnRegex.exec(source)) !== null) {
@@ -355,6 +364,63 @@ function extractFunctionMetadata(source: string): Map<
 }
 
 /**
+ * Extract event metadata from Solidity source.
+ * Returns GasInfo[] entries with the event topic hash as selector, gas: 0.
+ */
+function extractEventMetadata(source: string): GasInfo[] {
+  const events: GasInfo[] = [];
+  const lines = source.split('\n');
+  const lineOffsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
+  }
+  function offsetToLine(offset: number): number {
+    for (let i = 0; i < lineOffsets.length - 1; i++) {
+      if (offset >= lineOffsets[i] && offset < lineOffsets[i + 1]) {
+        return i + 1;
+      }
+    }
+    return lines.length;
+  }
+
+  const eventRegex = /event\s+(\w+)\s*\(([^)]*)\)\s*;/gs;
+  let match;
+  while ((match = eventRegex.exec(source)) !== null) {
+    const [, name, paramsStr] = match;
+    const params = paramsStr
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((param) => {
+        // Strip "indexed" keyword and variable name, keep only the type
+        const parts = param
+          .replace(/\bindexed\b/, '')
+          .trim()
+          .split(/\s+/)
+          .filter((p) => p.length > 0);
+        return parts[0] || 'unknown';
+      });
+
+    const signature = `${name}(${params.join(',')})`;
+    const topic = '0x' + keccak256(signature);
+
+    events.push({
+      name,
+      selector: topic.substring(0, 10), // Show first 4 bytes like function selectors
+      gas: 0,
+      loc: {
+        line: offsetToLine(match.index),
+        endLine: offsetToLine(match.index + match[0].length),
+      },
+      visibility: 'event',
+      stateMutability: 'n/a',
+      warnings: [],
+    });
+  }
+  return events;
+}
+
+/**
  * Build a fallback CompilationOutput using regex extraction (selectors only, gas: 0).
  */
 function fallbackResult(filePath: string, source: string, errorMessage: string): CompilationOutput {
@@ -373,6 +439,9 @@ function fallbackResult(filePath: string, source: string, errorMessage: string):
       warnings: [`Gas unavailable - runner failed (${errorMessage})`],
     });
   }
+
+  // Include events even in fallback
+  gasInfo.push(...extractEventMetadata(src));
 
   return {
     success: false,

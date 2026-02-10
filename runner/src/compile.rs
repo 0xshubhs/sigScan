@@ -172,7 +172,13 @@ fn read_artifacts(out_dir: &Path, sol_path: &Path) -> Result<Vec<CompiledContrac
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let bytecode = hex::decode(bytecode_hex.trim_start_matches("0x")).unwrap_or_default();
+        // Replace unlinked library placeholders (__$...$__) with a zero address.
+        // These appear when a contract uses external libraries. Each placeholder is
+        // 40 hex chars (20 bytes = an address slot). Replacing with zeros lets us
+        // deploy and measure gas — library calls will revert but non-library
+        // functions still produce accurate gas.
+        let cleaned_hex = replace_library_placeholders(bytecode_hex.trim_start_matches("0x"));
+        let bytecode = hex::decode(&cleaned_hex).unwrap_or_default();
 
         // Skip artifacts with no bytecode (interfaces, abstract contracts)
         if bytecode.is_empty() {
@@ -187,6 +193,37 @@ fn read_artifacts(out_dir: &Path, sol_path: &Path) -> Result<Vec<CompiledContrac
     }
 
     Ok(contracts)
+}
+
+/// Replace unlinked library placeholders (`__$<hash>$__`) with zero addresses.
+///
+/// Forge emits 40-char placeholders like `__$1f06ac8d622ce42796cee98ba1044ce165$__`
+/// for contracts that use external libraries. Each placeholder occupies exactly
+/// 40 hex characters (20 bytes = one EVM address slot).
+fn replace_library_placeholders(hex_str: &str) -> String {
+    let mut result = String::with_capacity(hex_str.len());
+    let bytes = hex_str.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'_' && bytes[i + 1] == b'_' {
+            // Find the closing `$__`
+            if let Some(end) = hex_str[i..].find("$__") {
+                let placeholder_end = i + end + 3; // past the closing `$__`
+                let placeholder_len = placeholder_end - i;
+                // Each placeholder should be 40 chars; pad with zeros
+                for _ in 0..placeholder_len {
+                    result.push('0');
+                }
+                i = placeholder_end;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+
+    result
 }
 
 fn parse_forge_out_dir(foundry_root: &Path) -> PathBuf {

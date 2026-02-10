@@ -8,7 +8,7 @@ import { logger } from '../utils/logger';
 let sigScanManager: SigScanManager;
 let signatureTreeProvider: SignatureTreeProvider;
 
-import { RealtimeAnalyzer, AnalysisReadyEvent } from '../features/realtime';
+import { RealtimeAnalyzer } from '../features/realtime';
 
 // New Remix-style compilation imports
 import { compilationService } from '../features/compilation-service';
@@ -368,28 +368,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Gas annotations now use colored decorations (gradient from green to red)
 
-  // Listen for background solc analysis completion - update decorations when ready
-  realtimeAnalyzer.on('analysisReady', (event: AnalysisReadyEvent) => {
-    const editor = vscode.window.visibleTextEditors.find(
-      (e) => e.document.uri.toString() === event.uri
-    );
-    if (editor && editor.document.languageId === 'solidity') {
-      // CRITICAL: Don't clear decorations if we have no new data
-      if (event.analysis.gasEstimates.size === 0) {
-        logger.debug('Solc returned empty results, keeping existing decorations');
-        return;
-      }
-
-      const gasDecorations = realtimeAnalyzer.createGasDecorations(event.analysis, editor.document);
-      const complexityDecorations = realtimeAnalyzer.createComplexityDecorations(
-        event.analysis,
-        editor.document
-      );
-      editor.setDecorations(gasDecorationType, gasDecorations);
-      editor.setDecorations(complexityDecorationType, complexityDecorations);
-      logger.info('Updated decorations with solc analysis');
-    }
-  });
+  // Legacy analysisReady listener disabled — it races with the primary
+  // runner/forge/solc pipeline and overwrites richer decorations with sparser ones.
+  // The primary pipeline (updateDecorations -> compilationService.compile ->
+  // createRemixStyleDecorations) handles all decoration updates.
 
   // Real-time analysis on text change
   const textChangeDisposable = vscode.workspace.onDidChangeTextDocument(async (event) => {

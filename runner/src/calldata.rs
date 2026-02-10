@@ -3,130 +3,153 @@ use alloy_json_abi::{Function, JsonAbi, Param};
 use alloy_primitives::{Address, I256, U256};
 use eyre::{Result, WrapErr};
 
-/// Encode calldata for a function using zero-value default arguments.
-///
-/// Returns `selector ++ abi_encoded_params`.
-pub fn encode_default_calldata(func: &Function) -> Result<Vec<u8>> {
-    let selector = func.selector();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallStrategy {
+    SmartDefaults,
+    CallerAddress,
+    ZeroDefaults,
+}
 
+/// Encode `selector ++ abi_encode(strategy_values)` for a function call.
+pub fn encode_calldata_with_strategy(
+    func: &Function,
+    strategy: CallStrategy,
+    caller: Address,
+) -> Result<Vec<u8>> {
+    let selector = func.selector();
     if func.inputs.is_empty() {
         return Ok(selector.to_vec());
     }
-
     let values: Vec<DynSolValue> = func
         .inputs
         .iter()
-        .map(|p| {
-            let ty = param_to_dyn_sol_type(p)?;
-            Ok(default_value(&ty))
-        })
+        .map(|p| Ok(strategy_value(&param_to_dyn_sol_type(p)?, strategy, caller)))
         .collect::<Result<Vec<_>>>()?;
-
-    let encoded = if values.len() == 1 {
-        DynSolValue::Tuple(values).abi_encode_params()
-    } else {
-        DynSolValue::Tuple(values).abi_encode_params()
-    };
-
+    let encoded = DynSolValue::Tuple(values).abi_encode_params();
     let mut calldata = Vec::with_capacity(4 + encoded.len());
     calldata.extend_from_slice(selector.as_slice());
     calldata.extend_from_slice(&encoded);
     Ok(calldata)
 }
 
-/// Encode default constructor arguments (no selector prefix).
-///
-/// Returns empty bytes if no constructor or no constructor inputs.
-pub fn encode_default_constructor_args(abi: &JsonAbi) -> Result<Vec<u8>> {
+/// Encode constructor arguments (no selector). Empty if no constructor.
+pub fn encode_constructor_args_with_strategy(
+    abi: &JsonAbi,
+    strategy: CallStrategy,
+    caller: Address,
+) -> Result<Vec<u8>> {
     let ctor = match &abi.constructor {
-        Some(c) => c,
-        None => return Ok(Vec::new()),
+        Some(c) if !c.inputs.is_empty() => c,
+        _ => return Ok(Vec::new()),
     };
-
-    if ctor.inputs.is_empty() {
-        return Ok(Vec::new());
-    }
-
     let values: Vec<DynSolValue> = ctor
         .inputs
         .iter()
-        .map(|p| {
-            let ty = param_to_dyn_sol_type(p)?;
-            Ok(default_value(&ty))
-        })
+        .map(|p| Ok(strategy_value(&param_to_dyn_sol_type(p)?, strategy, caller)))
         .collect::<Result<Vec<_>>>()?;
-
     Ok(DynSolValue::Tuple(values).abi_encode_params())
 }
 
-/// Convert an ABI `Param` to a `DynSolType`.
-///
-/// Handles tuple types (structs) by recursing into components.
 fn param_to_dyn_sol_type(param: &Param) -> Result<DynSolType> {
     let ty_str = &param.ty;
-
-    // Handle tuple types (structs in Solidity ABI)
     if ty_str == "tuple" {
         let inner: Vec<DynSolType> = param
             .components
             .iter()
-            .map(|c| param_to_dyn_sol_type(c))
+            .map(param_to_dyn_sol_type)
             .collect::<Result<Vec<_>>>()?;
         return Ok(DynSolType::Tuple(inner));
     }
-
-    // Handle tuple arrays: "tuple[]" or "tuple[N]"
     if ty_str.starts_with("tuple[") {
         let inner: Vec<DynSolType> = param
             .components
             .iter()
-            .map(|c| param_to_dyn_sol_type(c))
+            .map(param_to_dyn_sol_type)
             .collect::<Result<Vec<_>>>()?;
         let tuple_ty = DynSolType::Tuple(inner);
-
         if ty_str == "tuple[]" {
             return Ok(DynSolType::Array(Box::new(tuple_ty)));
         }
-
-        // Fixed-size tuple array: "tuple[N]"
-        let n_str = &ty_str[6..ty_str.len() - 1]; // extract N from "tuple[N]"
+        let n_str = &ty_str[6..ty_str.len() - 1];
         if let Ok(n) = n_str.parse::<usize>() {
             return Ok(DynSolType::FixedArray(Box::new(tuple_ty), n));
         }
-
         return Ok(DynSolType::Array(Box::new(tuple_ty)));
     }
-
-    // For all other types, parse from the type string
     ty_str
         .parse::<DynSolType>()
         .wrap_err_with(|| format!("failed to parse Solidity type: {ty_str}"))
 }
 
-/// Generate a zero-value `DynSolValue` for the given type.
-fn default_value(ty: &DynSolType) -> DynSolValue {
+fn strategy_value(ty: &DynSolType, strategy: CallStrategy, caller: Address) -> DynSolValue {
+    match strategy {
+        CallStrategy::SmartDefaults => smart_value(ty, caller),
+        CallStrategy::CallerAddress => caller_value(ty, caller),
+        CallStrategy::ZeroDefaults => zero_value(ty),
+    }
+}
+
+/// Non-zero defaults that pass common require guards.
+fn smart_value(ty: &DynSolType, caller: Address) -> DynSolValue {
+    match ty {
+        DynSolType::Bool => DynSolValue::Bool(true),
+        DynSolType::Uint(b) => DynSolValue::Uint(U256::from(1), *b),
+        DynSolType::Int(b) => DynSolValue::Int(I256::try_from(1i64).unwrap_or(I256::ZERO), *b),
+        DynSolType::Address => DynSolValue::Address(Address::with_last_byte(1)),
+        DynSolType::Bytes => DynSolValue::Bytes(vec![0x01]),
+        DynSolType::String => DynSolValue::String("a".into()),
+        DynSolType::FixedBytes(n) => {
+            let mut b = [0u8; 32];
+            if *n > 0 { b[n - 1] = 1; }
+            DynSolValue::FixedBytes(alloy_primitives::B256::from(b), *n)
+        }
+        DynSolType::Array(inner) => DynSolValue::Array(vec![smart_value(inner, caller)]),
+        DynSolType::FixedArray(inner, n) => {
+            DynSolValue::FixedArray((0..*n).map(|_| smart_value(inner, caller)).collect())
+        }
+        DynSolType::Tuple(types) => {
+            DynSolValue::Tuple(types.iter().map(|t| smart_value(t, caller)).collect())
+        }
+        DynSolType::Function => {
+            let mut f = [0u8; 24];
+            f[23] = 1;
+            DynSolValue::Function(alloy_primitives::Function::from(f))
+        }
+    }
+}
+
+/// Use CALLER for address params, smart defaults for the rest.
+fn caller_value(ty: &DynSolType, caller: Address) -> DynSolValue {
+    match ty {
+        DynSolType::Address => DynSolValue::Address(caller),
+        DynSolType::Array(inner) => DynSolValue::Array(vec![caller_value(inner, caller)]),
+        DynSolType::FixedArray(inner, n) => {
+            DynSolValue::FixedArray((0..*n).map(|_| caller_value(inner, caller)).collect())
+        }
+        DynSolType::Tuple(types) => {
+            DynSolValue::Tuple(types.iter().map(|t| caller_value(t, caller)).collect())
+        }
+        _ => smart_value(ty, caller),
+    }
+}
+
+/// Zero-value defaults.
+fn zero_value(ty: &DynSolType) -> DynSolValue {
     match ty {
         DynSolType::Bool => DynSolValue::Bool(false),
-        DynSolType::Uint(bits) => DynSolValue::Uint(U256::ZERO, *bits),
-        DynSolType::Int(bits) => DynSolValue::Int(I256::ZERO, *bits),
+        DynSolType::Uint(b) => DynSolValue::Uint(U256::ZERO, *b),
+        DynSolType::Int(b) => DynSolValue::Int(I256::ZERO, *b),
         DynSolType::Address => DynSolValue::Address(Address::ZERO),
         DynSolType::Bytes => DynSolValue::Bytes(vec![]),
         DynSolType::String => DynSolValue::String(String::new()),
-        DynSolType::FixedBytes(n) => {
-            DynSolValue::FixedBytes(alloy_primitives::B256::ZERO, *n)
-        }
-        DynSolType::Array(_inner) => DynSolValue::Array(vec![]),
+        DynSolType::FixedBytes(n) => DynSolValue::FixedBytes(alloy_primitives::B256::ZERO, *n),
+        DynSolType::Array(_) => DynSolValue::Array(vec![]),
         DynSolType::FixedArray(inner, n) => {
-            let vals = (0..*n).map(|_| default_value(inner)).collect();
-            DynSolValue::FixedArray(vals)
+            DynSolValue::FixedArray((0..*n).map(|_| zero_value(inner)).collect())
         }
         DynSolType::Tuple(types) => {
-            let vals = types.iter().map(default_value).collect();
-            DynSolValue::Tuple(vals)
+            DynSolValue::Tuple(types.iter().map(zero_value).collect())
         }
-        DynSolType::Function => {
-            // function type = 24 bytes (address + selector)
-            DynSolValue::Function(alloy_primitives::Function::ZERO)
-        }
+        DynSolType::Function => DynSolValue::Function(alloy_primitives::Function::ZERO),
     }
 }
