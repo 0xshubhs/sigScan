@@ -761,9 +761,10 @@ function findGasForFunction(
       }
     }
     // Handle object format with min/max properties
-    if (typeof value === 'object' && value !== null) {
+    const poolVal = pool[signature];
+    if (typeof poolVal === 'object' && poolVal !== null) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const gasObj = value as any;
+      const gasObj = poolVal as any;
       // Return average of min and max
       if (gasObj.min !== undefined && gasObj.max !== undefined) {
         const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
@@ -785,20 +786,20 @@ function findGasForFunction(
         if (result !== null) {
           return result;
         }
-      }
-    }
-    // Handle object format with min/max properties
-    if (typeof value === 'object' && value !== null) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const gasObj = value as any;
-      // Return average of min and max
-      if (gasObj.min !== undefined && gasObj.max !== undefined) {
-        const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
-        const max = gasObj.max === 'infinite' ? Infinity : Number(gasObj.max);
-        if (min === Infinity || max === Infinity) {
-          return 'infinite';
+        // Handle object format with min/max properties
+        if (typeof value === 'object' && value !== null) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const gasObj = value as any;
+          // Return average of min and max
+          if (gasObj.min !== undefined && gasObj.max !== undefined) {
+            const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
+            const max = gasObj.max === 'infinite' ? Infinity : Number(gasObj.max);
+            if (min === Infinity || max === Infinity) {
+              return 'infinite';
+            }
+            return Math.round((min + max) / 2);
+          }
         }
-        return Math.round((min + max) / 2);
       }
     }
   }
@@ -809,14 +810,15 @@ function findGasForFunction(
   for (const pool of pools) {
     const nameMatches = Object.entries(pool).filter(([sig]) => sig.startsWith(namePrefix));
     if (nameMatches.length === 1) {
-      const result = parseGasValue(nameMatches[0][1]);
+      const matchVal = nameMatches[0][1];
+      const result = parseGasValue(matchVal);
       if (result !== null) {
         return result;
       }
       // Handle object format with min/max properties
-      if (typeof value === 'object' && value !== null) {
+      if (typeof matchVal === 'object' && matchVal !== null) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const gasObj = value as any;
+        const gasObj = matchVal as any;
         // Return average of min and max
         if (gasObj.min !== undefined && gasObj.max !== undefined) {
           const min = gasObj.min === 'infinite' ? Infinity : Number(gasObj.min);
