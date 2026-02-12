@@ -14,8 +14,51 @@
 import * as semver from 'semver';
 import { keccak256 } from 'js-sha3';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const solc = require('solc');
+// Lazy-loaded solc instance — not imported at top level to allow the extension
+// to work even when the `solc` npm package is not installed.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _solc: any = null;
+
+function getSolc() {
+  if (!_solc) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      _solc = require('solc');
+    } catch {
+      // solc not installed — will be handled by callers
+      return null;
+    }
+  }
+  return _solc;
+}
+
+// Try native solc binary on PATH
+function tryNativeSolcVersion(): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { execSync } = require('child_process');
+    const output = execSync('solc --version', { encoding: 'utf-8', timeout: 5000 });
+    const match = output.match(/Version:\s*(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function compileWithNativeSolc(inputJson: string): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { execFileSync } = require('child_process');
+    return execFileSync('solc', ['--standard-json'], {
+      input: inputJson,
+      encoding: 'utf-8',
+      timeout: 60000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Internal debug logger for SolcManager.
@@ -126,19 +169,28 @@ export class SolcManager {
     const loadPromise = new Promise<SolcInstance>((resolve, reject) => {
       debug.log(`Downloading solc ${normalizedVersion}...`);
 
-      solc.loadRemoteVersion(normalizedVersion, (err: Error | null, solcInstance: SolcInstance) => {
-        this.loading.delete(normalizedVersion);
+      const solcModule = getSolc();
+      if (!solcModule) {
+        reject(new Error('solc npm package not available — install it or use native solc'));
+        return;
+      }
 
-        if (err) {
-          console.error(`❌ Failed to load solc ${normalizedVersion}:`, err.message);
-          reject(new Error(`Failed to load solc ${normalizedVersion}: ${err.message}`));
-          return;
+      solcModule.loadRemoteVersion(
+        normalizedVersion,
+        (err: Error | null, solcInstance: SolcInstance) => {
+          this.loading.delete(normalizedVersion);
+
+          if (err) {
+            console.error(`❌ Failed to load solc ${normalizedVersion}:`, err.message);
+            reject(new Error(`Failed to load solc ${normalizedVersion}: ${err.message}`));
+            return;
+          }
+
+          debug.log(`Loaded solc ${normalizedVersion}`);
+          this.cache.set(normalizedVersion, solcInstance);
+          resolve(solcInstance);
         }
-
-        debug.log(`Loaded solc ${normalizedVersion}`);
-        this.cache.set(normalizedVersion, solcInstance);
-        resolve(solcInstance);
-      });
+      );
     });
 
     this.loading.set(normalizedVersion, loadPromise);
@@ -146,17 +198,25 @@ export class SolcManager {
   }
 
   /**
-   * Get the bundled solc version (synchronous, always available)
+   * Get the bundled solc version (synchronous, returns null if solc not installed)
    */
-  static getBundled(): SolcInstance {
-    return solc;
+  static getBundled(): SolcInstance | null {
+    return getSolc();
   }
 
   /**
    * Get bundled version string
    */
   static getBundledVersion(): string {
-    return solc.version();
+    const solcModule = getSolc();
+    if (solcModule) {
+      return solcModule.version();
+    }
+    const native = tryNativeSolcVersion();
+    if (native) {
+      return native;
+    }
+    return 'unknown';
   }
 
   /**
@@ -422,8 +482,12 @@ export async function getCompilerForPragma(source: string): Promise<{
 
   if (!pragma) {
     // No pragma - use bundled
+    const bundled = SolcManager.getBundled();
+    if (!bundled) {
+      throw new Error('No solc compiler available (install solc npm package or native solc)');
+    }
     return {
-      compiler: SolcManager.getBundled(),
+      compiler: bundled,
       version: SolcManager.getBundledVersion(),
       isExact: true,
     };
@@ -466,9 +530,13 @@ export async function getCompilerForPragma(source: string): Promise<{
     };
   } catch (error) {
     // Fallback to bundled
-    console.warn(`⚠️  Could not resolve pragma ${pragma}, using bundled:`, error);
+    console.warn(`Could not resolve pragma ${pragma}, using bundled:`, error);
+    const bundled = SolcManager.getBundled();
+    if (!bundled) {
+      throw new Error('No solc compiler available');
+    }
     return {
-      compiler: SolcManager.getBundled(),
+      compiler: bundled,
       version: SolcManager.getBundledVersion(),
       isExact: false,
     };
@@ -844,7 +912,7 @@ function findGasForFunction(
  * - Recursive calls
  * - Unbounded storage iteration
  */
-function detectInfiniteGasWarnings(fnNode: ASTFunctionNode, functionSource: string): string[] {
+function _detectInfiniteGasWarnings(fnNode: ASTFunctionNode, functionSource: string): string[] {
   const warnings: string[] = [];
 
   // Check for loops with external calls
@@ -1021,20 +1089,42 @@ export async function compileWithGasAnalysis(
   importCallback?: (path: string) => { contents: string } | { error: string }
 ): Promise<CompilationOutput> {
   try {
-    // Get compiler for pragma
-    const { compiler, version, isExact } = await getCompilerForPragma(source);
-
-    if (!isExact) {
-      console.warn(`⚠️  Using fallback compiler version: ${version}`);
-    }
-
     // Create input
     const input = createCompilationInput(fileName, source, settings);
+    const inputJson = JSON.stringify(input);
+    let outputJson: string;
+    let version: string;
 
-    // Compile
-    const outputJson = importCallback
-      ? compiler.compile(JSON.stringify(input), { import: importCallback })
-      : compiler.compile(JSON.stringify(input));
+    // Try solc-js first, then native solc
+    try {
+      const resolved = await getCompilerForPragma(source);
+      version = resolved.version;
+
+      if (!resolved.isExact) {
+        console.warn(`Using fallback compiler version: ${version}`);
+      }
+
+      outputJson = importCallback
+        ? resolved.compiler.compile(inputJson, { import: importCallback })
+        : resolved.compiler.compile(inputJson);
+    } catch {
+      // solc-js not available — try native solc binary
+      const nativeResult = compileWithNativeSolc(inputJson);
+      if (nativeResult) {
+        outputJson = nativeResult;
+        version = tryNativeSolcVersion() || 'native';
+      } else {
+        // No compiler available at all — regex fallback
+        const fallbackGasInfo = extractFunctionsWithRegex(source);
+        return {
+          success: false,
+          version: 'none',
+          gasInfo: fallbackGasInfo,
+          errors: ['No Solidity compiler available (install solc npm package or native solc)'],
+          warnings: [],
+        };
+      }
+    }
 
     const output = JSON.parse(outputJson);
 

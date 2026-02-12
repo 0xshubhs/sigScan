@@ -10,13 +10,14 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].js',
-    libraryTarget: 'commonjs2'
+    libraryTarget: 'commonjs2',
+    chunkFormat: 'commonjs'
   },
   externals: {
     vscode: 'commonjs vscode',
     sqlite3: 'commonjs sqlite3',
-    fsevents: 'commonjs fsevents'
-    // NOTE: solc is now bundled, not external
+    fsevents: 'commonjs fsevents',
+    solc: 'commonjs solc'
   },
   resolve: {
     extensions: ['.ts', '.js'],

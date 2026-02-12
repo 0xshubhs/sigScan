@@ -5,12 +5,12 @@ import {
   ErrorSignature,
   ContractInfo,
   Parameter,
+  NatspecInfo,
 } from '../types';
 import {
   generateFunctionSelector,
   generateEventSignature,
   normalizeFunctionSignature,
-  parseParameters,
   getContractNameFromPath,
 } from '../utils/helpers';
 
@@ -93,6 +93,8 @@ export class SolidityParser {
       const signature = normalizeFunctionSignature(name, inputs);
       const selector = generateFunctionSelector(signature);
 
+      const natspec = this.extractNatspec(content, match.index);
+
       functions.push({
         name,
         signature,
@@ -103,6 +105,7 @@ export class SolidityParser {
         outputs,
         contractName,
         filePath,
+        natspec,
       });
     }
 
@@ -114,6 +117,7 @@ export class SolidityParser {
       const inputs = this.parseParameters(inputsStr);
       const signature = normalizeFunctionSignature('constructor', inputs);
       const selector = generateFunctionSelector(signature);
+      const natspec = this.extractNatspec(content, constructorMatch.index);
 
       functions.push({
         name: 'constructor',
@@ -125,6 +129,7 @@ export class SolidityParser {
         outputs: [],
         contractName,
         filePath,
+        natspec,
       });
     }
 
@@ -168,6 +173,8 @@ export class SolidityParser {
       const signature = normalizeFunctionSignature(name, inputs);
       const selector = generateEventSignature(signature);
 
+      const natspec = this.extractNatspec(content, match.index);
+
       events.push({
         name,
         signature,
@@ -175,6 +182,7 @@ export class SolidityParser {
         inputs,
         contractName,
         filePath,
+        natspec,
       });
     }
 
@@ -196,6 +204,8 @@ export class SolidityParser {
       const signature = normalizeFunctionSignature(name, inputs);
       const selector = generateFunctionSelector(signature);
 
+      const natspec = this.extractNatspec(content, match.index);
+
       errors.push({
         name,
         signature,
@@ -203,6 +213,7 @@ export class SolidityParser {
         inputs,
         contractName,
         filePath,
+        natspec,
       });
     }
 
@@ -273,5 +284,128 @@ export class SolidityParser {
         };
       })
       .filter((p) => p.type.length > 0);
+  }
+
+  /**
+   * Extract NatSpec comment block immediately preceding a declaration.
+   * Supports both /** ... * / block comments and /// line comments.
+   */
+  private extractNatspec(content: string, declarationIndex: number): NatspecInfo | undefined {
+    // Look at content before the declaration
+    const before = content.substring(0, declarationIndex).trimEnd();
+
+    let commentBody: string | null = null;
+
+    // Try block comment /** ... */
+    const blockEnd = before.lastIndexOf('*/');
+    if (blockEnd !== -1) {
+      const blockStart = before.lastIndexOf('/**', blockEnd);
+      if (blockStart !== -1) {
+        // Verify nothing but whitespace between comment end and declaration
+        const between = before.substring(blockEnd + 2).trim();
+        if (between.length === 0) {
+          commentBody = before
+            .substring(blockStart + 3, blockEnd)
+            .split('\n')
+            .map((line) => line.replace(/^\s*\*\s?/, '').trim())
+            .join('\n');
+        }
+      }
+    }
+
+    // Try /// line comments if no block comment found
+    if (!commentBody) {
+      const lines = before.split('\n');
+      const commentLines: string[] = [];
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const trimmed = lines[i].trim();
+        if (trimmed.startsWith('///')) {
+          commentLines.unshift(trimmed.substring(3).trim());
+        } else if (trimmed.length === 0) {
+          continue; // skip blank lines
+        } else {
+          break;
+        }
+      }
+      if (commentLines.length > 0) {
+        commentBody = commentLines.join('\n');
+      }
+    }
+
+    if (!commentBody) {
+      return undefined;
+    }
+
+    const info: NatspecInfo = {
+      params: {},
+      returns: {},
+      custom: {},
+    };
+
+    // Parse tags
+    const tagRegex = /@(\w+(?::\w+)?)\s+([^\n@]*(?:\n(?!\s*@)[^\n@]*)*)/g;
+    let tagMatch;
+
+    // Collect text before first tag as @notice
+    const firstTagIndex = commentBody.search(/@\w/);
+    if (firstTagIndex > 0) {
+      const preText = commentBody.substring(0, firstTagIndex).trim();
+      if (preText) {
+        info.notice = preText;
+      }
+    } else if (firstTagIndex === -1) {
+      // No tags at all — entire comment is notice
+      const trimmed = commentBody.trim();
+      if (trimmed) {
+        info.notice = trimmed;
+      }
+    }
+
+    while ((tagMatch = tagRegex.exec(commentBody)) !== null) {
+      const tag = tagMatch[1].toLowerCase();
+      const value = tagMatch[2].trim();
+
+      switch (tag) {
+        case 'notice':
+          info.notice = value;
+          break;
+        case 'dev':
+          info.dev = value;
+          break;
+        case 'param': {
+          const spaceIdx = value.indexOf(' ');
+          if (spaceIdx !== -1) {
+            info.params[value.substring(0, spaceIdx)] = value.substring(spaceIdx + 1).trim();
+          }
+          break;
+        }
+        case 'return':
+        case 'returns': {
+          const rSpaceIdx = value.indexOf(' ');
+          if (rSpaceIdx !== -1) {
+            info.returns[value.substring(0, rSpaceIdx)] = value.substring(rSpaceIdx + 1).trim();
+          } else {
+            info.returns[''] = value;
+          }
+          break;
+        }
+        default:
+          info.custom[tag] = value;
+          break;
+      }
+    }
+
+    // Only return if we actually got something
+    if (
+      !info.notice &&
+      !info.dev &&
+      Object.keys(info.params).length === 0 &&
+      Object.keys(info.returns).length === 0 &&
+      Object.keys(info.custom).length === 0
+    ) {
+      return undefined;
+    }
+
+    return info;
   }
 }

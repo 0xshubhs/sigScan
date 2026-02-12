@@ -354,7 +354,7 @@ contract Test {
 
       const report = estimator.generateGasReport([infiniteEstimate]);
 
-      expect(report).toContain('∞');
+      expect(report).toContain('inf');
       expect(report).toContain('unbounded');
     });
 

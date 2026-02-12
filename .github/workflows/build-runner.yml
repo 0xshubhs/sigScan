@@ -1,0 +1,126 @@
+name: Build Runner Binaries
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: sigscan-runner-linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: sigscan-runner-linux-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: sigscan-runner-darwin-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: sigscan-runner-darwin-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: sigscan-runner-win32-x64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: runner
+          key: ${{ matrix.target }}
+
+      - name: Build runner binary
+        working-directory: runner
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp runner/target/${{ matrix.target }}/release/sigscan-runner ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          copy runner\target\${{ matrix.target }}\release\sigscan-runner.exe ${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          find artifacts -type f -name 'sigscan-runner-*' -exec cp {} release-files/ \;
+          ls -la release-files/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          body: |
+            ## Runner Binaries
+
+            Prebuilt `sigscan-runner` binaries for all supported platforms.
+
+            ### Installation
+
+            Download the binary for your platform and place it in your PATH,
+            or in the extension's `bin/` directory.
+
+            | Platform | Binary |
+            |----------|--------|
+            | macOS (Apple Silicon) | `sigscan-runner-darwin-arm64` |
+            | macOS (Intel) | `sigscan-runner-darwin-x64` |
+            | Linux (x86_64) | `sigscan-runner-linux-x64` |
+            | Linux (ARM64) | `sigscan-runner-linux-arm64` |
+            | Windows (x86_64) | `sigscan-runner-win32-x64.exe` |
+
+            ### Auto-download
+
+            The extension will automatically download the correct binary on
+            first install via the postinstall script.

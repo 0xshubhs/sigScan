@@ -14,6 +14,26 @@ import { RealtimeAnalyzer } from '../features/realtime';
 import { compilationService } from '../features/compilation-service';
 import { GasDecorationManager } from '../features/gas-decorations';
 
+// New feature imports (Phase 6-9)
+import { CollisionDetector } from '../features/collision-detector';
+import { InterfaceChecker } from '../features/interface-check';
+import { GasOptimizer } from '../features/gas-optimizer';
+import { CoverageAnalyzer } from '../features/coverage';
+import { UpgradeAnalyzer } from '../features/upgrade-analyzer';
+import { InvariantDetector } from '../features/invariant-detector';
+import { MEVAnalyzer } from '../features/mev-analyzer';
+import { GasSnapshotManager } from '../features/gas-snapshot';
+import { GasPricingService } from '../features/gas-pricing';
+import { FourByteLookup } from '../features/four-byte-lookup';
+import { TestGenerator } from '../features/test-generator';
+import { SelectorHoverProvider } from './providers/selector-hover-provider';
+import { PlaygroundPanel } from './providers/playground';
+import { DashboardPanel } from './providers/dashboard';
+import {
+  SigScanNotebookSerializer,
+  SigScanNotebookController,
+} from './providers/notebook-provider';
+
 let realtimeAnalyzer: RealtimeAnalyzer;
 let gasDecorationType: vscode.TextEditorDecorationType;
 let complexityDecorationType: vscode.TextEditorDecorationType;
@@ -237,6 +257,348 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   ];
 
+  // ─── New feature commands (Phase 6-9) ────────────────────────────────────
+
+  const collisionDetector = new CollisionDetector();
+  const interfaceChecker = new InterfaceChecker();
+  const gasOptimizer = new GasOptimizer();
+  const coverageAnalyzer = new CoverageAnalyzer();
+  const upgradeAnalyzer = new UpgradeAnalyzer();
+  const invariantDetector = new InvariantDetector();
+  const mevAnalyzer = new MEVAnalyzer();
+  const gasSnapshotManager = new GasSnapshotManager();
+  const gasPricingService = new GasPricingService();
+  const fourByteLookup = new FourByteLookup();
+  const testGenerator = new TestGenerator();
+  const selectorHoverProvider = new SelectorHoverProvider();
+
+  const newCommands = [
+    // Collision detection
+    vscode.commands.registerCommand('sigscan.detectCollisions', async () => {
+      const scanResult = sigScanManager.getLastScanResult();
+      if (!scanResult) {
+        vscode.window.showWarningMessage('No contracts scanned yet. Run "Scan Project" first.');
+        return;
+      }
+      const contracts = new Map<string, import('../types').ContractInfo>();
+      scanResult.contractsByCategory.forEach((infos) => {
+        for (const info of infos) {
+          contracts.set(info.name, info);
+        }
+      });
+      const collisions = collisionDetector.detectCollisions(contracts);
+      const report = collisionDetector.generateReport(collisions);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // Interface compliance
+    vscode.commands.registerCommand('sigscan.checkInterfaces', async () => {
+      const scanResult = sigScanManager.getLastScanResult();
+      if (!scanResult) {
+        vscode.window.showWarningMessage('No contracts scanned yet. Run "Scan Project" first.');
+        return;
+      }
+      const contracts = new Map<string, import('../types').ContractInfo>();
+      scanResult.contractsByCategory.forEach((infos) => {
+        for (const info of infos) {
+          contracts.set(info.name, info);
+        }
+      });
+      const allResults = interfaceChecker.checkAllContracts(contracts);
+      const parts: string[] = ['# Interface Compliance Report\n'];
+      allResults.forEach((results, contractName) => {
+        parts.push(interfaceChecker.generateReport(contractName, results));
+      });
+      const doc = await vscode.workspace.openTextDocument({
+        content: parts.join('\n'),
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // Gas optimizer
+    vscode.commands.registerCommand('sigscan.suggestOptimizations', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const suggestions = gasOptimizer.analyze(editor.document.getText());
+      const report = gasOptimizer.generateReport(
+        suggestions,
+        path.basename(editor.document.uri.fsPath)
+      );
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // Coverage
+    vscode.commands.registerCommand('sigscan.showCoverage', async () => {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Parsing coverage data...' },
+        async () => {
+          const coverageReport = await coverageAnalyzer.parseForgeCoverage(
+            workspaceFolder.uri.fsPath
+          );
+          if (!coverageReport) {
+            vscode.window.showWarningMessage(
+              'No coverage data found. Run `forge coverage --report lcov` first.'
+            );
+            return;
+          }
+          const report = coverageAnalyzer.generateReport(coverageReport);
+          const doc = await vscode.workspace.openTextDocument({
+            content: report,
+            language: 'markdown',
+          });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        }
+      );
+    }),
+
+    // Upgrade analysis
+    vscode.commands.registerCommand('sigscan.analyzeUpgrade', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file (new version) to compare');
+        return;
+      }
+      const oldFile = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { Solidity: ['sol'] },
+        openLabel: 'Select Old Version',
+      });
+      if (!oldFile || oldFile.length === 0) {
+        return;
+      }
+      const oldSource = fs.readFileSync(oldFile[0].fsPath, 'utf-8');
+      const newSource = editor.document.getText();
+      const contractMatch = newSource.match(/(contract|library)\s+(\w+)/);
+      const contractName = contractMatch ? contractMatch[2] : 'Unknown';
+      const report = upgradeAnalyzer.analyzeUpgrade(oldSource, newSource, contractName);
+      const reportStr = upgradeAnalyzer.generateReport(report);
+      const doc = await vscode.workspace.openTextDocument({
+        content: reportStr,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // Invariant detection
+    vscode.commands.registerCommand('sigscan.detectInvariants', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const invariants = invariantDetector.detect(editor.document.getText());
+      const lines = ['# Invariant Detection Report\n'];
+      if (invariants.length === 0) {
+        lines.push('No invariants detected.\n');
+      }
+      for (const inv of invariants) {
+        lines.push(`## ${inv.type}\n`);
+        lines.push(`**Description:** ${inv.description}\n`);
+        lines.push(`**Confidence:** ${inv.confidence}\n`);
+        if (inv.line) {
+          lines.push(`**Line:** ${inv.line}\n`);
+        }
+        lines.push('');
+      }
+      const doc = await vscode.workspace.openTextDocument({
+        content: lines.join('\n'),
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // MEV analysis
+    vscode.commands.registerCommand('sigscan.analyzeMEV', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const risks = mevAnalyzer.analyze(editor.document.getText());
+      const lines = ['# MEV Risk Analysis\n'];
+      if (risks.length === 0) {
+        lines.push('No MEV risks detected.\n');
+      }
+      for (const risk of risks) {
+        lines.push(`## ${risk.riskType} (${risk.functionName})\n`);
+        lines.push(`**Description:** ${risk.description}\n`);
+        lines.push(`**Severity:** ${risk.severity}\n`);
+        if (risk.line) {
+          lines.push(`**Line:** ${risk.line}\n`);
+        }
+        if (risk.mitigation) {
+          lines.push(`**Mitigation:** ${risk.mitigation}\n`);
+        }
+        lines.push('');
+      }
+      const doc = await vscode.workspace.openTextDocument({
+        content: lines.join('\n'),
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // Gas snapshot
+    vscode.commands.registerCommand('sigscan.createGasSnapshot', async () => {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder open');
+        return;
+      }
+      const scanResult = sigScanManager.getLastScanResult();
+      if (!scanResult) {
+        vscode.window.showWarningMessage('No contracts scanned. Run "Scan Project" first.');
+        return;
+      }
+      const gasData: Array<{
+        contractName: string;
+        functionName: string;
+        selector: string;
+        gas: number;
+      }> = [];
+      scanResult.contractsByCategory.forEach((infos) => {
+        for (const info of infos) {
+          for (const fn of info.functions) {
+            gasData.push({
+              contractName: info.name,
+              functionName: fn.name,
+              selector: fn.selector,
+              gas: 0,
+            });
+          }
+        }
+      });
+      const snapshot = await gasSnapshotManager.createSnapshot(gasData, workspaceFolder.uri.fsPath);
+      const filePath = path.join(workspaceFolder.uri.fsPath, '.sigscan-snapshot.json');
+      gasSnapshotManager.exportSnapshot(snapshot, filePath);
+      vscode.window.showInformationMessage(`Gas snapshot saved to ${filePath}`);
+    }),
+
+    // Gas pricing
+    vscode.commands.registerCommand('sigscan.showGasPricing', async () => {
+      const chains = gasPricingService.getSupportedChains();
+      const chain = await vscode.window.showQuickPick(chains, { placeHolder: 'Select chain' });
+      if (!chain) {
+        return;
+      }
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Fetching ${chain} gas prices...`,
+        },
+        async () => {
+          const price = await gasPricingService.fetchGasPrice(chain);
+          if (!price) {
+            vscode.window.showWarningMessage(`Could not fetch gas prices for ${chain}`);
+            return;
+          }
+          const lines = [
+            `# Gas Prices: ${chain}\n`,
+            `| Metric | Value |`,
+            `|--------|-------|`,
+            `| Gas Price | ${price.gasPriceGwei} Gwei |`,
+            `| ETH Price (est.) | $${price.ethPriceUsd} |`,
+            ``,
+            `*Updated: ${new Date(price.timestamp).toLocaleTimeString()}*`,
+          ];
+          const doc = await vscode.workspace.openTextDocument({
+            content: lines.join('\n'),
+            language: 'markdown',
+          });
+          await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        }
+      );
+    }),
+
+    // 4byte lookup
+    vscode.commands.registerCommand('sigscan.lookup4byte', async () => {
+      const selector = await vscode.window.showInputBox({
+        prompt: 'Enter a 4-byte selector (e.g. 0xa9059cbb)',
+        placeHolder: '0x...',
+      });
+      if (!selector) {
+        return;
+      }
+      const results = await fourByteLookup.lookup(selector);
+      if (results.length === 0) {
+        vscode.window.showInformationMessage(`No matches found for ${selector}`);
+      } else {
+        const picked = await vscode.window.showQuickPick(results, {
+          placeHolder: `${results.length} matches for ${selector}`,
+        });
+        if (picked) {
+          await vscode.env.clipboard.writeText(picked);
+          vscode.window.showInformationMessage(`Copied: ${picked}`);
+        }
+      }
+    }),
+
+    // Test generator
+    vscode.commands.registerCommand('sigscan.generateTests', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to generate tests');
+        return;
+      }
+      const { SolidityParser } = await import('../core/parser');
+      const parser = new SolidityParser();
+      const contractInfo = parser.parseContent(
+        editor.document.getText(),
+        editor.document.uri.fsPath
+      );
+      if (!contractInfo) {
+        vscode.window.showErrorMessage('Could not parse contract');
+        return;
+      }
+      const testContent = testGenerator.generateTestFile(contractInfo);
+      const doc = await vscode.workspace.openTextDocument({
+        content: testContent,
+        language: 'solidity',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    // Playground webview
+    vscode.commands.registerCommand('sigscan.openPlayground', () => {
+      PlaygroundPanel.createOrShow(context.extensionUri);
+    }),
+
+    // Dashboard webview
+    vscode.commands.registerCommand('sigscan.openDashboard', () => {
+      DashboardPanel.createOrShow(context.extensionUri);
+    }),
+  ];
+
+  // Register selector hover provider
+  const selectorHover = vscode.languages.registerHoverProvider(
+    { scheme: 'file', pattern: '**/*' },
+    selectorHoverProvider
+  );
+
+  // Register notebook serializer
+  const notebookSerializer = vscode.workspace.registerNotebookSerializer(
+    SigScanNotebookController.notebookType,
+    new SigScanNotebookSerializer()
+  );
+  const _notebookController = new SigScanNotebookController();
+
   // Register combined hover provider (uses cached analysis to prevent flickering)
   const hoverProvider = vscode.languages.registerHoverProvider(
     { scheme: 'file', language: 'solidity' },
@@ -425,7 +787,7 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async () => {
           const layout = await realtimeAnalyzer.analyzeStorageLayout(editor.document);
-          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const analyzers = await realtimeAnalyzer.getExtendedAnalyzers();
           const report = analyzers.storage.generateReport(layout, editor.document.fileName);
 
           const doc = await vscode.workspace.openTextDocument({
@@ -458,7 +820,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
       async () => {
         const callGraph = await realtimeAnalyzer.analyzeCallGraph(editor.document);
-        const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+        const analyzers = await realtimeAnalyzer.getExtendedAnalyzers();
         const report = analyzers.callGraph.generateReport(callGraph, editor.document.fileName);
 
         const doc = await vscode.workspace.openTextDocument({
@@ -492,7 +854,7 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async () => {
           const cost = await realtimeAnalyzer.estimateDeploymentCost(editor.document);
-          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const analyzers = await realtimeAnalyzer.getExtendedAnalyzers();
 
           const analysis = {
             contracts: [cost],
@@ -553,7 +915,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
           }
 
-          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const analyzers = await realtimeAnalyzer.getExtendedAnalyzers();
           const report = analyzers.regression.generateReport(regressionReport);
 
           const doc = await vscode.workspace.openTextDocument({
@@ -596,7 +958,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
           }
 
-          const analyzers = realtimeAnalyzer.getExtendedAnalyzers();
+          const analyzers = await realtimeAnalyzer.getExtendedAnalyzers();
           const report = analyzers.profiler.generateReport(profilerReport);
 
           const doc = await vscode.workspace.openTextDocument({
@@ -613,6 +975,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     treeView,
     hoverProvider,
+    selectorHover,
+    notebookSerializer,
     textChangeDisposable,
     editorChangeDisposable,
     documentOpenDisposable,
@@ -626,7 +990,8 @@ export function activate(context: vscode.ExtensionContext) {
     deploymentCostCommand,
     regressionCommand,
     profilerCommand,
-    ...commands
+    ...commands,
+    ...newCommands
   );
 
   // Auto-scan on activation if enabled

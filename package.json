@@ -145,6 +145,73 @@
         "title": "Show Runtime Profiler Report",
         "category": "SigScan",
         "icon": "$(graph)"
+      },
+      {
+        "command": "sigscan.detectCollisions",
+        "title": "Detect Selector Collisions",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.checkInterfaces",
+        "title": "Check Interface Compliance (ERC20/721/1155)",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.suggestOptimizations",
+        "title": "Suggest Gas Optimizations",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.showCoverage",
+        "title": "Show Test Coverage",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.analyzeUpgrade",
+        "title": "Analyze Upgrade Compatibility",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.detectInvariants",
+        "title": "Detect Contract Invariants",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.analyzeMEV",
+        "title": "Analyze MEV Risks",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.createGasSnapshot",
+        "title": "Create Gas Snapshot",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.showGasPricing",
+        "title": "Show Live Gas Prices",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.lookup4byte",
+        "title": "Lookup 4-Byte Selector",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.generateTests",
+        "title": "Generate Foundry Test Stubs",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.openPlayground",
+        "title": "Open Contract Playground",
+        "category": "SigScan",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sigscan.openDashboard",
+        "title": "Open Project Dashboard",
+        "category": "SigScan",
+        "icon": "$(dashboard)"
       }
     ],
     "configuration": {
@@ -249,6 +316,15 @@
         }
       }
     },
+    "notebooks": [
+      {
+        "type": "sigscan-notebook",
+        "displayName": "SigScan Notebook",
+        "selector": [
+          { "filenamePattern": "*.sigscan" }
+        ]
+      }
+    ],
     "views": {
       "explorer": [
         {
@@ -330,7 +406,9 @@
     "commander": "^9.4.1",
     "glob": "^8.0.3",
     "js-sha3": "^0.8.0",
-    "semver": "^7.7.3",
+    "semver": "^7.7.3"
+  },
+  "optionalDependencies": {
     "solc": "^0.8.28"
   },
   "bin": {
