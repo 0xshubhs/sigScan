@@ -43,6 +43,12 @@ function transfer(address to, uint256 amount) external returns (bool) {  // 51.2
 ```
 Color-coded by cost: green (<50k) → yellow (<150k) → orange (<500k) → red (>500k) → gray (N/A).
 
+**Contract Size Validation** — Inline error when contracts exceed the 24KB EIP-170 limit:
+```
+contract Large {  // ⚠️ Contract size: 24.8 KB (exceeds 24 KB limit)
+```
+Displayed with a warning indicator whenever bytecode size is calculated, helping catch deployment failures early.
+
 **17 Commands** available via Command Palette:
 - Scan project, export signatures, generate ABI
 - Gas estimation, contract size check, complexity analysis
@@ -76,7 +82,7 @@ Standalone tool. Scans directories, exports in 4 formats (JSON, TXT, CSV, Markdo
 | `call-graph.ts` | Function dependency graph within and across contracts |
 | `deployment.ts` | Deployment cost estimation (bytecode size + constructor gas) |
 | `complexity.ts` | Cyclomatic and cognitive complexity metrics per function |
-| `size.ts` | Contract bytecode size vs. 24KB EIP-170 limit |
+| `size.ts` | Contract bytecode size vs. 24KB EIP-170 limit 
 | `regression.ts` | Gas diff between current code and a git branch |
 | `profiler.ts` | Runtime profile from forge test output |
 | `abi.ts` | Standard Ethereum ABI JSON generation |
@@ -235,3 +241,5 @@ Support `.sol` analysis in VS Code notebooks for interactive auditing workflows.
 | E2E extension tests | None | Only unit tests exist |
 | CI/CD pipeline | None | No GitHub Actions configured |
 | VSIX publishing | Manual | No automated marketplace publish |
+
+

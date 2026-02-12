@@ -14,7 +14,7 @@ Test result: ok. 1 passed; 0 failed; finished in 1.23ms
 | SimpleStorage  | setValue     | 22375| 22375 | 22375  | 22375 | 1       |
 | SimpleStorage  | getValue     | 2245 | 2245  | 2245   | 2245  | 1       |
 | SimpleStorage  | deposit      | 24576| 24576 | 24576  | 24576 | 1       |
-| SimpleStorage  | withdraw     | 5432 | 8921  | 8921   | 12410 | 2       |
+| SimpleStorage  | withdraw     | 5432 | 8921  | 8921   | 12410 | 2       || SimpleStorage | balances | 2469 | 2469 | 2469 | 2469 | 1 | | SimpleStorage | value | 2325 | 2325 | 2325 | 2325 | 1 | | SimpleStorage (deployment) | - | - | 129775| - | - | - | ``` Forge provides **actual** gas usage from test execution, including min/avg/median/max across multiple calls. Deployment costs are shown separately. This is more detailed than solc's static estimates.
 ```
 
 ## Key Differences
