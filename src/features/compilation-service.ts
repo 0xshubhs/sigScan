@@ -89,6 +89,7 @@ export class CompilationService extends EventEmitter {
 
   // Debouncing
   private debounceTimers = new Map<string, NodeJS.Timeout>();
+  private pendingDebounceResolvers = new Map<string, Array<(r: CompilationResult) => void>>();
   private activeCompilations = new Map<string, Promise<CompilationResult>>();
 
   // Settings
@@ -230,21 +231,47 @@ export class CompilationService extends EventEmitter {
     contentHash: string,
     importCallback?: (path: string) => { contents: string } | { error: string }
   ): Promise<CompilationResult> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       // Clear existing timer
       const existingTimer = this.debounceTimers.get(uri);
       if (existingTimer) {
         clearTimeout(existingTimer);
       }
 
-      // Set new timer
+      // Track this resolver so it can be resolved when the winning timer fires
+      if (!this.pendingDebounceResolvers.has(uri)) {
+        this.pendingDebounceResolvers.set(uri, []);
+      }
+      this.pendingDebounceResolvers.get(uri)!.push(resolve);
+
+      // Set new timer — when it fires, resolve ALL pending promises for this URI
       const timer = setTimeout(async () => {
         this.debounceTimers.delete(uri);
+        const resolvers = this.pendingDebounceResolvers.get(uri) || [];
+        this.pendingDebounceResolvers.delete(uri);
+
         try {
           const result = await this.compileNow(uri, source, trigger, contentHash, importCallback);
-          resolve(result);
-        } catch (error) {
-          reject(error);
+          for (const r of resolvers) {
+            r(result);
+          }
+        } catch {
+          // On error, resolve all with a minimal fallback so callers don't hang
+          const fallback: CompilationResult = {
+            success: false,
+            version: 'none',
+            gasInfo: [],
+            errors: ['Compilation failed'],
+            warnings: [],
+            uri,
+            timestamp: Date.now(),
+            trigger,
+            contentHash,
+            cached: false,
+          };
+          for (const r of resolvers) {
+            r(fallback);
+          }
         }
       }, this.debounceMs);
 
@@ -271,37 +298,48 @@ export class CompilationService extends EventEmitter {
       const filePath = this.uriToFilePath(uri);
       const foundryRoot = filePath ? findFoundryRoot(filePath) : null;
 
+      // Helper: check if output has real gas data (not just fallback selectors with gas: 0)
+      const hasRealGas = (o: CompilationOutput | null): boolean =>
+        !!o && o.success && o.gasInfo.length > 0 && o.gasInfo.some((g) => g.gas !== 0);
+
+      // Check user preference for runner backend
+      let preferRunner = true;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const vscode = require('vscode');
+        preferRunner = vscode.workspace.getConfiguration('sigscan').get('preferRunner', true);
+      } catch {
+        // CLI context — default to true
+      }
+
       // --- Priority 1: Runner backend (EVM-executed gas, fastest) ---
-      if (filePath && (await isRunnerAvailable())) {
+      if (preferRunner && filePath && (await isRunnerAvailable())) {
         this.emit('compilation:start', { uri, version: 'runner' });
         try {
-          output = await compileWithRunner(filePath, source);
-          // If runner returned a fallback (success: false), clear output so next tier is tried
-          if (output && !output.success) {
-            output = null;
+          const runnerOutput = await compileWithRunner(filePath, source);
+          if (hasRealGas(runnerOutput)) {
+            output = runnerOutput;
           }
         } catch {
           // Runner failed — fall through to forge/solc
-          output = null;
         }
       }
 
       // --- Priority 2: Forge backend (Foundry projects) ---
-      if (!output && foundryRoot && (await isForgeAvailable())) {
+      if (!hasRealGas(output) && foundryRoot && (await isForgeAvailable())) {
         this.emit('compilation:start', { uri, version: 'forge' });
         try {
-          output = await compileWithForge(filePath!, foundryRoot);
-          // If forge returned a fallback (success: false), clear output so solc is tried
-          if (output && !output.success) {
-            output = null;
+          const forgeOutput = await compileWithForge(filePath!, foundryRoot);
+          if (hasRealGas(forgeOutput)) {
+            output = forgeOutput;
           }
         } catch {
-          output = null;
+          // Forge failed — fall through to solc
         }
       }
 
       // --- Priority 3: Solc-js (WASM, universal fallback) ---
-      if (!output) {
+      if (!hasRealGas(output)) {
         this.emit('compilation:start', { uri, version: pragma || 'bundled' });
 
         if (pragma) {
@@ -319,6 +357,19 @@ export class CompilationService extends EventEmitter {
         }
 
         output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
+      }
+
+      // If all backends produced output but none had real gas, prefer the one with most gasInfo entries
+      // (the regex fallback from runner/forge still has valid selectors and line locations)
+      if (!output) {
+        // This shouldn't happen since compileWithGasAnalysis always returns, but guard anyway
+        output = {
+          success: false,
+          version: 'none',
+          gasInfo: [],
+          errors: ['All compilation backends failed'],
+          warnings: [],
+        };
       }
 
       const result: CompilationResult = {
@@ -481,6 +532,26 @@ export class CompilationService extends EventEmitter {
       clearTimeout(timer);
       this.debounceTimers.delete(uri);
     }
+    // Resolve any pending promises with empty result so they don't hang
+    const resolvers = this.pendingDebounceResolvers.get(uri);
+    if (resolvers) {
+      const empty: CompilationResult = {
+        success: false,
+        version: 'none',
+        gasInfo: [],
+        errors: ['Cancelled'],
+        warnings: [],
+        uri,
+        timestamp: Date.now(),
+        trigger: 'manual',
+        contentHash: '',
+        cached: false,
+      };
+      for (const r of resolvers) {
+        r(empty);
+      }
+      this.pendingDebounceResolvers.delete(uri);
+    }
   }
 
   /**
@@ -491,6 +562,25 @@ export class CompilationService extends EventEmitter {
       clearTimeout(timer);
     }
     this.debounceTimers.clear();
+    // Resolve all pending promises so callers don't hang
+    for (const [uri, resolvers] of this.pendingDebounceResolvers) {
+      const empty: CompilationResult = {
+        success: false,
+        version: 'none',
+        gasInfo: [],
+        errors: ['Cancelled'],
+        warnings: [],
+        uri,
+        timestamp: Date.now(),
+        trigger: 'manual',
+        contentHash: '',
+        cached: false,
+      };
+      for (const r of resolvers) {
+        r(empty);
+      }
+    }
+    this.pendingDebounceResolvers.clear();
   }
 
   /**

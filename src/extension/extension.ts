@@ -106,16 +106,29 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  compilationService.on('compilation:success', ({ output }) => {
+  compilationService.on('compilation:success', ({ uri, output }) => {
     logger.info(`Compilation successful: ${output.gasInfo.length} functions analyzed`);
     statusBarItem.text = '$(flame) Gas Analysis';
-    // Decorations are applied by updateDecorations() which awaits compile() — no need to duplicate here
+
+    // Safety net: apply decorations from event in case the updateDecorations() caller
+    // missed this result (e.g. editor switched mid-compilation)
+    if (output.gasInfo.length > 0) {
+      const editor = vscode.window.visibleTextEditors.find(
+        (e) => e.document.uri.toString() === uri
+      );
+      if (editor) {
+        const decorations = realtimeAnalyzer.createRemixStyleDecorations(
+          output.gasInfo,
+          editor.document
+        );
+        editor.setDecorations(gasDecorationType, decorations);
+      }
+    }
   });
 
   compilationService.on('compilation:error', ({ errors }) => {
     logger.error(`Compilation failed: ${errors[0]}`);
     statusBarItem.text = '$(flame) Gas Analysis';
-    // Fallback decorations are applied by updateDecorations() which handles compilation errors
   });
 
   compilationService.on('version:downloading', ({ version }) => {

@@ -219,11 +219,27 @@ export function createRemixStyleDecorations(
   document: vscode.TextDocument
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
+  const content = document.getText();
 
   for (const info of gasInfo) {
-    const line = info.loc.line - 1;
+    let line = info.loc.line - 1;
+
+    // If loc.line is 0 (unresolved), try to find the function in source via regex
     if (line < 0 || line >= document.lineCount) {
-      continue;
+      const isEvent = info.visibility === 'event';
+      const escapedName = info.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = isEvent
+        ? new RegExp(`event\\s+${escapedName}\\s*\\(`)
+        : info.name === 'constructor'
+          ? /constructor\s*\(/
+          : new RegExp(`function\\s+${escapedName}\\s*\\(`);
+
+      const match = pattern.exec(content);
+      if (match) {
+        line = document.positionAt(match.index).line;
+      } else {
+        continue; // Truly unfindable — skip
+      }
     }
 
     const lineText = document.lineAt(line).text;

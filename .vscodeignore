@@ -1,19 +1,41 @@
-# Include only what the extension needs at runtime:
-#   dist/          - webpack bundle
-#   data/          - signatures.json
-#   package.json   - extension manifest
-#   README.md      - marketplace page
-#   icon.png       - extension icon
-#   language-configuration.json
+# Exclude source, dev tooling, and build artifacts — keep node_modules for solc
+.vscode/**
+src/**
+runner/**
+examples/**
+docs/**
+scripts/**
+releases/**
 
-# Exclude everything by default, then whitelist below
-**
+# TypeScript / build config
+tsconfig.json
+webpack.config.js
+jest.config.js
+commitlint.config.js
+.eslintrc*
+.prettierrc*
+.editorconfig
 
-# Whitelist runtime files
-!dist/**
-!data/**
-!package.json
-!README.md
-!icon.png
-!language-configuration.json
-!bin/**
+# Dev files
+*.ts
+*.map
+.gitignore
+.git/**
+ARCHITECTURE.md
+Claude.md
+Features.md
+Implementation.md
+forge-gas-example.md
+install
+install-dev.sh
+CHANGELOG.md
+CONTRIBUTING.md
+
+# Test files
+**/__tests__/**
+**/*.test.*
+**/*.spec.*
+
+# Dev dependencies (vsce includes only production deps from node_modules automatically)
+node_modules/.pnpm/**
+node_modules/.package-lock.json

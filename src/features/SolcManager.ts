@@ -339,7 +339,7 @@ export class SolcManager {
         const https = require('https');
         const url = 'https://binaries.soliditylang.org/bin/list.json';
 
-        https
+        const req = https
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .get(url, (res: { on: (event: string, callback: (data?: string) => void) => void }) => {
             let data = '';
@@ -365,6 +365,13 @@ export class SolcManager {
             availableVersionsCache = this.getHardcodedVersions();
             resolve(availableVersionsCache);
           });
+
+        // Timeout after 10 seconds — fall back to hardcoded versions
+        req.setTimeout(10_000, () => {
+          req.destroy();
+          availableVersionsCache = this.getHardcodedVersions();
+          resolve(availableVersionsCache!);
+        });
       } catch {
         availableVersionsCache = this.getHardcodedVersions();
         resolve(availableVersionsCache);
@@ -1207,10 +1214,12 @@ export async function compileWithGasAnalysis(
       deployedBytecode,
     };
   } catch (error) {
+    // Last resort: regex fallback so we at least show selectors
+    const fallbackGasInfo = extractFunctionsWithRegex(source);
     return {
       success: false,
       version: 'unknown',
-      gasInfo: [],
+      gasInfo: fallbackGasInfo,
       errors: [error instanceof Error ? error.message : 'Unknown compilation error'],
       warnings: [],
     };
