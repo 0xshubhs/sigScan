@@ -793,10 +793,9 @@ export class SignatureExporter {
       case 'md':
         return `# Updated: ${timestamp}\n# Previous content replaced\n\n${content}`;
       case 'json': {
-        const jsonContent = JSON.parse(content);
-        jsonContent.metadata.lastUpdated = timestamp;
-        jsonContent.metadata.note = 'Previous content replaced';
-        return JSON.stringify(jsonContent, null, 2);
+        // Inject fields into metadata without parse/re-stringify to avoid doubling memory
+        const injection = `"lastUpdated": ${JSON.stringify(timestamp)},\n    "note": "Previous content replaced",\n    `;
+        return content.replace('"metadata": {\n    ', `"metadata": {\n    ${injection}`);
       }
       case 'csv':
         return `# Updated: ${timestamp}\n# Previous content replaced\n${content}`;

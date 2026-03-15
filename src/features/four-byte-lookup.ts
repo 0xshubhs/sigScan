@@ -29,6 +29,9 @@ interface CacheEntry {
 /** Cache TTL: 10 minutes. */
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
+/** Maximum number of entries held in the lookup cache. */
+const CACHE_MAX_SIZE = 1000;
+
 export class FourByteLookup {
   private readonly cache: Map<string, CacheEntry>;
 
@@ -70,7 +73,10 @@ export class FourByteLookup {
       const parsed = JSON.parse(response);
       const signatures = this.extractSignatures(parsed);
 
-      // Cache the result
+      // Cache the result — evict oldest entry when at capacity
+      if (this.cache.size >= CACHE_MAX_SIZE) {
+        this.cache.delete(this.cache.keys().next().value!);
+      }
       this.cache.set(normalizedSelector, {
         signatures,
         expiresAt: Date.now() + CACHE_TTL_MS,

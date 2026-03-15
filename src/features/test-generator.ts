@@ -11,6 +11,52 @@
 
 import { ContractInfo, FunctionSignature, Parameter } from '../types';
 
+const SOLIDITY_RESERVED_WORDS = new Set([
+  'abstract',
+  'after',
+  'alias',
+  'apply',
+  'auto',
+  'byte',
+  'case',
+  'catch',
+  'copyof',
+  'default',
+  'define',
+  'final',
+  'immutable',
+  'implements',
+  'in',
+  'inline',
+  'let',
+  'macro',
+  'match',
+  'mutable',
+  'null',
+  'of',
+  'override',
+  'partial',
+  'promise',
+  'reference',
+  'relocatable',
+  'sealed',
+  'sizeof',
+  'static',
+  'supports',
+  'switch',
+  'try',
+  'typedef',
+  'typeof',
+  'unchecked',
+  'virtual',
+  'address',
+  'bool',
+  'string',
+  'bytes',
+  'mapping',
+  'type',
+]);
+
 export class TestGenerator {
   /**
    * Generate a complete Foundry test file for a contract.
@@ -325,52 +371,7 @@ export class TestGenerator {
    * Check if a name is a Solidity reserved word.
    */
   private isReservedWord(name: string): boolean {
-    const reserved = new Set([
-      'abstract',
-      'after',
-      'alias',
-      'apply',
-      'auto',
-      'byte',
-      'case',
-      'catch',
-      'copyof',
-      'default',
-      'define',
-      'final',
-      'immutable',
-      'implements',
-      'in',
-      'inline',
-      'let',
-      'macro',
-      'match',
-      'mutable',
-      'null',
-      'of',
-      'override',
-      'partial',
-      'promise',
-      'reference',
-      'relocatable',
-      'sealed',
-      'sizeof',
-      'static',
-      'supports',
-      'switch',
-      'try',
-      'typedef',
-      'typeof',
-      'unchecked',
-      'virtual',
-      'address',
-      'bool',
-      'string',
-      'bytes',
-      'mapping',
-      'type',
-    ]);
-    return reserved.has(name);
+    return SOLIDITY_RESERVED_WORDS.has(name);
   }
 
   /**

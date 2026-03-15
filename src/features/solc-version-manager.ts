@@ -8,61 +8,69 @@
 
 import * as semver from 'semver';
 
-// Compiler cache
+// Compiler cache — limited to 1 entry (only the current compiler is needed)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const compilerCache = new Map<string, any>();
+const MAX_COMPILER_CACHE = 1;
 const downloading = new Set<string>();
 
 // Bundled compiler version
 const BUNDLED_VERSION = '0.8.28';
 
-// Map of version patterns to actual available solc releases
-// These are known stable releases that exist in the solc-bin repository
-const VERSION_RELEASES: Record<string, string> = {
-  '0.8.28': 'v0.8.28+commit.7893614a',
-  '0.8.27': 'v0.8.27+commit.40a35a09',
-  '0.8.26': 'v0.8.26+commit.8a97fa7a',
-  '0.8.25': 'v0.8.25+commit.b61c2a91',
-  '0.8.24': 'v0.8.24+commit.e11b9ed9',
-  '0.8.23': 'v0.8.23+commit.f704f362',
-  '0.8.22': 'v0.8.22+commit.4fc1097e',
-  '0.8.21': 'v0.8.21+commit.d9974bed',
-  '0.8.20': 'v0.8.20+commit.a1b79de6',
-  '0.8.19': 'v0.8.19+commit.7dd6d404',
-  '0.8.18': 'v0.8.18+commit.87f61d96',
-  '0.8.17': 'v0.8.17+commit.8df45f5f',
-  '0.8.16': 'v0.8.16+commit.07a7930e',
-  '0.8.15': 'v0.8.15+commit.e14f2714',
-  '0.8.14': 'v0.8.14+commit.80d49f37',
-  '0.8.13': 'v0.8.13+commit.abaa5c0e',
-  '0.8.12': 'v0.8.12+commit.f00d7308',
-  '0.8.11': 'v0.8.11+commit.d7f03943',
-  '0.8.10': 'v0.8.10+commit.fc410830',
-  '0.8.9': 'v0.8.9+commit.e5eed63a',
-  '0.8.8': 'v0.8.8+commit.dddeac2f',
-  '0.8.7': 'v0.8.7+commit.e28d00a7',
-  '0.8.6': 'v0.8.6+commit.11564f7e',
-  '0.8.5': 'v0.8.5+commit.a4f2e591',
-  '0.8.4': 'v0.8.4+commit.c7e474f2',
-  '0.8.3': 'v0.8.3+commit.8d00100c',
-  '0.8.2': 'v0.8.2+commit.661d1103',
-  '0.8.1': 'v0.8.1+commit.df193b15',
-  '0.8.0': 'v0.8.0+commit.c7dfd78e',
-  '0.7.6': 'v0.7.6+commit.7338295f',
-  '0.7.5': 'v0.7.5+commit.eb77ed08',
-  '0.7.4': 'v0.7.4+commit.3f05b770',
-  '0.7.3': 'v0.7.3+commit.9bfce1f6',
-  '0.7.2': 'v0.7.2+commit.51b20bc0',
-  '0.7.1': 'v0.7.1+commit.f4a555be',
-  '0.7.0': 'v0.7.0+commit.9e61f92b',
-  '0.6.12': 'v0.6.12+commit.27d51765',
-  '0.6.11': 'v0.6.11+commit.5ef660b1',
-  '0.6.10': 'v0.6.10+commit.00c0fcaf',
-  '0.6.9': 'v0.6.9+commit.3e3065ac',
-  '0.6.8': 'v0.6.8+commit.0bbfe453',
-  '0.6.7': 'v0.6.7+commit.b8d736ae',
-  '0.6.6': 'v0.6.6+commit.6c089d02',
-};
+// Lazy-loaded version map — only allocated on first access to avoid paying
+// the memory cost when the module is imported but version resolution isn't used.
+let _versionReleases: Record<string, string> | null = null;
+
+function getVersionReleases(): Record<string, string> {
+  if (!_versionReleases) {
+    _versionReleases = {
+      '0.8.28': 'v0.8.28+commit.7893614a',
+      '0.8.27': 'v0.8.27+commit.40a35a09',
+      '0.8.26': 'v0.8.26+commit.8a97fa7a',
+      '0.8.25': 'v0.8.25+commit.b61c2a91',
+      '0.8.24': 'v0.8.24+commit.e11b9ed9',
+      '0.8.23': 'v0.8.23+commit.f704f362',
+      '0.8.22': 'v0.8.22+commit.4fc1097e',
+      '0.8.21': 'v0.8.21+commit.d9974bed',
+      '0.8.20': 'v0.8.20+commit.a1b79de6',
+      '0.8.19': 'v0.8.19+commit.7dd6d404',
+      '0.8.18': 'v0.8.18+commit.87f61d96',
+      '0.8.17': 'v0.8.17+commit.8df45f5f',
+      '0.8.16': 'v0.8.16+commit.07a7930e',
+      '0.8.15': 'v0.8.15+commit.e14f2714',
+      '0.8.14': 'v0.8.14+commit.80d49f37',
+      '0.8.13': 'v0.8.13+commit.abaa5c0e',
+      '0.8.12': 'v0.8.12+commit.f00d7308',
+      '0.8.11': 'v0.8.11+commit.d7f03943',
+      '0.8.10': 'v0.8.10+commit.fc410830',
+      '0.8.9': 'v0.8.9+commit.e5eed63a',
+      '0.8.8': 'v0.8.8+commit.dddeac2f',
+      '0.8.7': 'v0.8.7+commit.e28d00a7',
+      '0.8.6': 'v0.8.6+commit.11564f7e',
+      '0.8.5': 'v0.8.5+commit.a4f2e591',
+      '0.8.4': 'v0.8.4+commit.c7e474f2',
+      '0.8.3': 'v0.8.3+commit.8d00100c',
+      '0.8.2': 'v0.8.2+commit.661d1103',
+      '0.8.1': 'v0.8.1+commit.df193b15',
+      '0.8.0': 'v0.8.0+commit.c7dfd78e',
+      '0.7.6': 'v0.7.6+commit.7338295f',
+      '0.7.5': 'v0.7.5+commit.eb77ed08',
+      '0.7.4': 'v0.7.4+commit.3f05b770',
+      '0.7.3': 'v0.7.3+commit.9bfce1f6',
+      '0.7.2': 'v0.7.2+commit.51b20bc0',
+      '0.7.1': 'v0.7.1+commit.f4a555be',
+      '0.7.0': 'v0.7.0+commit.9e61f92b',
+      '0.6.12': 'v0.6.12+commit.27d51765',
+      '0.6.11': 'v0.6.11+commit.5ef660b1',
+      '0.6.10': 'v0.6.10+commit.00c0fcaf',
+      '0.6.9': 'v0.6.9+commit.3e3065ac',
+      '0.6.8': 'v0.6.8+commit.0bbfe453',
+      '0.6.7': 'v0.6.7+commit.b8d736ae',
+      '0.6.6': 'v0.6.6+commit.6c089d02',
+    };
+  }
+  return _versionReleases;
+}
 
 export interface PragmaInfo {
   raw: string;
@@ -145,7 +153,7 @@ export function resolveBestVersion(pragma: PragmaInfo | null): string | null {
   try {
     // Priority 1: Use extracted exact version from pragma
     if (pragma.exactVersion) {
-      const release = VERSION_RELEASES[pragma.exactVersion];
+      const release = getVersionReleases()[pragma.exactVersion];
       if (release) {
         return release;
       }
@@ -161,7 +169,7 @@ export function resolveBestVersion(pragma: PragmaInfo | null): string | null {
     const simpleMatch = cleaned.match(/[\^~]?(\d+\.\d+\.\d+)/);
     if (simpleMatch) {
       const version = simpleMatch[1];
-      const release = VERSION_RELEASES[version];
+      const release = getVersionReleases()[version];
       if (release) {
         return release;
       }
@@ -172,7 +180,7 @@ export function resolveBestVersion(pragma: PragmaInfo | null): string | null {
     const rangeMatch = cleaned.match(/>=?(\d+\.\d+\.\d+)/);
     if (rangeMatch) {
       const version = rangeMatch[1];
-      const release = VERSION_RELEASES[version];
+      const release = getVersionReleases()[version];
       if (release) {
         return release;
       }
@@ -180,11 +188,11 @@ export function resolveBestVersion(pragma: PragmaInfo | null): string | null {
 
     // Priority 3: For complex ranges without explicit version, use latest stable of major version
     const rangeToVersion: Record<string, string> = {
-      '^0.8': VERSION_RELEASES['0.8.28'],
-      '^0.7': VERSION_RELEASES['0.7.6'],
-      '^0.6': VERSION_RELEASES['0.6.12'],
-      '>=0.8.0<0.9.0': VERSION_RELEASES['0.8.28'],
-      '>=0.7.0<0.8.0': VERSION_RELEASES['0.7.6'],
+      '^0.8': getVersionReleases()['0.8.28'],
+      '^0.7': getVersionReleases()['0.7.6'],
+      '^0.6': getVersionReleases()['0.6.12'],
+      '>=0.8.0<0.9.0': getVersionReleases()['0.8.28'],
+      '>=0.7.0<0.8.0': getVersionReleases()['0.7.6'],
     };
 
     for (const [pattern, version] of Object.entries(rangeToVersion)) {
@@ -221,6 +229,10 @@ export function getCachedCompiler(version: string): any | null {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function cacheCompiler(version: string, compiler: any): void {
+  // Evict old entries to stay within the size limit (only keep current compiler)
+  if (compilerCache.size >= MAX_COMPILER_CACHE && !compilerCache.has(version)) {
+    compilerCache.clear();
+  }
   compilerCache.set(version, compiler);
   console.log(`✅ Cached solc ${version} in memory`);
 }

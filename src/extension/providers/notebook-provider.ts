@@ -156,6 +156,8 @@ export class SigScanNotebookController {
 
   private readonly controller: vscode.NotebookController;
   private executionOrder = 0;
+  private keccak256: ((input: string) => string) | null = null;
+  private keccak256Resolved = false;
 
   constructor() {
     this.controller = vscode.notebooks.createNotebookController(
@@ -446,6 +448,25 @@ export class SigScanNotebookController {
   }
 
   // ---------------------------------------------------------------------------
+  // Hashing helper (resolved once, cached for all subsequent calls)
+  // ---------------------------------------------------------------------------
+
+  private getKeccak256(): ((input: string) => string) | null {
+    if (!this.keccak256Resolved) {
+      this.keccak256Resolved = true;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { keccak256 } = require('js-sha3');
+        this.keccak256 = keccak256;
+      } catch {
+        // js-sha3 not available
+        this.keccak256 = null;
+      }
+    }
+    return this.keccak256;
+  }
+
+  // ---------------------------------------------------------------------------
   // Parsing helpers (lightweight regex, no solc dependency)
   // ---------------------------------------------------------------------------
 
@@ -523,12 +544,9 @@ export class SigScanNotebookController {
 
       // Compute selector via simple keccak256 (use js-sha3 if available)
       let selector = '0x????????';
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { keccak256 } = require('js-sha3');
-        selector = '0x' + keccak256(signature).substring(0, 8);
-      } catch {
-        // js-sha3 not available in notebook context
+      const hashFn = this.getKeccak256();
+      if (hashFn) {
+        selector = '0x' + hashFn(signature).substring(0, 8);
       }
 
       results.push({ name, signature, selector, stateMutability, inputs });
@@ -561,12 +579,9 @@ export class SigScanNotebookController {
       const signature = `${name}(${typeOnly.join(',')})`;
 
       let topic = '0x' + '?'.repeat(64);
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { keccak256 } = require('js-sha3');
-        topic = '0x' + keccak256(signature);
-      } catch {
-        // js-sha3 not available
+      const hashFn2 = this.getKeccak256();
+      if (hashFn2) {
+        topic = '0x' + hashFn2(signature);
       }
 
       results.push({ name, signature, topic, inputs });

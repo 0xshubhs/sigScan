@@ -24,21 +24,21 @@ export interface DecorationAnalysis {
  */
 export function getGasGradientColor(gasAmount: number | 'infinite'): string {
   if (gasAmount === 'infinite') {
-    return '#E06C75';
+    return '#FF6B7A';
   }
   if (gasAmount < 5_000) {
-    return '#98C379';
+    return '#73E068';
   }
   if (gasAmount < 20_000) {
-    return '#B5BD68';
+    return '#C8D85A';
   }
   if (gasAmount < 50_000) {
-    return '#E5C07B';
+    return '#FFD454';
   }
   if (gasAmount < 100_000) {
-    return '#D19A66';
+    return '#FFA64D';
   }
-  return '#E06C75';
+  return '#FF6B7A';
 }
 
 export function getComplexityColor(rating: string): string {
@@ -98,6 +98,62 @@ function buildFuncMatch(funcName: string): FuncMatch {
   return { pattern, displayName, isEvent };
 }
 
+// ─── Regex match cache (keyed by content hash + funcName) ────────────────────
+
+interface CachedMatch {
+  match: RegExpExecArray | null;
+}
+
+const regexMatchCache = new Map<string, Map<string, CachedMatch>>();
+const MAX_REGEX_CACHE_ENTRIES = 2; // keep current + previous content version
+
+function getContentHash(content: string): string {
+  let hash = 5381;
+  for (let i = 0; i < content.length; i++) {
+    hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * Get or compute a regex match for funcName against content, cached by content hash.
+ */
+function getCachedMatch(
+  content: string,
+  contentHash: string,
+  funcName: string
+): RegExpExecArray | null {
+  let hashMap = regexMatchCache.get(contentHash);
+  if (hashMap) {
+    const cached = hashMap.get(funcName);
+    if (cached !== undefined) {
+      return cached.match;
+    }
+  }
+
+  // Evict old content hashes if cache grows too large
+  if (!hashMap) {
+    if (regexMatchCache.size >= MAX_REGEX_CACHE_ENTRIES) {
+      const oldest = regexMatchCache.keys().next().value as string;
+      regexMatchCache.delete(oldest);
+    }
+    hashMap = new Map();
+    regexMatchCache.set(contentHash, hashMap);
+  }
+
+  const { pattern } = buildFuncMatch(funcName);
+  const match = pattern.exec(content);
+  hashMap.set(funcName, { match });
+  return match;
+}
+
+/**
+ * Invalidate the regex match cache (call when content changes are known).
+ */
+export function invalidateMatchCache(): void {
+  regexMatchCache.clear();
+}
+
 function findHintPosition(
   content: string,
   match: RegExpExecArray,
@@ -155,11 +211,12 @@ export function createGasDecorations(
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
   const content = document.getText();
+  const contentHash = getContentHash(content);
   const isPending = analysis.isPending === true;
 
   analysis.gasEstimates.forEach((estimate, funcName) => {
-    const { pattern, displayName, isEvent } = buildFuncMatch(funcName);
-    const match = pattern.exec(content);
+    const { displayName, isEvent } = buildFuncMatch(funcName);
+    const match = getCachedMatch(content, contentHash, funcName);
 
     if (match) {
       const hintPos = findHintPosition(content, match, isEvent, document);
@@ -185,6 +242,7 @@ export function createGasDecorations(
             contentText: decorationText,
             color,
             fontStyle: 'normal',
+            fontWeight: 'bold',
             margin: '0 0 0 0.5em',
           },
         },
@@ -263,11 +321,8 @@ export function createRemixStyleDecorations(
       gasText = 'var';
     }
 
-    const color: string | vscode.ThemeColor = !gasText
-      ? new vscode.ThemeColor('editorCodeLens.foreground')
-      : isReverted
-        ? new vscode.ThemeColor('editorGutter.commentRangeForeground')
-        : getGasGradientColor(info.gas);
+    // Reverted functions still get gradient color (the gas is real, just from a revert path)
+    const color: string | vscode.ThemeColor = !gasText ? '#9E9E9E' : getGasGradientColor(info.gas);
 
     let decorationText: string;
     if (isEvent) {
@@ -289,7 +344,9 @@ export function createRemixStyleDecorations(
     } else if (!gasText) {
       hoverMd.appendMarkdown('**Gas:** unavailable\n\n');
     } else if (isReverted) {
-      hoverMd.appendMarkdown(`**Gas:** ~${gasText} (reverted with default args)\n\n`);
+      hoverMd.appendMarkdown(
+        `**Gas:** ~${gasText} (estimated — function requires specific args)\n\n`
+      );
     } else if (info.gas === 'infinite') {
       hoverMd.appendMarkdown('**Gas:** variable (depends on execution path)\n\n');
     } else {
@@ -319,6 +376,7 @@ export function createRemixStyleDecorations(
           contentText: decorationText,
           color,
           fontStyle: 'normal',
+          fontWeight: 'bold',
           margin: '0 0 0 0.5em',
         },
       },
@@ -338,10 +396,10 @@ export function createComplexityDecorations(
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
   const content = document.getText();
+  const contentHash = getContentHash(content);
 
   analysis.complexityMetrics.forEach((metrics, funcName) => {
-    const pattern = new RegExp(`function\\s+${funcName}\\s*\\(`);
-    const match = pattern.exec(content);
+    const match = getCachedMatch(content, contentHash, funcName);
 
     if (match && metrics.rating !== 'A') {
       const position = document.positionAt(match.index);
@@ -372,11 +430,12 @@ export function createGasInlayHints(
 ): vscode.InlayHint[] {
   const hints: vscode.InlayHint[] = [];
   const content = document.getText();
+  const contentHash = getContentHash(content);
   const isPending = analysis.isPending === true;
 
   analysis.gasEstimates.forEach((estimate, funcName) => {
-    const { pattern, displayName, isEvent } = buildFuncMatch(funcName);
-    const match = pattern.exec(content);
+    const { displayName, isEvent } = buildFuncMatch(funcName);
+    const match = getCachedMatch(content, contentHash, funcName);
 
     if (match) {
       const hintPos = findHintPosition(content, match, isEvent, document);

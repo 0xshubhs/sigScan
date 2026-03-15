@@ -61,12 +61,13 @@ export class FileWatcher extends EventEmitter {
   /**
    * Stop watching for file changes
    */
-  public stopWatching(): void {
+  public async stopWatching(): Promise<void> {
     if (this.watcher) {
-      this.watcher.close();
+      await this.watcher.close();
       this.watcher = null;
     }
     this.isWatching = false;
+    this.removeAllListeners();
   }
 
   /**

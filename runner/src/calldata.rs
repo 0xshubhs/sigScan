@@ -6,6 +6,7 @@ use eyre::{Result, WrapErr};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallStrategy {
     SmartDefaults,
+    IncrementingArgs,
     CallerAddress,
     ZeroDefaults,
 }
@@ -20,11 +21,24 @@ pub fn encode_calldata_with_strategy(
     if func.inputs.is_empty() {
         return Ok(selector.to_vec());
     }
-    let values: Vec<DynSolValue> = func
-        .inputs
-        .iter()
-        .map(|p| Ok(strategy_value(&param_to_dyn_sol_type(p)?, strategy, caller)))
-        .collect::<Result<Vec<_>>>()?;
+    let values: Vec<DynSolValue> = if strategy == CallStrategy::IncrementingArgs {
+        // Incrementing strategy: each param of the same type gets an increasing value.
+        // This passes guards like require(fromTime < toTime) where both are uint.
+        let mut counter: u64 = 1;
+        func.inputs
+            .iter()
+            .map(|p| {
+                let ty = param_to_dyn_sol_type(p)?;
+                let val = incrementing_value(&ty, caller, &mut counter);
+                Ok(val)
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        func.inputs
+            .iter()
+            .map(|p| Ok(strategy_value(&param_to_dyn_sol_type(p)?, strategy, caller)))
+            .collect::<Result<Vec<_>>>()?
+    };
     let encoded = DynSolValue::Tuple(values).abi_encode_params();
     let mut calldata = Vec::with_capacity(4 + encoded.len());
     calldata.extend_from_slice(selector.as_slice());
@@ -84,8 +98,49 @@ fn param_to_dyn_sol_type(param: &Param) -> Result<DynSolType> {
 fn strategy_value(ty: &DynSolType, strategy: CallStrategy, caller: Address) -> DynSolValue {
     match strategy {
         CallStrategy::SmartDefaults => smart_value(ty, caller),
+        CallStrategy::IncrementingArgs => smart_value(ty, caller), // fallback; real logic in encode_calldata_with_strategy
         CallStrategy::CallerAddress => caller_value(ty, caller),
         CallStrategy::ZeroDefaults => zero_value(ty),
+    }
+}
+
+/// Incrementing defaults: each numeric param gets an increasing value.
+/// Passes guards like require(a < b), require(a != b), require(a <= b).
+fn incrementing_value(ty: &DynSolType, caller: Address, counter: &mut u64) -> DynSolValue {
+    match ty {
+        DynSolType::Uint(b) => {
+            let val = *counter;
+            *counter += 1;
+            DynSolValue::Uint(U256::from(val), *b)
+        }
+        DynSolType::Int(b) => {
+            let val = *counter as i64;
+            *counter += 1;
+            DynSolValue::Int(I256::try_from(val).unwrap_or(I256::ZERO), *b)
+        }
+        DynSolType::Bool => DynSolValue::Bool(true),
+        DynSolType::Address => DynSolValue::Address(caller),
+        DynSolType::Bytes => DynSolValue::Bytes(vec![0x01]),
+        DynSolType::String => DynSolValue::String("a".into()),
+        DynSolType::FixedBytes(n) => {
+            let mut b = [0u8; 32];
+            if *n > 0 { b[n - 1] = 1; }
+            DynSolValue::FixedBytes(alloy_primitives::B256::from(b), *n)
+        }
+        DynSolType::Array(inner) => {
+            DynSolValue::Array(vec![incrementing_value(inner, caller, counter)])
+        }
+        DynSolType::FixedArray(inner, n) => {
+            DynSolValue::FixedArray((0..*n).map(|_| incrementing_value(inner, caller, counter)).collect())
+        }
+        DynSolType::Tuple(types) => {
+            DynSolValue::Tuple(types.iter().map(|t| incrementing_value(t, caller, counter)).collect())
+        }
+        DynSolType::Function => {
+            let mut f = [0u8; 24];
+            f[23] = 1;
+            DynSolValue::Function(alloy_primitives::Function::from(f))
+        }
     }
 }
 

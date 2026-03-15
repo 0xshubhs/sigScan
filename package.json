@@ -212,6 +212,56 @@
         "title": "Open Project Dashboard",
         "category": "SigScan",
         "icon": "$(dashboard)"
+      },
+      {
+        "command": "sigscan.detectReentrancy",
+        "title": "Detect Reentrancy Vulnerabilities",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.detectUncheckedCalls",
+        "title": "Detect Unchecked Low-Level Calls",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.checkEvents",
+        "title": "Check Missing Event Emissions",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.checkAccessControl",
+        "title": "Check Access Control",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.suggestCustomErrors",
+        "title": "Suggest Custom Errors (Gas Savings)",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.checkNatspec",
+        "title": "Check NatSpec Completeness",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.forgeRunTest",
+        "title": "Run Forge Test",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.forgeRunAllTests",
+        "title": "Run All Forge Tests",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.detectDangerousPatterns",
+        "title": "Detect Dangerous Patterns (tx.origin, selfdestruct, delegatecall)",
+        "category": "SigScan"
+      },
+      {
+        "command": "sigscan.detectDeFiRisks",
+        "title": "Detect DeFi Risks (Oracle, Precision, Approval, Zero-Address, Vault)",
+        "category": "SigScan"
       }
     ],
     "configuration": {

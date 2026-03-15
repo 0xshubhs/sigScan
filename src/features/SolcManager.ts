@@ -19,6 +19,20 @@ import { keccak256 } from 'js-sha3';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _solc: any = null;
 
+let _solcReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+const SOLC_RELEASE_MS = 60_000; // Release solc after 60s of inactivity
+
+function scheduleSolcRelease() {
+  if (_solcReleaseTimer) {
+    clearTimeout(_solcReleaseTimer);
+  }
+  _solcReleaseTimer = setTimeout(() => {
+    _solc = null;
+    _solcReleaseTimer = null;
+    console.log('Released solc WASM module (idle timeout)');
+  }, SOLC_RELEASE_MS);
+}
+
 function getSolc() {
   if (!_solc) {
     try {
@@ -109,9 +123,8 @@ export interface CompilationOutput {
   gasInfo: GasInfo[];
   errors: string[];
   warnings: string[];
-  ast?: unknown;
-  bytecode?: string;
-  deployedBytecode?: string;
+  /** Size of deployed bytecode in bytes (for EIP-170 24KB check). AST and full bytecode are NOT retained to save memory. */
+  deployedBytecodeSize?: number;
 }
 
 /**
@@ -138,6 +151,14 @@ export interface CompilerSettings {
 export class SolcManager {
   private static cache = new Map<string, SolcInstance>();
   private static loading = new Map<string, Promise<SolcInstance>>();
+  /** Tracks last-used timestamp per cached version for TTL eviction */
+  private static lastUsed = new Map<string, number>();
+  /** TTL in ms — unload solc versions unused for 5 minutes */
+  private static readonly TTL_MS = 5 * 60 * 1000;
+  /** Max number of solc versions to keep in memory simultaneously */
+  private static readonly MAX_CACHED = 1;
+  /** Handle for the periodic eviction timer */
+  private static evictionTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Load a specific solc version (cached)
@@ -153,6 +174,7 @@ export class SolcManager {
     if (this.cache.has(normalizedVersion)) {
       const cached = this.cache.get(normalizedVersion);
       if (cached) {
+        this.touchVersion(normalizedVersion);
         return cached;
       }
     }
@@ -187,7 +209,11 @@ export class SolcManager {
           }
 
           debug.log(`Loaded solc ${normalizedVersion}`);
+          // Evict excess cached versions before adding new one
+          this.evictExcess(normalizedVersion);
           this.cache.set(normalizedVersion, solcInstance);
+          this.touchVersion(normalizedVersion);
+          this.startEvictionTimer();
           resolve(solcInstance);
         }
       );
@@ -230,7 +256,24 @@ export class SolcManager {
    * Get cached compiler (returns null if not cached)
    */
   static getCached(version: string): SolcInstance | null {
-    return this.cache.get(this.normalizeVersion(version)) || null;
+    const normalizedVersion = this.normalizeVersion(version);
+    const instance = this.cache.get(normalizedVersion) || null;
+    if (instance) {
+      this.touchVersion(normalizedVersion);
+    }
+    return instance;
+  }
+
+  /**
+   * Unload a specific solc version from memory
+   */
+  static unload(version: string): void {
+    const normalizedVersion = this.normalizeVersion(version);
+    if (this.cache.has(normalizedVersion)) {
+      this.cache.delete(normalizedVersion);
+      this.lastUsed.delete(normalizedVersion);
+      debug.log(`Unloaded solc ${normalizedVersion}`);
+    }
   }
 
   /**
@@ -239,6 +282,8 @@ export class SolcManager {
   static clearCache(): void {
     this.cache.clear();
     this.loading.clear();
+    this.lastUsed.clear();
+    this.stopEvictionTimer();
     debug.log('Cache cleared');
   }
 
@@ -247,6 +292,73 @@ export class SolcManager {
    */
   static getCachedVersions(): string[] {
     return Array.from(this.cache.keys());
+  }
+
+  /** Mark a version as recently used */
+  private static touchVersion(version: string): void {
+    this.lastUsed.set(version, Date.now());
+  }
+
+  /**
+   * Evict cached versions that exceed MAX_CACHED, keeping the most recently used.
+   * Called before inserting a new version so we don't accumulate WASM instances.
+   */
+  private static evictExcess(excludeVersion?: string): void {
+    // Only evict if we're at or over the limit
+    if (this.cache.size < this.MAX_CACHED) {
+      return;
+    }
+
+    // Sort by last-used ascending (oldest first)
+    const entries = Array.from(this.cache.keys())
+      .filter((v) => v !== excludeVersion)
+      .sort((a, b) => (this.lastUsed.get(a) || 0) - (this.lastUsed.get(b) || 0));
+
+    // Remove oldest until we're under the limit
+    const toRemove = this.cache.size - this.MAX_CACHED + 1; // +1 to make room for the new one
+    for (let i = 0; i < toRemove && i < entries.length; i++) {
+      debug.log(`Evicting solc ${entries[i]} (%.1f MB freed est.)`, 40);
+      this.cache.delete(entries[i]);
+      this.lastUsed.delete(entries[i]);
+    }
+  }
+
+  /** Start the periodic TTL eviction timer (runs every 60s) */
+  private static startEvictionTimer(): void {
+    if (this.evictionTimer) {
+      return;
+    }
+    this.evictionTimer = setInterval(() => {
+      this.evictExpired();
+    }, 60_000);
+    // Unref so the timer doesn't prevent Node from exiting
+    if (typeof this.evictionTimer === 'object' && 'unref' in this.evictionTimer) {
+      this.evictionTimer.unref();
+    }
+  }
+
+  /** Stop the eviction timer */
+  private static stopEvictionTimer(): void {
+    if (this.evictionTimer) {
+      clearInterval(this.evictionTimer);
+      this.evictionTimer = null;
+    }
+  }
+
+  /** Evict all versions that haven't been used within TTL_MS */
+  private static evictExpired(): void {
+    const now = Date.now();
+    for (const [version, lastUsedTime] of this.lastUsed.entries()) {
+      if (now - lastUsedTime > this.TTL_MS) {
+        debug.log(`TTL expired for solc ${version} — unloading`);
+        this.cache.delete(version);
+        this.lastUsed.delete(version);
+      }
+    }
+    // If nothing left cached, stop the timer
+    if (this.cache.size === 0) {
+      this.stopEvictionTimer();
+    }
   }
 
   /**
@@ -674,6 +786,40 @@ interface ASTNode {
 }
 
 /**
+ * Build a line-offset table from source without retaining a split lines array.
+ * Returns an array where lineOffsets[i] is the character offset of line i (0-based lines).
+ * The final entry equals sourceCode.length + 1, so binary-search works for any offset.
+ */
+function buildLineOffsets(sourceCode: string): number[] {
+  const offsets: number[] = [0];
+  for (let i = 0; i < sourceCode.length; i++) {
+    if (sourceCode.charCodeAt(i) === 10 /* \n */) {
+      offsets.push(i + 1);
+    }
+  }
+  // Sentinel so the last line is searchable
+  offsets.push(sourceCode.length + 1);
+  return offsets;
+}
+
+/**
+ * Convert a character offset to a 1-based line number using binary search.
+ */
+function offsetToLine(offset: number, lineOffsets: number[]): number {
+  let lo = 0;
+  let hi = lineOffsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (lineOffsets[mid] <= offset) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo + 1; // 1-based
+}
+
+/**
  * Map gas estimates to AST function locations (Remix-style)
  *
  * This is the core of the gas-to-source mapping system.
@@ -687,31 +833,13 @@ export function mapGasToAst(
   contractName?: string
 ): GasInfo[] {
   const results: GasInfo[] = [];
-  const lines = sourceCode.split('\n');
 
   debug.log(
     `mapGasToAst: nodeType=${ast?.nodeType}, contract=${contractName || '(all)'}, keys=${JSON.stringify(gasEstimates).substring(0, 200)}`
   );
 
-  // Build line offset map for src parsing
-  const lineOffsets: number[] = [0];
-  for (let i = 0; i < lines.length; i++) {
-    lineOffsets.push(lineOffsets[i] + lines[i].length + 1); // +1 for newline
-  }
-
-  function offsetToLine(offset: number): number {
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      if (lineOffsets[mid] <= offset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo + 1; // 1-based
-  }
+  // Build line offset map for src parsing (no intermediate lines array)
+  const lineOffsets = buildLineOffsets(sourceCode);
 
   // Track the current contract name as we walk the AST
   let currentContract: string | null = null;
@@ -742,8 +870,8 @@ export function mapGasToAst(
       const srcParts = fnNode.src.split(':');
       const startOffset = parseInt(srcParts[0], 10);
       const length = parseInt(srcParts[1], 10);
-      const startLine = offsetToLine(startOffset);
-      const endLine = offsetToLine(startOffset + length);
+      const startLine = offsetToLine(startOffset, lineOffsets);
+      const endLine = offsetToLine(startOffset + length, lineOffsets);
 
       // Compute selector
       const selector = computeSelector(fnNode);
@@ -972,27 +1100,9 @@ function _detectInfiniteGasWarnings(fnNode: ASTFunctionNode, functionSource: str
  */
 function extractFunctionsWithRegex(source: string): GasInfo[] {
   const results: GasInfo[] = [];
-  const lines = source.split('\n');
 
-  // Build line offset map for finding line numbers
-  const lineOffsets: number[] = [0];
-  for (let i = 0; i < lines.length; i++) {
-    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
-  }
-
-  function offsetToLine(offset: number): number {
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      if (lineOffsets[mid] <= offset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo + 1; // 1-based
-  }
+  // Build line offset map for finding line numbers (no intermediate lines array)
+  const lineOffsets = buildLineOffsets(source);
 
   // Regex to match function declarations
   const functionRegex =
@@ -1045,8 +1155,8 @@ function extractFunctionsWithRegex(source: string): GasInfo[] {
     const hash = keccak256(signature);
     const selector = '0x' + hash.substring(0, 8);
 
-    const startLine = offsetToLine(startOffset);
-    const endLine = offsetToLine(endOffset);
+    const startLine = offsetToLine(startOffset, lineOffsets);
+    const endLine = offsetToLine(endOffset, lineOffsets);
 
     results.push({
       name,
@@ -1079,7 +1189,7 @@ function extractFunctionsWithRegex(source: string): GasInfo[] {
     const hash = keccak256(signature);
     const selector = '0x' + hash.substring(0, 8);
 
-    const startLine = offsetToLine(startOffset);
+    const startLine = offsetToLine(startOffset, lineOffsets);
 
     results.push({
       name: 'constructor',
@@ -1106,10 +1216,11 @@ export async function compileWithGasAnalysis(
   importCallback?: (path: string) => { contents: string } | { error: string }
 ): Promise<CompilationOutput> {
   try {
-    // Create input
-    const input = createCompilationInput(fileName, source, settings);
-    const inputJson = JSON.stringify(input);
-    let outputJson: string;
+    // Create input — release the object immediately after serialization
+    let inputJson: string | null = JSON.stringify(
+      createCompilationInput(fileName, source, settings)
+    );
+    let outputJson: string | null;
     let version: string;
 
     // Try solc-js first, then native solc
@@ -1122,16 +1233,17 @@ export async function compileWithGasAnalysis(
       }
 
       outputJson = importCallback
-        ? resolved.compiler.compile(inputJson, { import: importCallback })
-        : resolved.compiler.compile(inputJson);
+        ? resolved.compiler.compile(inputJson!, { import: importCallback })
+        : resolved.compiler.compile(inputJson!);
     } catch {
       // solc-js not available — try native solc binary
-      const nativeResult = compileWithNativeSolc(inputJson);
+      const nativeResult = compileWithNativeSolc(inputJson!);
       if (nativeResult) {
         outputJson = nativeResult;
         version = tryNativeSolcVersion() || 'native';
       } else {
         // No compiler available at all — regex fallback
+        inputJson = null;
         const fallbackGasInfo = extractFunctionsWithRegex(source);
         return {
           success: false,
@@ -1143,7 +1255,12 @@ export async function compileWithGasAnalysis(
       }
     }
 
-    const output = JSON.parse(outputJson);
+    // Release the input JSON — no longer needed after compilation
+    inputJson = null;
+
+    // Parse and immediately release the raw JSON string to free memory
+    let output = JSON.parse(outputJson!);
+    outputJson = null; // Release raw JSON (can be 5-20MB)
 
     // Check for errors
     const errors: string[] = [];
@@ -1160,7 +1277,8 @@ export async function compileWithGasAnalysis(
     }
 
     if (errors.length > 0) {
-      // Compilation failed - fall back to regex-based extraction for selectors
+      // Compilation failed - release solc output and fall back to regex
+      output = null;
       console.warn(
         `⚠️ Compilation failed, falling back to regex-based selector extraction for ${fileName}`
       );
@@ -1176,10 +1294,11 @@ export async function compileWithGasAnalysis(
       };
     }
 
-    // Extract gas info from AST
+    // Extract gas info from AST — use `let` so references can be released
     const gasInfo: GasInfo[] = [];
-    const contracts = output.contracts?.[fileName] || {};
-    const ast = output.sources?.[fileName]?.ast;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let contracts: Record<string, any> = output.contracts?.[fileName] || {};
+    let ast: ASTNode | undefined = output.sources?.[fileName]?.ast;
 
     debug.log(`Contracts found: ${Object.keys(contracts).length}, AST present: ${!!ast}`);
 
@@ -1197,21 +1316,32 @@ export async function compileWithGasAnalysis(
       }
     }
 
-    // Extract bytecode from first contract
+    // Compute deployed bytecode size for EIP-170 check (don't retain the full string)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const firstContract = Object.values(contracts)[0] as any;
-    const bytecode = firstContract?.evm?.bytecode?.object;
-    const deployedBytecode = firstContract?.evm?.deployedBytecode?.object;
+    const deployedBytecodeHex: string | undefined = firstContract?.evm?.deployedBytecode?.object;
+    let deployedBytecodeSize: number | undefined;
+    if (deployedBytecodeHex) {
+      const hex = deployedBytecodeHex.startsWith('0x')
+        ? deployedBytecodeHex.slice(2)
+        : deployedBytecodeHex;
+      deployedBytecodeSize = hex.length / 2;
+    }
 
+    // Release the entire solc output and extracted references so GC can reclaim
+    // AST, bytecodes, ABI, metadata, and all contract data
+    output = null;
+    contracts = null as any;
+    ast = undefined;
+
+    scheduleSolcRelease();
     return {
       success: true,
       version,
       gasInfo,
       errors: [],
       warnings,
-      ast,
-      bytecode,
-      deployedBytecode,
+      deployedBytecodeSize,
     };
   } catch (error) {
     // Last resort: regex fallback so we at least show selectors

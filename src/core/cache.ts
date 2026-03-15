@@ -1,5 +1,3 @@
-import * as crypto from 'crypto';
-
 interface SignatureData {
   functions: unknown[];
   events: unknown[];
@@ -27,7 +25,7 @@ interface CacheEntry {
  */
 export class SignatureCache {
   private cache: Map<string, CacheEntry> = new Map();
-  private maxSize = 1000;
+  private maxSize = 100;
 
   /**
    * Get cached signatures for a file
@@ -105,10 +103,14 @@ export class SignatureCache {
   }
 
   /**
-   * Calculate SHA-256 hash of content
+   * Calculate hash of content (DJB2 — fast inline hash for cache invalidation)
    */
   private calculateHash(content: string): string {
-    return crypto.createHash('sha256').update(content).digest('hex');
+    let hash = 5381;
+    for (let i = 0; i < content.length; i++) {
+      hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+    }
+    return hash.toString(36);
   }
 }
 

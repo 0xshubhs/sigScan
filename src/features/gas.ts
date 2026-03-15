@@ -6,6 +6,13 @@ import { keccak256 } from 'js-sha3';
 import { SolcManager, compileWithGasAnalysis, GasInfo } from './SolcManager';
 import { FunctionSignature } from '../types';
 
+/** Cached solc compilation result keyed by content hash */
+interface SolcCompilationCache {
+  hash: string;
+  success: boolean;
+  gasInfo: GasInfo[];
+}
+
 export interface GasEstimate {
   function: string;
   signature: string;
@@ -30,9 +37,19 @@ export class GasEstimator {
   private readonly EXTERNAL_CALL = 2600;
 
   private useSolc: boolean;
+  private compilationCache: SolcCompilationCache | null = null;
 
   constructor(useSolc = true, _optimizerRuns = 200) {
     this.useSolc = useSolc;
+  }
+
+  /** DJB2 hash — fast, no crypto dependency needed for cache keying. */
+  private contentHash(content: string): string {
+    let hash = 5381;
+    for (let i = 0; i < content.length; i++) {
+      hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+    }
+    return (hash >>> 0).toString(16);
   }
 
   public isSolcAvailable(): boolean {
@@ -59,18 +76,35 @@ export class GasEstimator {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const source = content || require('fs').readFileSync(filePath, 'utf-8');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const fileName = require('path').basename(filePath);
-      const result = await compileWithGasAnalysis(source, fileName);
+      const sourceHash = this.contentHash(source);
 
-      if (!result.success || result.gasInfo.length === 0) {
-        return null;
+      // Use cached compilation if content hasn't changed
+      let gasInfo: GasInfo[];
+      if (this.compilationCache && this.compilationCache.hash === sourceHash) {
+        if (!this.compilationCache.success || this.compilationCache.gasInfo.length === 0) {
+          return null;
+        }
+        gasInfo = this.compilationCache.gasInfo;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const fileName = require('path').basename(filePath);
+        const result = await compileWithGasAnalysis(source, fileName);
+        this.compilationCache = {
+          hash: sourceHash,
+          success: result.success,
+          gasInfo: result.gasInfo,
+        };
+
+        if (!result.success || result.gasInfo.length === 0) {
+          return null;
+        }
+        gasInfo = result.gasInfo;
       }
 
       // Find matching gas info by function name
       const functionName = signature.split('(')[0];
       // Try exact name match
-      const gasInfoMatch = result.gasInfo.find((g) => {
+      const gasInfoMatch = gasInfo.find((g) => {
         const sig = `${g.name}(`;
         return signature.startsWith(sig) || g.name === functionName;
       });
@@ -257,14 +291,17 @@ export class GasEstimator {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const fileName = require('path').basename(filePath);
         const result = await compileWithGasAnalysis(contractCode, fileName);
+        const compiledGasInfo = result.success ? result.gasInfo : [];
+        // Release the full compilation result to free memory
+        (result as { gasInfo?: unknown }).gasInfo = undefined;
 
-        if (result.success && result.gasInfo.length > 0) {
+        if (compiledGasInfo.length > 0) {
           for (const func of functions) {
             const signature = func.signature;
             const funcName = func.name;
 
             // Find matching gas info
-            const gasInfoMatch = result.gasInfo.find(
+            const gasInfoMatch = compiledGasInfo.find(
               (g) => g.name === funcName || g.name === signature.split('(')[0]
             );
 

@@ -10,7 +10,6 @@
  */
 
 import * as vscode from 'vscode';
-import * as crypto from 'crypto';
 
 export interface DashboardData {
   totalContracts: number;
@@ -48,7 +47,6 @@ export class DashboardPanel {
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
-        retainContextWhenHidden: true,
         localResourceRoots: [extensionUri],
       }
     );
@@ -453,10 +451,11 @@ export class DashboardPanel {
 }
 
 /**
- * Generate a random nonce string for CSP.
+ * Generate a nonce string for CSP.
+ * CSP nonces in a local VS Code webview do not require cryptographic randomness.
  */
 function getNonce(): string {
-  return crypto.randomBytes(16).toString('hex');
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 /**

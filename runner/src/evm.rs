@@ -12,8 +12,9 @@ use revm::state::AccountInfo;
 use revm::{ExecuteCommitEvm, ExecuteEvm, MainBuilder, MainContext};
 
 const GAS_LIMIT: u64 = 30_000_000;
-const STRATEGIES: [CallStrategy; 3] = [
+const STRATEGIES: [CallStrategy; 4] = [
     CallStrategy::SmartDefaults,
+    CallStrategy::IncrementingArgs,
     CallStrategy::CallerAddress,
     CallStrategy::ZeroDefaults,
 ];
@@ -103,6 +104,7 @@ fn status_rank(s: &ExecutionStatus) -> u8 {
 fn strategy_label(s: CallStrategy) -> String {
     match s {
         CallStrategy::SmartDefaults => "smart_defaults".into(),
+        CallStrategy::IncrementingArgs => "incrementing_args".into(),
         CallStrategy::CallerAddress => "caller_address".into(),
         CallStrategy::ZeroDefaults => "zero_defaults".into(),
     }

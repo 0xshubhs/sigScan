@@ -5,7 +5,6 @@
 
 import * as vscode from 'vscode';
 import * as childProcess from 'child_process';
-import * as crypto from 'crypto';
 import { promisify } from 'util';
 
 const exec = promisify(childProcess.exec);
@@ -49,6 +48,17 @@ export interface RegressionReport {
     regressed: number;
     unchanged: number;
   };
+}
+
+/**
+ * DJB2 hash — lightweight, non-cryptographic, suitable for cache keys.
+ */
+function hashContent(content: string): string {
+  let hash = 5381;
+  for (let i = 0; i < content.length; i++) {
+    hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
 }
 
 export class GasRegressionTracker {
@@ -275,7 +285,7 @@ export class GasRegressionTracker {
    * Get cache key for snapshot
    */
   private getCacheKey(commitHash: string): string {
-    return crypto.createHash('sha256').update(commitHash).digest('hex');
+    return hashContent(commitHash);
   }
 
   /**

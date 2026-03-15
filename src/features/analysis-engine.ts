@@ -13,7 +13,7 @@
  */
 
 import * as vscode from 'vscode';
-import * as crypto from 'crypto';
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
@@ -84,16 +84,25 @@ export class AnalysisEngine extends EventEmitter {
   private complexityAnalyzer: ComplexityAnalyzer;
   private parser: SolidityParser;
   private diagnosticCollection: vscode.DiagnosticCollection;
-  private analysisCache: Map<string, { timestamp: number; analysis: LiveAnalysis }>;
-  private solcResultsCache: Map<string, { analysis: LiveAnalysis; timestamp: number }>;
-  private signatureCache: Map<string, { analysis: LiveAnalysis; timestamp: number }>;
+  /** Unified cache keyed by content hash. `source` distinguishes signature-only vs solc results. */
+  private unifiedCache: Map<
+    string,
+    { analysis: LiveAnalysis; timestamp: number; source: 'signature' | 'solc' }
+  >;
+  /** Per-document content hash cache to avoid repeated SHA-256 on hover */
+  private contentHashCache: Map<string, { version: number; hash: string }>;
   private idleTimers: Map<string, NodeJS.Timeout>;
   private activeSolcCompilations: Map<string, boolean>;
   private analysisInProgress = false;
   private extendedAnalysisInProgress = false;
   private _evictionInterval: NodeJS.Timeout | undefined;
+  private _trackedSolidityFiles = 0;
   private static readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-  private static readonly MAX_CACHE_SIZE = 50;
+  private static readonly MAX_CACHE_SIZE = 20;
+
+  // Cache for resolved imports (avoids re-reading the same file from disk)
+  private _importCache: Map<string, { contents: string } | { error: string }> = new Map();
+  private static readonly MAX_IMPORT_CACHE_SIZE = 100;
 
   // Extended analyzers (lazy-loaded on first use via dynamic import())
   private _storageAnalyzer: StorageLayoutAnalyzer | null = null;
@@ -109,12 +118,10 @@ export class AnalysisEngine extends EventEmitter {
     this.complexityAnalyzer = new ComplexityAnalyzer();
     this.parser = new SolidityParser();
     this.diagnosticCollection = diagnosticCollection;
-    this.analysisCache = new Map();
-    this.solcResultsCache = new Map();
-    this.signatureCache = new Map();
+    this.unifiedCache = new Map();
+    this.contentHashCache = new Map();
 
-    // Periodically evict stale cache entries (every 60s)
-    this._evictionInterval = setInterval(() => this.evictStaleCacheEntries(), 60_000);
+    // Eviction interval is started lazily when solidity files are tracked
     this.idleTimers = new Map();
     this.activeSolcCompilations = new Map();
   }
@@ -161,18 +168,63 @@ export class AnalysisEngine extends EventEmitter {
     return this._runtimeProfiler;
   }
 
+  // ─── Eviction interval lifecycle ────────────────────────────────────────────
+
+  /** Call when a solidity file is opened/tracked. Starts eviction timer if needed. */
+  public trackSolidityFile(): void {
+    this._trackedSolidityFiles++;
+    if (this._trackedSolidityFiles === 1 && !this._evictionInterval) {
+      this._evictionInterval = setInterval(() => this.evictStaleCacheEntries(), 60_000);
+    }
+  }
+
+  /** Call when a solidity file is closed/untracked. Stops eviction timer when none remain. */
+  public untrackSolidityFile(closedUri?: string): void {
+    this._trackedSolidityFiles = Math.max(0, this._trackedSolidityFiles - 1);
+
+    // Clean up contentHashCache entry for the closed document
+    if (closedUri) {
+      this.contentHashCache.delete(closedUri);
+    }
+
+    // Trim contentHashCache if it grows beyond threshold
+    if (this.contentHashCache.size > 50) {
+      const keys = [...this.contentHashCache.keys()];
+      const toRemove = keys.slice(0, keys.length - 50);
+      for (const key of toRemove) {
+        this.contentHashCache.delete(key);
+      }
+    }
+
+    if (this._trackedSolidityFiles === 0) {
+      if (this._evictionInterval) {
+        clearInterval(this._evictionInterval);
+        this._evictionInterval = undefined;
+      }
+      // Release extended analyzers and import cache when no solidity files remain
+      this.releaseExtendedAnalyzers();
+      this._importCache.clear();
+    }
+  }
+
+  /** Release lazy-loaded extended analyzers to free memory. */
+  public releaseExtendedAnalyzers(): void {
+    this._storageAnalyzer = null;
+    this._callGraphAnalyzer = null;
+    this._deploymentAnalyzer = null;
+    this._regressionTracker = null;
+    this._runtimeProfiler = null;
+  }
+
   // ─── Document analysis ─────────────────────────────────────────────────────
 
   public async analyzeDocumentOnOpen(document: vscode.TextDocument): Promise<LiveAnalysis> {
-    const content = document.getText();
-    const uri = document.uri.toString();
-    const contentHash = this.hashContent(content);
+    const contentHash = this.hashContentCached(document);
 
-    this.analysisCache.delete(uri);
-
-    const solcEntry = this.solcResultsCache.get(contentHash);
+    const solcEntry = this.unifiedCache.get(contentHash);
     if (
       solcEntry &&
+      solcEntry.source === 'solc' &&
       !solcEntry.analysis.isPending &&
       Date.now() - solcEntry.timestamp < AnalysisEngine.CACHE_TTL_MS
     ) {
@@ -191,12 +243,12 @@ export class AnalysisEngine extends EventEmitter {
   }
 
   public async analyzeDocumentOnChange(document: vscode.TextDocument): Promise<LiveAnalysis> {
-    const content = document.getText();
-    const contentHash = this.hashContent(content);
+    const contentHash = this.hashContentCached(document);
 
-    const solcEntry = this.solcResultsCache.get(contentHash);
+    const solcEntry = this.unifiedCache.get(contentHash);
     if (
       solcEntry &&
+      solcEntry.source === 'solc' &&
       !solcEntry.analysis.isPending &&
       Date.now() - solcEntry.timestamp < AnalysisEngine.CACHE_TTL_MS
     ) {
@@ -209,24 +261,20 @@ export class AnalysisEngine extends EventEmitter {
   }
 
   public getCachedAnalysis(document: vscode.TextDocument): LiveAnalysis | null {
-    const content = document.getText();
-    const contentHash = this.hashContent(content);
+    const contentHash = this.hashContentCached(document);
 
-    const solcEntry = this.solcResultsCache.get(contentHash);
-    if (
-      solcEntry &&
-      !solcEntry.analysis.isPending &&
-      Date.now() - solcEntry.timestamp < AnalysisEngine.CACHE_TTL_MS
-    ) {
-      return solcEntry.analysis;
+    const entry = this.unifiedCache.get(contentHash);
+    if (!entry || Date.now() - entry.timestamp >= AnalysisEngine.CACHE_TTL_MS) {
+      return null;
     }
 
-    const sigEntry = this.signatureCache.get(contentHash);
-    if (sigEntry && Date.now() - sigEntry.timestamp < AnalysisEngine.CACHE_TTL_MS) {
-      return sigEntry.analysis;
+    // Prefer solc results (not pending) over signature-only
+    if (entry.source === 'solc' && !entry.analysis.isPending) {
+      return entry.analysis;
     }
 
-    return null;
+    // Return signature-only analysis as fallback
+    return entry.analysis;
   }
 
   /** @deprecated Use analyzeDocumentOnOpen or analyzeDocumentOnChange */
@@ -240,7 +288,7 @@ export class AnalysisEngine extends EventEmitter {
     document: vscode.TextDocument,
     contentHash: string
   ): LiveAnalysis {
-    const cachedEntry = this.signatureCache.get(contentHash);
+    const cachedEntry = this.unifiedCache.get(contentHash);
     if (cachedEntry && Date.now() - cachedEntry.timestamp < AnalysisEngine.CACHE_TTL_MS) {
       return cachedEntry.analysis;
     }
@@ -313,23 +361,39 @@ export class AnalysisEngine extends EventEmitter {
       isPending: true,
     };
 
-    // Evict if cache is too large
-    if (this.signatureCache.size >= AnalysisEngine.MAX_CACHE_SIZE) {
-      const oldest = [...this.signatureCache.entries()].sort(
-        (a, b) => a[1].timestamp - b[1].timestamp
-      );
-      for (let i = 0; i < Math.ceil(oldest.length * 0.2); i++) {
-        this.signatureCache.delete(oldest[i][0]);
-      }
+    // Only insert signature entry if no solc entry already exists for this hash
+    const existingEntry = this.unifiedCache.get(contentHash);
+    if (!existingEntry || existingEntry.source !== 'solc') {
+      this.evictCacheIfFull();
+      this.unifiedCache.set(contentHash, { analysis, timestamp: Date.now(), source: 'signature' });
     }
-    this.signatureCache.set(contentHash, { analysis, timestamp: Date.now() });
     return analysis;
   }
 
   // ─── Solc compilation ──────────────────────────────────────────────────────
 
   private hashContent(content: string): string {
-    return crypto.createHash('sha256').update(content).digest('hex');
+    let hash = 5381;
+    for (let i = 0; i < content.length; i++) {
+      hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+    }
+    return hash.toString(36);
+  }
+
+  /**
+   * Returns a cached content hash for the document, avoiding repeated SHA-256
+   * on the same document version (e.g., repeated hover calls).
+   */
+  private hashContentCached(document: vscode.TextDocument): string {
+    const uri = document.uri.toString();
+    const version = document.version;
+    const cached = this.contentHashCache.get(uri);
+    if (cached && cached.version === version) {
+      return cached.hash;
+    }
+    const hash = this.hashContent(document.getText());
+    this.contentHashCache.set(uri, { version, hash });
+    return hash;
   }
 
   private scheduleIdleSolcAnalysis(document: vscode.TextDocument, contentHash: string): void {
@@ -366,9 +430,10 @@ export class AnalysisEngine extends EventEmitter {
     const uri = document.uri.toString();
     const content = document.getText();
 
-    const cachedEntry = this.solcResultsCache.get(contentHash);
+    const cachedEntry = this.unifiedCache.get(contentHash);
     if (
       cachedEntry &&
+      cachedEntry.source === 'solc' &&
       !cachedEntry.analysis.isPending &&
       Date.now() - cachedEntry.timestamp < AnalysisEngine.CACHE_TTL_MS
     ) {
@@ -393,52 +458,105 @@ export class AnalysisEngine extends EventEmitter {
       const gasEstimates = new Map<string, GasEstimate>();
       const diagnostics: vscode.Diagnostic[] = [];
 
-      const compileResult = await this.solcGasEstimator.estimateContractGas(
-        content,
-        contractInfo.functions,
-        document.uri.fsPath
-      );
+      // Check if compilationService already has results (from runner/forge/solc pipeline)
+      const cachedCompilation = compilationService.getCachedByUri(uri);
+      if (
+        cachedCompilation &&
+        cachedCompilation.gasInfo.length > 0 &&
+        cachedCompilation.gasInfo.some((g) => g.gas !== 0)
+      ) {
+        // Reuse existing compilation results — avoid duplicate solc compilation
+        for (const info of cachedCompilation.gasInfo) {
+          if (info.visibility === 'event') {
+            continue;
+          }
+          const estimate = this.gasInfoToEstimate(info);
+          gasEstimates.set(info.name, estimate);
+        }
 
-      if (!this.activeSolcCompilations.get(uri)) {
-        return;
-      }
+        // Generate diagnostics from the cached estimates
+        for (const [funcName, estimate] of gasEstimates) {
+          const avgGas = estimate.estimatedGas.average;
+          const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
 
-      for (const estimate of compileResult) {
-        const funcName = estimate.signature.split('(')[0];
-        gasEstimates.set(funcName, estimate);
+          if (
+            estimate.complexity === 'high' ||
+            estimate.complexity === 'very-high' ||
+            estimate.complexity === 'unbounded'
+          ) {
+            const funcPattern =
+              funcName === 'constructor'
+                ? /constructor\s*\([^)]*\)/s
+                : new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)`, 's');
+            const match = content.match(funcPattern);
 
-        const avgGas = estimate.estimatedGas.average;
-        const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+            if (match) {
+              const functionStart = content.indexOf(match[0]);
+              const lines = content.substring(0, functionStart).split('\n').length - 1;
 
-        if (
-          estimate.complexity === 'high' ||
-          estimate.complexity === 'very-high' ||
-          estimate.complexity === 'unbounded'
-        ) {
-          const funcPattern =
-            funcName === 'constructor'
-              ? /constructor\s*\([^)]*\)/s
-              : new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)`, 's');
-          const match = content.match(funcPattern);
-
-          if (match) {
-            const functionStart = content.indexOf(match[0]);
-            const lines = content.substring(0, functionStart).split('\n').length - 1;
-
-            const diagnostic = new vscode.Diagnostic(
-              new vscode.Range(lines, 0, lines, 1000),
-              `High gas cost (${avgGasString} gas): ${estimate.warning || estimate.factors.join(', ')}`,
-              estimate.complexity === 'very-high' || estimate.complexity === 'unbounded'
-                ? vscode.DiagnosticSeverity.Warning
-                : vscode.DiagnosticSeverity.Information
-            );
-            diagnostic.source = 'SigScan Gas';
-            diagnostics.push(diagnostic);
+              const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(lines, 0, lines, 1000),
+                `High gas cost (${avgGasString} gas): ${estimate.warning || estimate.factors.join(', ')}`,
+                estimate.complexity === 'very-high' || estimate.complexity === 'unbounded'
+                  ? vscode.DiagnosticSeverity.Warning
+                  : vscode.DiagnosticSeverity.Information
+              );
+              diagnostic.source = 'SigScan Gas';
+              diagnostics.push(diagnostic);
+            }
           }
         }
-      }
 
-      console.log(`Solc compilation complete: ${gasEstimates.size} functions analyzed`);
+        console.log(`Reused cached compilation: ${gasEstimates.size} functions analyzed`);
+      } else {
+        // No cached result — fall through to solc compilation
+        const compileResult = await this.solcGasEstimator.estimateContractGas(
+          content,
+          contractInfo.functions,
+          document.uri.fsPath
+        );
+
+        if (!this.activeSolcCompilations.get(uri)) {
+          return;
+        }
+
+        for (const estimate of compileResult) {
+          const funcName = estimate.signature.split('(')[0];
+          gasEstimates.set(funcName, estimate);
+
+          const avgGas = estimate.estimatedGas.average;
+          const avgGasString = avgGas === 'infinite' ? '∞' : avgGas.toLocaleString();
+
+          if (
+            estimate.complexity === 'high' ||
+            estimate.complexity === 'very-high' ||
+            estimate.complexity === 'unbounded'
+          ) {
+            const funcPattern =
+              funcName === 'constructor'
+                ? /constructor\s*\([^)]*\)/s
+                : new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)`, 's');
+            const match = content.match(funcPattern);
+
+            if (match) {
+              const functionStart = content.indexOf(match[0]);
+              const lines = content.substring(0, functionStart).split('\n').length - 1;
+
+              const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(lines, 0, lines, 1000),
+                `High gas cost (${avgGasString} gas): ${estimate.warning || estimate.factors.join(', ')}`,
+                estimate.complexity === 'very-high' || estimate.complexity === 'unbounded'
+                  ? vscode.DiagnosticSeverity.Warning
+                  : vscode.DiagnosticSeverity.Information
+              );
+              diagnostic.source = 'SigScan Gas';
+              diagnostics.push(diagnostic);
+            }
+          }
+        }
+
+        console.log(`Solc compilation complete: ${gasEstimates.size} functions analyzed`);
+      }
 
       this.diagnosticCollection.set(document.uri, diagnostics);
 
@@ -451,16 +569,9 @@ export class AnalysisEngine extends EventEmitter {
         gasInfo: [],
       };
 
-      // Evict if cache is too large
-      if (this.solcResultsCache.size >= AnalysisEngine.MAX_CACHE_SIZE) {
-        const oldest = [...this.solcResultsCache.entries()].sort(
-          (a, b) => a[1].timestamp - b[1].timestamp
-        );
-        for (let i = 0; i < Math.ceil(oldest.length * 0.2); i++) {
-          this.solcResultsCache.delete(oldest[i][0]);
-        }
-      }
-      this.solcResultsCache.set(contentHash, { analysis, timestamp: Date.now() });
+      // Solc results replace any existing entry (including signature-only)
+      this.evictCacheIfFull();
+      this.unifiedCache.set(contentHash, { analysis, timestamp: Date.now(), source: 'solc' });
 
       this.emit('analysisReady', { uri, analysis } as AnalysisReadyEvent);
     } catch (error) {
@@ -505,35 +616,40 @@ export class AnalysisEngine extends EventEmitter {
   ): { contents: string } | { error: string } {
     try {
       const dir = path.dirname(document.uri.fsPath);
-      let fullPath = path.resolve(dir, importPath);
-
-      if (fs.existsSync(fullPath)) {
-        return { contents: fs.readFileSync(fullPath, 'utf-8') };
-      }
-
-      fullPath = path.resolve(dir, 'node_modules', importPath);
-      if (fs.existsSync(fullPath)) {
-        return { contents: fs.readFileSync(fullPath, 'utf-8') };
-      }
-
-      fullPath = path.resolve(dir, 'lib', importPath);
-      if (fs.existsSync(fullPath)) {
-        return { contents: fs.readFileSync(fullPath, 'utf-8') };
-      }
+      const candidatePaths: string[] = [
+        path.resolve(dir, importPath),
+        path.resolve(dir, 'node_modules', importPath),
+        path.resolve(dir, 'lib', importPath),
+      ];
 
       const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
       if (workspaceFolder) {
         const wsPath = workspaceFolder.uri.fsPath;
-        const libPaths = [
+        candidatePaths.push(
           path.resolve(wsPath, 'node_modules', importPath),
           path.resolve(wsPath, 'lib', importPath),
-          path.resolve(wsPath, 'contracts', importPath),
-        ];
+          path.resolve(wsPath, 'contracts', importPath)
+        );
+      }
 
-        for (const libPath of libPaths) {
-          if (fs.existsSync(libPath)) {
-            return { contents: fs.readFileSync(libPath, 'utf-8') };
+      for (const fullPath of candidatePaths) {
+        // Check import cache first to avoid redundant disk reads
+        const cached = this._importCache.get(fullPath);
+        if (cached) {
+          return cached;
+        }
+
+        if (fs.existsSync(fullPath)) {
+          const result: { contents: string } = { contents: fs.readFileSync(fullPath, 'utf-8') };
+          // Evict oldest entries if cache is too large
+          if (this._importCache.size >= AnalysisEngine.MAX_IMPORT_CACHE_SIZE) {
+            const firstKey = this._importCache.keys().next().value;
+            if (firstKey !== undefined) {
+              this._importCache.delete(firstKey);
+            }
           }
+          this._importCache.set(fullPath, result);
+          return result;
         }
       }
 
@@ -784,12 +900,16 @@ export class AnalysisEngine extends EventEmitter {
 
   // ─── Cache management ──────────────────────────────────────────────────────
 
-  public clearCache(uri: vscode.Uri): void {
-    this.analysisCache.delete(uri.toString());
+  public clearCache(_uri: vscode.Uri): void {
+    // Content-hash based cache cannot be cleared by URI alone;
+    // clear all entries for safety (same as clearAllCaches).
+    this.unifiedCache.clear();
+    this.contentHashCache.clear();
   }
 
   public clearAllCaches(): void {
-    this.analysisCache.clear();
+    this.unifiedCache.clear();
+    this.contentHashCache.clear();
   }
 
   // ─── Dispose ───────────────────────────────────────────────────────────────
@@ -809,26 +929,34 @@ export class AnalysisEngine extends EventEmitter {
     }
     this.activeSolcCompilations.clear();
 
-    this.analysisCache.clear();
-    this.solcResultsCache.clear();
-    this.signatureCache.clear();
+    this.unifiedCache.clear();
+    this.contentHashCache.clear();
+    this._importCache.clear();
+    this.releaseExtendedAnalyzers();
 
     compilationService.dispose();
   }
 
   /**
-   * Evict stale entries from solcResultsCache and signatureCache (TTL-based).
+   * Evict stale entries from the unified cache (TTL-based).
    */
   private evictStaleCacheEntries(): void {
     const now = Date.now();
-    for (const [key, entry] of this.solcResultsCache) {
+    for (const [key, entry] of this.unifiedCache) {
       if (now - entry.timestamp > AnalysisEngine.CACHE_TTL_MS) {
-        this.solcResultsCache.delete(key);
+        this.unifiedCache.delete(key);
       }
     }
-    for (const [key, entry] of this.signatureCache) {
-      if (now - entry.timestamp > AnalysisEngine.CACHE_TTL_MS) {
-        this.signatureCache.delete(key);
+  }
+
+  /** Evict oldest 20% of cache entries if the cache is full. */
+  private evictCacheIfFull(): void {
+    if (this.unifiedCache.size >= AnalysisEngine.MAX_CACHE_SIZE) {
+      const oldest = [...this.unifiedCache.entries()].sort(
+        (a, b) => a[1].timestamp - b[1].timestamp
+      );
+      for (let i = 0; i < Math.ceil(oldest.length * 0.2); i++) {
+        this.unifiedCache.delete(oldest[i][0]);
       }
     }
   }

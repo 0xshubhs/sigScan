@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -8,31 +9,19 @@ import { logger } from '../utils/logger';
 let sigScanManager: SigScanManager;
 let signatureTreeProvider: SignatureTreeProvider;
 
-import { RealtimeAnalyzer } from '../features/realtime';
+// RealtimeAnalyzer — lazy loaded at first use (type-only import for annotations)
+import type { RealtimeAnalyzer } from '../features/realtime';
 
 // New Remix-style compilation imports
 import { compilationService } from '../features/compilation-service';
 import { GasDecorationManager } from '../features/gas-decorations';
 
-// New feature imports (Phase 6-9)
-import { CollisionDetector } from '../features/collision-detector';
-import { InterfaceChecker } from '../features/interface-check';
-import { GasOptimizer } from '../features/gas-optimizer';
-import { CoverageAnalyzer } from '../features/coverage';
-import { UpgradeAnalyzer } from '../features/upgrade-analyzer';
-import { InvariantDetector } from '../features/invariant-detector';
-import { MEVAnalyzer } from '../features/mev-analyzer';
-import { GasSnapshotManager } from '../features/gas-snapshot';
-import { GasPricingService } from '../features/gas-pricing';
-import { FourByteLookup } from '../features/four-byte-lookup';
-import { TestGenerator } from '../features/test-generator';
+// SelectorHoverProvider is eagerly loaded (used for frequent hover events)
 import { SelectorHoverProvider } from './providers/selector-hover-provider';
-import { PlaygroundPanel } from './providers/playground';
-import { DashboardPanel } from './providers/dashboard';
-import {
-  SigScanNotebookSerializer,
-  SigScanNotebookController,
-} from './providers/notebook-provider';
+// Notebook provider — lazy loaded when registering serializer/controller
+type NotebookProviderModule = typeof import('./providers/notebook-provider');
+
+// RemappingsResolver and ForgeTestCodeLensProvider — lazy loaded at point-of-use
 
 let realtimeAnalyzer: RealtimeAnalyzer;
 let gasDecorationType: vscode.TextEditorDecorationType;
@@ -55,18 +44,36 @@ export function activate(context: vscode.ExtensionContext) {
   sigScanManager = new SigScanManager(context);
   signatureTreeProvider = new SignatureTreeProvider(sigScanManager);
 
-  // Initialize real-time analyzer
+  // Initialize real-time analyzer (lazy-loaded)
   const diagnosticCollection = vscode.languages.createDiagnosticCollection('sigscan');
+  const { RealtimeAnalyzer } = require('../features/realtime');
   realtimeAnalyzer = new RealtimeAnalyzer(diagnosticCollection);
 
   // Initialize Remix-style gas decoration manager
   gasDecorationManager = GasDecorationManager.getInstance(300); // 300ms debounce
+
+  // Initialize remappings resolver (lazy-loaded)
+  const { RemappingsResolver } = require('../features/remappings');
+  const remappingsResolver = new RemappingsResolver();
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (workspaceRoot) {
+    remappingsResolver.load(workspaceRoot);
+  }
+
+  // Initialize forge test CodeLens provider (lazy-loaded)
+  const { ForgeTestCodeLensProvider } = require('../features/forge-test-runner');
+  const forgeTestProvider = new ForgeTestCodeLensProvider();
+  const codeLensDisposable = vscode.languages.registerCodeLensProvider(
+    { scheme: 'file', language: 'solidity' },
+    forgeTestProvider
+  );
 
   // Create decoration types for gas and complexity hints
   // IMPORTANT: Need at least an empty 'after' object for dynamic renderOptions to work
   gasDecorationType = vscode.window.createTextEditorDecorationType({
     after: {
       margin: '0 0 0 1em',
+      fontWeight: 'bold',
     },
     isWholeLine: false,
   });
@@ -77,7 +84,8 @@ export function activate(context: vscode.ExtensionContext) {
   });
   remixGasDecorationType = vscode.window.createTextEditorDecorationType({
     after: {
-      color: '#6A9955',
+      color: '#73E068',
+      fontWeight: 'bold',
       margin: '0 0 0 1em',
     },
   });
@@ -245,17 +253,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ─── New feature commands (Phase 6-9) ────────────────────────────────────
 
-  const collisionDetector = new CollisionDetector();
-  const interfaceChecker = new InterfaceChecker();
-  const gasOptimizer = new GasOptimizer();
-  const coverageAnalyzer = new CoverageAnalyzer();
-  const upgradeAnalyzer = new UpgradeAnalyzer();
-  const invariantDetector = new InvariantDetector();
-  const mevAnalyzer = new MEVAnalyzer();
-  const gasSnapshotManager = new GasSnapshotManager();
-  const gasPricingService = new GasPricingService();
-  const fourByteLookup = new FourByteLookup();
-  const testGenerator = new TestGenerator();
   const selectorHoverProvider = new SelectorHoverProvider();
 
   const newCommands = [
@@ -272,6 +269,8 @@ export function activate(context: vscode.ExtensionContext) {
           contracts.set(info.name, info);
         }
       });
+      const { CollisionDetector } = require('../features/collision-detector');
+      const collisionDetector = new CollisionDetector();
       const collisions = collisionDetector.detectCollisions(contracts);
       const report = collisionDetector.generateReport(collisions);
       const doc = await vscode.workspace.openTextDocument({
@@ -294,9 +293,11 @@ export function activate(context: vscode.ExtensionContext) {
           contracts.set(info.name, info);
         }
       });
+      const { InterfaceChecker } = require('../features/interface-check');
+      const interfaceChecker = new InterfaceChecker();
       const allResults = interfaceChecker.checkAllContracts(contracts);
       const parts: string[] = ['# Interface Compliance Report\n'];
-      allResults.forEach((results, contractName) => {
+      allResults.forEach((results: any, contractName: string) => {
         parts.push(interfaceChecker.generateReport(contractName, results));
       });
       const doc = await vscode.workspace.openTextDocument({
@@ -313,6 +314,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Open a Solidity file to analyze');
         return;
       }
+      const { GasOptimizer } = require('../features/gas-optimizer');
+      const gasOptimizer = new GasOptimizer();
       const suggestions = gasOptimizer.analyze(editor.document.getText());
       const report = gasOptimizer.generateReport(
         suggestions,
@@ -332,6 +335,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('No workspace folder open');
         return;
       }
+      const { CoverageAnalyzer } = require('../features/coverage');
+      const coverageAnalyzer = new CoverageAnalyzer();
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: 'Parsing coverage data...' },
         async () => {
@@ -373,6 +378,8 @@ export function activate(context: vscode.ExtensionContext) {
       const newSource = editor.document.getText();
       const contractMatch = newSource.match(/(contract|library)\s+(\w+)/);
       const contractName = contractMatch ? contractMatch[2] : 'Unknown';
+      const { UpgradeAnalyzer } = require('../features/upgrade-analyzer');
+      const upgradeAnalyzer = new UpgradeAnalyzer();
       const report = upgradeAnalyzer.analyzeUpgrade(oldSource, newSource, contractName);
       const reportStr = upgradeAnalyzer.generateReport(report);
       const doc = await vscode.workspace.openTextDocument({
@@ -389,6 +396,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Open a Solidity file to analyze');
         return;
       }
+      const { InvariantDetector } = require('../features/invariant-detector');
+      const invariantDetector = new InvariantDetector();
       const invariants = invariantDetector.detect(editor.document.getText());
       const lines = ['# Invariant Detection Report\n'];
       if (invariants.length === 0) {
@@ -417,6 +426,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Open a Solidity file to analyze');
         return;
       }
+      const { MEVAnalyzer } = require('../features/mev-analyzer');
+      const mevAnalyzer = new MEVAnalyzer();
       const risks = mevAnalyzer.analyze(editor.document.getText());
       const lines = ['# MEV Risk Analysis\n'];
       if (risks.length === 0) {
@@ -471,6 +482,8 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
       });
+      const { GasSnapshotManager } = require('../features/gas-snapshot');
+      const gasSnapshotManager = new GasSnapshotManager();
       const snapshot = await gasSnapshotManager.createSnapshot(gasData, workspaceFolder.uri.fsPath);
       const filePath = path.join(workspaceFolder.uri.fsPath, '.sigscan-snapshot.json');
       gasSnapshotManager.exportSnapshot(snapshot, filePath);
@@ -479,6 +492,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Gas pricing
     vscode.commands.registerCommand('sigscan.showGasPricing', async () => {
+      const { GasPricingService } = require('../features/gas-pricing');
+      const gasPricingService = new GasPricingService();
       const chains = gasPricingService.getSupportedChains();
       const chain = await vscode.window.showQuickPick(chains, { placeHolder: 'Select chain' });
       if (!chain) {
@@ -522,6 +537,8 @@ export function activate(context: vscode.ExtensionContext) {
       if (!selector) {
         return;
       }
+      const { FourByteLookup } = require('../features/four-byte-lookup');
+      const fourByteLookup = new FourByteLookup();
       const results = await fourByteLookup.lookup(selector);
       if (results.length === 0) {
         vscode.window.showInformationMessage(`No matches found for ${selector}`);
@@ -553,6 +570,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Could not parse contract');
         return;
       }
+      const { TestGenerator } = require('../features/test-generator');
+      const testGenerator = new TestGenerator();
       const testContent = testGenerator.generateTestFile(contractInfo);
       const doc = await vscode.workspace.openTextDocument({
         content: testContent,
@@ -563,12 +582,155 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Playground webview
     vscode.commands.registerCommand('sigscan.openPlayground', () => {
+      const { PlaygroundPanel } = require('./providers/playground');
       PlaygroundPanel.createOrShow(context.extensionUri);
     }),
 
     // Dashboard webview
     vscode.commands.registerCommand('sigscan.openDashboard', () => {
+      const { DashboardPanel } = require('./providers/dashboard');
       DashboardPanel.createOrShow(context.extensionUri);
+    }),
+
+    // Forge test runner
+    vscode.commands.registerCommand(
+      'sigscan.forgeRunTest',
+      async (uri: vscode.Uri, testName: string) => {
+        await forgeTestProvider.runTest(uri, testName);
+      }
+    ),
+
+    vscode.commands.registerCommand('sigscan.forgeRunAllTests', async (uri: vscode.Uri) => {
+      await forgeTestProvider.runAllTests(uri);
+    }),
+
+    // Security analysis reports
+    vscode.commands.registerCommand('sigscan.detectReentrancy', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.reentrancy.detect(editor.document.getText());
+      const report = analyzers.reentrancy.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.detectUncheckedCalls', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.uncheckedCalls.detect(editor.document.getText());
+      const report = analyzers.uncheckedCalls.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.checkEvents', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.events.detect(editor.document.getText());
+      const report = analyzers.events.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.checkAccessControl', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.accessControl.detect(editor.document.getText());
+      const report = analyzers.accessControl.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.suggestCustomErrors', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const suggestions = analyzers.customErrors.detect(editor.document.getText());
+      const report = analyzers.customErrors.generateReport(suggestions);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.checkNatspec', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.natspec.detect(editor.document.getText());
+      const report = analyzers.natspec.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.detectDangerousPatterns', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.dangerousPatterns.detect(editor.document.getText());
+      const report = analyzers.dangerousPatterns.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    }),
+
+    vscode.commands.registerCommand('sigscan.detectDeFiRisks', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'solidity') {
+        vscode.window.showErrorMessage('Open a Solidity file to analyze');
+        return;
+      }
+      const analyzers = getSecurityAnalyzers();
+      const warnings = analyzers.defiRisks.detect(editor.document.getText());
+      const report = analyzers.defiRisks.generateReport(warnings);
+      const doc = await vscode.workspace.openTextDocument({
+        content: report,
+        language: 'markdown',
+      });
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
     }),
   ];
 
@@ -578,12 +740,14 @@ export function activate(context: vscode.ExtensionContext) {
     selectorHoverProvider
   );
 
-  // Register notebook serializer
+  // Register notebook serializer (lazy-loaded)
+  const { SigScanNotebookSerializer, SigScanNotebookController } =
+    require('./providers/notebook-provider') as NotebookProviderModule;
   const notebookSerializer = vscode.workspace.registerNotebookSerializer(
     SigScanNotebookController.notebookType,
     new SigScanNotebookSerializer()
   );
-  const _notebookController = new SigScanNotebookController();
+  const notebookController = new SigScanNotebookController();
 
   // Register combined hover provider (uses cached analysis to prevent flickering)
   const hoverProvider = vscode.languages.registerHoverProvider(
@@ -608,6 +772,18 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Content hash guard: skip re-compilation if content hasn't changed
+  const lastCompiledHash = new Map<string, string>();
+  function simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash |= 0; // Convert to 32bit integer
+    }
+    return hash.toString(36);
+  }
+
   // Helper function to update decorations with colored gas hints
   // Uses Remix-style compilation with AST-based gas mapping
   let lastDisabledLogTime = 0;
@@ -630,6 +806,14 @@ export function activate(context: vscode.ExtensionContext) {
       const source = editor.document.getText();
       const fileName = path.basename(editor.document.uri.fsPath);
 
+      // Skip re-compilation if content hasn't changed
+      const contentHash = simpleHash(source);
+      if (lastCompiledHash.get(uri) === contentHash) {
+        logger.debug(`Skipping compilation for ${fileName} — content unchanged`);
+        return;
+      }
+      lastCompiledHash.set(uri, contentHash);
+
       logger.info(`Compiling ${fileName}...`);
 
       // Use Remix-style compilation service directly
@@ -637,7 +821,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       try {
         const result = await compilationService.compile(uri, source, trigger, (importPath) => {
-          // Import resolver - tries multiple common paths
+          // Import resolver - tries remappings first, then common paths
           const fileDir = path.dirname(editor.document.uri.fsPath);
 
           // Find project root (look for foundry.toml or hardhat.config.js)
@@ -653,6 +837,18 @@ export function activate(context: vscode.ExtensionContext) {
               break;
             }
             current = path.dirname(current);
+          }
+
+          // Reload remappings if project root changed
+          if (remappingsResolver.getRemappings().length === 0 || projectRoot !== workspaceRoot) {
+            remappingsResolver.load(projectRoot);
+          }
+
+          // 0. Try remappings first (handles @openzeppelin/, forge-std/, etc.)
+          const remapped = remappingsResolver.resolve(importPath);
+          if (remapped) {
+            logger.debug(`Resolved import via remapping: ${importPath} -> ${remapped}`);
+            return { contents: fs.readFileSync(remapped, 'utf-8') };
           }
 
           // Paths to try in order
@@ -703,11 +899,58 @@ export function activate(context: vscode.ExtensionContext) {
               info.gas === 'infinite' ? '∞' : info.gas === 0 ? 'N/A' : info.gas.toLocaleString();
             logger.debug(`${info.name}() @ line ${info.loc.line}: ${gasStr} gas`);
           }
-        } else if (!result.success) {
+        }
+
+        // Check contract size against 24KB EIP-170 limit
+        if (result.deployedBytecodeSize) {
+          const bytecodeBytes = result.deployedBytecodeSize;
+          const sizeKB = bytecodeBytes / 1024;
+          const EIP170_LIMIT = 24576; // 24KB
+          const WARNING_THRESHOLD = EIP170_LIMIT * 0.9; // 90%
+
+          if (bytecodeBytes > EIP170_LIMIT) {
+            vscode.window
+              .showWarningMessage(
+                `${fileName} exceeds 24KB deployment limit! (${sizeKB.toFixed(1)}KB) — contract cannot be deployed. Consider splitting into libraries or using the diamond pattern.`,
+                'Show Details'
+              )
+              .then((choice) => {
+                if (choice === 'Show Details') {
+                  vscode.commands.executeCommand('sigscan.checkContractSize');
+                }
+              });
+            // Add diagnostic
+            const firstLine = editor.document.lineAt(0).range;
+            const sizeDiag = new vscode.Diagnostic(
+              firstLine,
+              `Contract bytecode is ${sizeKB.toFixed(1)}KB — exceeds 24KB EIP-170 deployment limit`,
+              vscode.DiagnosticSeverity.Error
+            );
+            sizeDiag.source = 'SigScan';
+            sizeDiag.code = 'eip170-size';
+            const existingDiags = diagnosticCollection.get(editor.document.uri);
+            if (existingDiags) {
+              const updated = [...existingDiags, sizeDiag];
+              diagnosticCollection.set(editor.document.uri, updated);
+            } else {
+              diagnosticCollection.set(editor.document.uri, [sizeDiag]);
+            }
+          } else if (bytecodeBytes > WARNING_THRESHOLD) {
+            const pct = ((bytecodeBytes / EIP170_LIMIT) * 100).toFixed(0);
+            vscode.window.showWarningMessage(
+              `${fileName} is ${sizeKB.toFixed(1)}KB (${pct}% of 24KB limit). Approaching deployment size limit.`
+            );
+          }
+        }
+
+        if (!result.success && result.gasInfo.length === 0) {
           logger.error(`Compilation failed and no functions extracted: ${result.errors[0]}`);
-        } else {
+        } else if (result.gasInfo.length === 0) {
           logger.warn('Compilation succeeded but no gas info extracted');
         }
+
+        // Security analysis is handled separately by runSecurityAnalysis()
+        // which only fires on file save/open events (not on every keystroke)
       } catch (error) {
         logger.error(`Decoration update error: ${error}`);
       }
@@ -721,7 +964,235 @@ export function activate(context: vscode.ExtensionContext) {
   // The primary pipeline (updateDecorations -> compilationService.compile ->
   // createRemixStyleDecorations) handles all decoration updates.
 
-  // Real-time analysis on text change (debounced to avoid excessive calls during typing)
+  // ─── Security analyzers — lazy loaded on first save ──────────────────────
+  let _securityAnalyzers: {
+    reentrancy: InstanceType<typeof import('../features/reentrancy-detector').ReentrancyDetector>;
+    uncheckedCalls: InstanceType<
+      typeof import('../features/unchecked-calls').UncheckedCallDetector
+    >;
+    events: InstanceType<typeof import('../features/event-checker').EventEmissionChecker>;
+    accessControl: InstanceType<typeof import('../features/access-control').AccessControlAnalyzer>;
+    customErrors: InstanceType<
+      typeof import('../features/custom-error-suggestions').CustomErrorDetector
+    >;
+    natspec: InstanceType<typeof import('../features/natspec-checker').NatspecChecker>;
+    dangerousPatterns: InstanceType<
+      typeof import('../features/dangerous-patterns').DangerousPatternDetector
+    >;
+    defiRisks: InstanceType<typeof import('../features/defi-risks').DeFiRiskDetector>;
+  } | null = null;
+
+  function getSecurityAnalyzers() {
+    if (!_securityAnalyzers) {
+      const { ReentrancyDetector } = require('../features/reentrancy-detector');
+      const { UncheckedCallDetector } = require('../features/unchecked-calls');
+      const { EventEmissionChecker } = require('../features/event-checker');
+      const { AccessControlAnalyzer } = require('../features/access-control');
+      const { CustomErrorDetector } = require('../features/custom-error-suggestions');
+      const { NatspecChecker } = require('../features/natspec-checker');
+      const { DangerousPatternDetector } = require('../features/dangerous-patterns');
+      const { DeFiRiskDetector } = require('../features/defi-risks');
+      _securityAnalyzers = {
+        reentrancy: new ReentrancyDetector(),
+        uncheckedCalls: new UncheckedCallDetector(),
+        events: new EventEmissionChecker(),
+        accessControl: new AccessControlAnalyzer(),
+        customErrors: new CustomErrorDetector(),
+        natspec: new NatspecChecker(),
+        dangerousPatterns: new DangerousPatternDetector(),
+        defiRisks: new DeFiRiskDetector(),
+      };
+    }
+    return _securityAnalyzers;
+  }
+
+  // ─── Security analysis (only on save/open, 2s debounce) ──────────────────
+  let securityAnalysisTimer: NodeJS.Timeout | undefined;
+  const lastSecurityHash = new Map<string, string>();
+
+  function runSecurityAnalysis(editor: vscode.TextEditor) {
+    if (securityAnalysisTimer) {
+      clearTimeout(securityAnalysisTimer);
+    }
+    securityAnalysisTimer = setTimeout(() => {
+      runSecurityAnalysisImmediate(editor);
+    }, 2000); // 2-second debounce
+  }
+
+  function runSecurityAnalysisImmediate(editor: vscode.TextEditor) {
+    if (editor.document.languageId !== 'solidity') {
+      return;
+    }
+    const source = editor.document.getText();
+    const uri = editor.document.uri.toString();
+
+    // Skip if content hasn't changed since last security analysis
+    const contentHash = simpleHash(source);
+    if (lastSecurityHash.get(uri) === contentHash) {
+      return;
+    }
+    lastSecurityHash.set(uri, contentHash);
+
+    const analyzers = getSecurityAnalyzers();
+    const securityDiags: vscode.Diagnostic[] = [];
+
+    // Reentrancy detection
+    const reentrancyWarnings = analyzers.reentrancy.detect(source);
+    for (const w of reentrancyWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.functionName}(): ${w.description}`,
+          w.severity === 'high'
+            ? vscode.DiagnosticSeverity.Warning
+            : vscode.DiagnosticSeverity.Information
+        );
+        diag.source = 'SigScan';
+        diag.code = 'reentrancy';
+        securityDiags.push(diag);
+      }
+    }
+
+    // Unchecked calls
+    const uncheckedWarnings = analyzers.uncheckedCalls.detect(source);
+    for (const w of uncheckedWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.functionName}(): ${w.description}`,
+          vscode.DiagnosticSeverity.Warning
+        );
+        diag.source = 'SigScan';
+        diag.code = 'unchecked-call';
+        securityDiags.push(diag);
+      }
+    }
+
+    // Missing events
+    const eventWarnings = analyzers.events.detect(source);
+    for (const w of eventWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.functionName}(): ${w.description}`,
+          vscode.DiagnosticSeverity.Hint
+        );
+        diag.source = 'SigScan';
+        diag.code = 'missing-event';
+        securityDiags.push(diag);
+      }
+    }
+
+    // Access control
+    const accessWarnings = analyzers.accessControl.detect(source);
+    for (const w of accessWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.description}`,
+          w.severity === 'high'
+            ? vscode.DiagnosticSeverity.Warning
+            : vscode.DiagnosticSeverity.Information
+        );
+        diag.source = 'SigScan';
+        diag.code = 'access-control';
+        securityDiags.push(diag);
+      }
+    }
+
+    // Custom error suggestions
+    const errorSuggestions = analyzers.customErrors.detect(source);
+    for (const s of errorSuggestions) {
+      const line = Math.max(0, s.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${s.description}`,
+          vscode.DiagnosticSeverity.Hint
+        );
+        diag.source = 'SigScan';
+        diag.code = 'custom-error';
+        securityDiags.push(diag);
+      }
+    }
+
+    // NatSpec completeness
+    const natspecWarnings = analyzers.natspec.detect(source);
+    for (const w of natspecWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.functionName}(): ${w.description}`,
+          vscode.DiagnosticSeverity.Hint
+        );
+        diag.source = 'SigScan';
+        diag.code = 'natspec';
+        securityDiags.push(diag);
+      }
+    }
+
+    // Dangerous patterns (tx.origin, selfdestruct, delegatecall, proxy, decimals)
+    const dangerousWarnings = analyzers.dangerousPatterns.detect(source);
+    for (const w of dangerousWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diagSeverity =
+          w.severity === 'critical'
+            ? vscode.DiagnosticSeverity.Error
+            : w.severity === 'high'
+              ? vscode.DiagnosticSeverity.Warning
+              : vscode.DiagnosticSeverity.Information;
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.functionName}(): ${w.description}`,
+          diagSeverity
+        );
+        diag.source = 'SigScan';
+        diag.code = w.patternType;
+        securityDiags.push(diag);
+      }
+    }
+
+    // DeFi risks (stale oracle, precision loss, infinite approval, zero-address, vault inflation)
+    const defiWarnings = analyzers.defiRisks.detect(source);
+    for (const w of defiWarnings) {
+      const line = Math.max(0, w.line - 1);
+      if (line < editor.document.lineCount) {
+        const diagSeverity =
+          w.severity === 'high'
+            ? vscode.DiagnosticSeverity.Warning
+            : w.severity === 'medium'
+              ? vscode.DiagnosticSeverity.Information
+              : vscode.DiagnosticSeverity.Hint;
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${w.functionName}(): ${w.description}`,
+          diagSeverity
+        );
+        diag.source = 'SigScan';
+        diag.code = w.riskType;
+        securityDiags.push(diag);
+      }
+    }
+
+    // Merge with existing diagnostics (keep EIP-170 size diagnostics if present)
+    const existingDiags = diagnosticCollection.get(editor.document.uri);
+    const eip170Diags = existingDiags
+      ? [...existingDiags].filter((d) => d.code === 'eip170-size')
+      : [];
+    diagnosticCollection.set(editor.document.uri, [...eip170Diags, ...securityDiags]);
+
+    if (securityDiags.length > 0) {
+      logger.info(`Found ${securityDiags.length} security/quality diagnostics`);
+    }
+  }
+
+  // Real-time analysis on text change (debounced — 1500ms for WASM solc compilation)
   let textChangeTimer: NodeJS.Timeout | undefined;
   const textChangeDisposable = vscode.workspace.onDidChangeTextDocument(async (event) => {
     const editor = vscode.window.activeTextEditor;
@@ -731,28 +1202,51 @@ export function activate(context: vscode.ExtensionContext) {
       }
       textChangeTimer = setTimeout(() => {
         updateDecorations(editor);
-      }, 300); // 300ms debounce on keystroke changes
+      }, 1500); // 1500ms debounce on keystroke changes (was 300ms — too aggressive for WASM solc)
     }
   });
 
+  // Run security analysis on file save (not on every keystroke)
+  const documentSaveDisposable = vscode.workspace.onDidSaveTextDocument(async (document) => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document === document) {
+      runSecurityAnalysis(editor);
+    }
+  });
+
+  // Track open/close of solidity files so the analysis engine can manage its eviction interval
+  const docOpenDisposable = vscode.workspace.onDidOpenTextDocument((doc) => {
+    if (doc.languageId === 'solidity') {
+      realtimeAnalyzer.trackSolidityFile();
+    }
+  });
+  const docCloseDisposable = vscode.workspace.onDidCloseTextDocument((doc) => {
+    if (doc.languageId === 'solidity') {
+      realtimeAnalyzer.untrackSolidityFile(doc.uri.toString());
+    }
+  });
+
+  // Count already-open solidity documents
+  for (const doc of vscode.workspace.textDocuments) {
+    if (doc.languageId === 'solidity') {
+      realtimeAnalyzer.trackSolidityFile();
+    }
+  }
+
   // Update decorations when switching editors (treat as file open for immediate response)
+  // Note: onDidOpenTextDocument is NOT needed — onDidChangeActiveTextEditor already fires
+  // when a new file is opened, and having both causes redundant compilations.
   const editorChangeDisposable = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
     if (editor) {
       await updateDecorations(editor, true); // true = treat as file open
-    }
-  });
-
-  // Update decorations when opening a document
-  const documentOpenDisposable = vscode.workspace.onDidOpenTextDocument(async (document) => {
-    const editor = vscode.window.activeTextEditor;
-    if (editor && editor.document === document) {
-      await updateDecorations(editor, true); // true = file open event
+      runSecurityAnalysis(editor); // also trigger security analysis on file open
     }
   });
 
   // Trigger initial analysis for currently open editor (treat as file open)
   if (vscode.window.activeTextEditor) {
     updateDecorations(vscode.window.activeTextEditor, true);
+    runSecurityAnalysis(vscode.window.activeTextEditor);
   }
 
   // Extended analysis commands (on-demand only, runs when idle - never parallel with solc)
@@ -969,9 +1463,12 @@ export function activate(context: vscode.ExtensionContext) {
     hoverProvider,
     selectorHover,
     notebookSerializer,
+    notebookController,
     textChangeDisposable,
+    documentSaveDisposable,
+    docOpenDisposable,
+    docCloseDisposable,
     editorChangeDisposable,
-    documentOpenDisposable,
     diagnosticCollection,
     gasDecorationType,
     complexityDecorationType,
@@ -982,6 +1479,7 @@ export function activate(context: vscode.ExtensionContext) {
     deploymentCostCommand,
     regressionCommand,
     profilerCommand,
+    codeLensDisposable,
     ...commands,
     ...newCommands
   );

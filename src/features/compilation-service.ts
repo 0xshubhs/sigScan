@@ -13,7 +13,6 @@
  * - Event-driven UI updates
  */
 
-import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
 import {
   SolcManager,
@@ -103,8 +102,8 @@ export class CompilationService extends EventEmitter {
   private debounceMs = 300; // 250-500ms recommended
 
   // Cache limits
-  private maxCacheSize = 100;
-  private cacheExpiryMs = 5 * 60 * 1000; // 5 minutes
+  private maxCacheSize = 5;
+  private cacheExpiryMs = 60 * 1000;
 
   private constructor() {
     super();
@@ -456,7 +455,12 @@ export class CompilationService extends EventEmitter {
     if (!hash) {
       return null;
     }
-    return this.getCached(hash);
+    const result = this.getCached(hash);
+    if (!result) {
+      // Hash was evicted or expired — clean up the URI mapping
+      this.uriToHashCache.delete(uri);
+    }
+    return result;
   }
 
   /**
@@ -501,16 +505,39 @@ export class CompilationService extends EventEmitter {
   }
 
   /**
-   * Evict oldest cache entries
+   * Evict oldest cache entries and clean up uriToHashCache
    */
   private evictOldest(): void {
+    const now = Date.now();
     const entries = Array.from(this.compilationCache.entries());
-    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
 
-    // Remove oldest 20%
-    const toRemove = Math.ceil(entries.length * 0.2);
-    for (let i = 0; i < toRemove; i++) {
-      this.compilationCache.delete(entries[i][0]);
+    // First pass: remove expired entries
+    const removedHashes = new Set<string>();
+    for (const [hash, entry] of entries) {
+      if (now - entry.timestamp > this.cacheExpiryMs) {
+        this.compilationCache.delete(hash);
+        removedHashes.add(hash);
+      }
+    }
+
+    // If still over limit, remove oldest 20%
+    if (this.compilationCache.size >= this.maxCacheSize) {
+      const remaining = Array.from(this.compilationCache.entries());
+      remaining.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = Math.ceil(remaining.length * 0.2);
+      for (let i = 0; i < toRemove; i++) {
+        this.compilationCache.delete(remaining[i][0]);
+        removedHashes.add(remaining[i][0]);
+      }
+    }
+
+    // Clean up uriToHashCache: remove entries pointing to evicted hashes
+    if (removedHashes.size > 0) {
+      for (const [uri, hash] of this.uriToHashCache) {
+        if (removedHashes.has(hash)) {
+          this.uriToHashCache.delete(uri);
+        }
+      }
     }
   }
 
@@ -587,7 +614,11 @@ export class CompilationService extends EventEmitter {
    * Hash content for caching
    */
   private hashContent(content: string): string {
-    return crypto.createHash('sha256').update(content).digest('hex');
+    let hash = 5381;
+    for (let i = 0; i < content.length; i++) {
+      hash = ((hash << 5) + hash + content.charCodeAt(i)) & 0xffffffff;
+    }
+    return (hash >>> 0).toString(16);
   }
 
   /**

@@ -14,6 +14,8 @@ export interface SignatureEntry {
   tags: string[];
 }
 
+const SIGNATURES_MAX_SIZE = 10000;
+
 export class SignatureDatabase {
   private signatures: Map<string, SignatureEntry> = new Map();
   private databasePath: string;
@@ -137,6 +139,9 @@ export class SignatureDatabase {
    * Add signature to database
    */
   public addSignature(entry: SignatureEntry): void {
+    if (!this.signatures.has(entry.selector) && this.signatures.size >= SIGNATURES_MAX_SIZE) {
+      this.signatures.delete(this.signatures.keys().next().value!);
+    }
     this.signatures.set(entry.selector, entry);
     this.saveDatabase();
   }

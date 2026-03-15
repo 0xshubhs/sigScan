@@ -17,18 +17,18 @@ import { GasInfo } from './SolcManager';
  */
 const DECORATION_STYLES = {
   // Gas colors - gradient from green (cheap) to red (expensive)
-  lowGas: '#6A9955', // Green - < 50k gas
-  mediumGas: '#DCDCAA', // Yellow - 50k-150k gas
-  highGas: '#CE9178', // Orange - 150k-500k gas
-  veryHighGas: '#F44747', // Red - > 500k gas
-  infiniteGas: '#FF00FF', // Magenta - infinite/unbounded
+  lowGas: '#73E068', // Green - < 50k gas
+  mediumGas: '#FFD454', // Yellow - 50k-150k gas
+  highGas: '#FFA64D', // Orange - 150k-500k gas
+  veryHighGas: '#FF5555', // Red - > 500k gas
+  infiniteGas: '#FF55FF', // Magenta - infinite/unbounded
 
   // Warning colors
-  warning: '#FFCC00',
+  warning: '#FFD700',
 
   // Font settings
-  fontStyle: 'italic',
-  fontWeight: 'normal',
+  fontStyle: 'normal',
+  fontWeight: 'bold',
   margin: '0 0 0 1.5em',
 };
 
@@ -83,14 +83,27 @@ function formatGas(gas: number | 'infinite'): string {
  * Created dynamically per-color to support gradient
  */
 const decorationTypeCache = new Map<string, vscode.TextEditorDecorationType>();
+const MAX_DECORATION_TYPES = 10; // Safety cap — only ~5 colors expected
 
 /**
- * Get or create decoration type for a specific color
+ * Get or create decoration type for a specific color.
+ * The cache is bounded by MAX_DECORATION_TYPES; oldest entries are
+ * disposed and evicted if the cap is reached.
  */
 function getDecorationType(color: string): vscode.TextEditorDecorationType {
   const cached = decorationTypeCache.get(color);
   if (cached) {
     return cached;
+  }
+
+  // Evict oldest if at cap (dispose the VS Code resource)
+  if (decorationTypeCache.size >= MAX_DECORATION_TYPES) {
+    const oldestKey = decorationTypeCache.keys().next().value as string;
+    const oldestType = decorationTypeCache.get(oldestKey);
+    if (oldestType) {
+      oldestType.dispose();
+    }
+    decorationTypeCache.delete(oldestKey);
   }
 
   const decorationType = vscode.window.createTextEditorDecorationType({
@@ -299,10 +312,16 @@ export class GasDecorationManager {
       clearTimeout(existingTimer);
     }
 
-    // Set new timer
+    // Set new timer — capture only the URI to avoid pinning the full document/gasInfo in the closure
     const timer = setTimeout(() => {
       this.updateTimers.delete(uri);
-      this.applyDecorationsNow(editor, gasInfo);
+      const activeEditor = vscode.window.visibleTextEditors.find(
+        (e) => e.document.uri.toString() === uri
+      );
+      const latestGasInfo = this.lastGasInfo.get(uri);
+      if (activeEditor && latestGasInfo) {
+        this.applyDecorationsNow(activeEditor, latestGasInfo);
+      }
     }, this.debounceMs);
 
     this.updateTimers.set(uri, timer);

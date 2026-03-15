@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -5,12 +6,7 @@ import { ProjectScanner, SubProject } from '../core/scanner';
 import { SignatureExporter } from '../core/exporter';
 import { FileWatcher } from '../core/watcher';
 import { ScanResult, ExportOptions } from '../types';
-import { ABIGenerator } from '../features/abi';
-import { GasEstimator } from '../features/gas';
-import { ContractSizeAnalyzer } from '../features/size';
-import { ComplexityAnalyzer } from '../features/complexity';
-import { EtherscanVerifier } from '../features/verify';
-import { SignatureDatabase, SignatureEntry } from '../features/database';
+import type { SignatureEntry } from '../features/database';
 
 export class SigScanManager {
   private scanner: ProjectScanner;
@@ -315,6 +311,7 @@ export class SigScanManager {
     }
 
     try {
+      const { ABIGenerator } = require('../features/abi');
       const generator = new ABIGenerator();
       const workspaceFolders = vscode.workspace.workspaceFolders;
       if (!workspaceFolders) {
@@ -364,6 +361,7 @@ export class SigScanManager {
     }
 
     try {
+      const { GasEstimator } = require('../features/gas');
       const estimator = new GasEstimator();
       const results: Array<{ contract: string; function: string; estimate: number }> = [];
 
@@ -433,6 +431,7 @@ export class SigScanManager {
     }
 
     try {
+      const { ContractSizeAnalyzer } = require('../features/size');
       const analyzer = new ContractSizeAnalyzer();
       const results: Array<{ contract: string; size: number; withinLimit: boolean }> = [];
 
@@ -491,6 +490,7 @@ export class SigScanManager {
     }
 
     try {
+      const { ComplexityAnalyzer } = require('../features/complexity');
       const analyzer = new ComplexityAnalyzer();
       const results: Array<{
         contract: string;
@@ -603,6 +603,7 @@ export class SigScanManager {
 
     try {
       const config = { apiKey, network: network as 'mainnet' | 'sepolia' | 'polygon' | 'bsc' };
+      const { EtherscanVerifier } = require('../features/verify');
       const verifier = new EtherscanVerifier(config);
 
       await vscode.window.withProgress(
@@ -642,6 +643,7 @@ export class SigScanManager {
     }
 
     try {
+      const { SignatureDatabase } = require('../features/database');
       const db = new SignatureDatabase();
       const results = await db.search(query);
 
@@ -661,10 +663,9 @@ export class SigScanManager {
         placeHolder: `Found ${results.length} matching signature(s)`,
       });
 
-      if (selected && typeof selected !== 'string') {
-        // Copy to clipboard
-        await vscode.env.clipboard.writeText(selected.label);
-        vscode.window.showInformationMessage(`Copied: ${selected.label}`);
+      if (selected) {
+        await vscode.env.clipboard.writeText((selected as any).label);
+        vscode.window.showInformationMessage(`Copied: ${(selected as any).label}`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

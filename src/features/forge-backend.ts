@@ -136,6 +136,8 @@ export async function compileWithForge(
     // Read all contract artifacts under <fileName>.sol/
     const gasInfo: GasInfo[] = [];
     const source = fs.readFileSync(filePath, 'utf-8');
+    const lineOffsets = buildLineOffsets(source);
+    const fnLines = findFunctionLines(source, lineOffsets);
     const artifactFiles = fs.readdirSync(artifactDir).filter((f) => f.endsWith('.json'));
 
     for (const artFile of artifactFiles) {
@@ -143,7 +145,7 @@ export async function compileWithForge(
       const artPath = path.join(artifactDir, artFile);
       const artifact: ForgeArtifact = JSON.parse(fs.readFileSync(artPath, 'utf-8'));
 
-      const items = parseForgeArtifact(artifact, contractName, source);
+      const items = parseForgeArtifact(artifact, contractName, fnLines);
       gasInfo.push(...items);
     }
 
@@ -157,6 +159,33 @@ export async function compileWithForge(
   } catch (error) {
     return fallbackResult(filePath, error instanceof Error ? error.message : 'forge build failed');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared line-offset utilities
+// ---------------------------------------------------------------------------
+
+function buildLineOffsets(source: string): number[] {
+  const lines = source.split('\n');
+  const offsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    offsets.push(offsets[i] + lines[i].length + 1);
+  }
+  return offsets;
+}
+
+function offsetToLine(lineOffsets: number[], offset: number): number {
+  let lo = 0;
+  let hi = lineOffsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (lineOffsets[mid] <= offset) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo + 1; // 1-based
 }
 
 // ---------------------------------------------------------------------------
@@ -210,15 +239,12 @@ async function getForgeOutDir(projectRoot: string): Promise<string> {
 function parseForgeArtifact(
   artifact: ForgeArtifact,
   contractName: string,
-  source: string
+  fnLines: Map<string, { line: number; endLine: number }>
 ): GasInfo[] {
   const results: GasInfo[] = [];
   const methodIds = artifact.methodIdentifiers || {};
   const gasExt = artifact.evm?.gasEstimates?.external || {};
   const gasInt = artifact.evm?.gasEstimates?.internal || {};
-
-  // Build a map of function line locations from source
-  const fnLines = findFunctionLines(source);
 
   // Process ABI entries to get visibility and mutability
   const abiFunctions = new Map<string, { visibility: string; stateMutability: string }>();
@@ -298,28 +324,11 @@ function parseForgeGas(value: string | undefined): number | 'infinite' {
  * Quick regex scan of Solidity source to find function start/end lines.
  * Returns a map of functionName → { line, endLine }.
  */
-function findFunctionLines(source: string): Map<string, { line: number; endLine: number }> {
+function findFunctionLines(
+  source: string,
+  lineOffsets: number[]
+): Map<string, { line: number; endLine: number }> {
   const result = new Map<string, { line: number; endLine: number }>();
-  const lines = source.split('\n');
-
-  const lineOffsets: number[] = [0];
-  for (let i = 0; i < lines.length; i++) {
-    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
-  }
-
-  function offsetToLine(offset: number): number {
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      if (lineOffsets[mid] <= offset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo + 1; // 1-based
-  }
 
   const fnRegex =
     /function\s+(\w+)\s*\([^)]*\)\s*(?:public|external|internal|private)?\s*(?:pure|view|payable|nonpayable)?[^{;]*[{;]/gs;
@@ -347,8 +356,8 @@ function findFunctionLines(source: string): Map<string, { line: number; endLine:
     // Only store the first occurrence (don't overwrite overloads — use first match)
     if (!result.has(name)) {
       result.set(name, {
-        line: offsetToLine(startOffset),
-        endLine: offsetToLine(endOffset),
+        line: offsetToLine(lineOffsets, startOffset),
+        endLine: offsetToLine(lineOffsets, endOffset),
       });
     }
   }
@@ -361,7 +370,8 @@ function findFunctionLines(source: string): Map<string, { line: number; endLine:
  */
 function fallbackResult(filePath: string, errorMessage: string): CompilationOutput {
   const source = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
-  const gasInfo = extractFunctionsForFallback(source);
+  const lineOffsets = buildLineOffsets(source);
+  const gasInfo = extractFunctionsForFallback(source, lineOffsets);
 
   return {
     success: false,
@@ -376,27 +386,8 @@ function fallbackResult(filePath: string, errorMessage: string): CompilationOutp
  * Minimal regex-based function extraction (same approach as SolcManager's extractFunctionsWithRegex).
  * Provides selectors but no gas estimates.
  */
-function extractFunctionsForFallback(source: string): GasInfo[] {
+function extractFunctionsForFallback(source: string, lineOffsets: number[]): GasInfo[] {
   const results: GasInfo[] = [];
-  const lines = source.split('\n');
-  const lineOffsets: number[] = [0];
-  for (let i = 0; i < lines.length; i++) {
-    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
-  }
-
-  function offsetToLine(offset: number): number {
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      if (lineOffsets[mid] <= offset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo + 1; // 1-based
-  }
 
   const fnRegex =
     /function\s+(\w+)\s*\(([^)]*?)\)\s*(public|external|internal|private)?\s*(pure|view|payable|nonpayable)?[^{;]*[{;]/gs;
@@ -424,8 +415,8 @@ function extractFunctionsForFallback(source: string): GasInfo[] {
       selector,
       gas: 0,
       loc: {
-        line: offsetToLine(startOffset),
-        endLine: offsetToLine(startOffset + match[0].length),
+        line: offsetToLine(lineOffsets, startOffset),
+        endLine: offsetToLine(lineOffsets, startOffset + match[0].length),
       },
       visibility: visibility || 'internal',
       stateMutability: stateMutability || 'nonpayable',

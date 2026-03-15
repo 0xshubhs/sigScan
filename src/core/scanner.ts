@@ -218,16 +218,28 @@ export class ProjectScanner {
       }
     }
 
-    // Detect inherited contracts from libs
-    this.detectInheritedContracts(contracts, projectInfo);
+    // Read each 'contracts'-category file once and use it for both
+    // inherited contract detection and import checking
+    const contractFileContents = new Map<string, string>();
+    for (const [filePath, contract] of contracts) {
+      if (contract.category === 'contracts') {
+        try {
+          contractFileContents.set(filePath, fs.readFileSync(filePath, 'utf-8'));
+        } catch {
+          // skip unreadable files
+        }
+      }
+    }
+
+    // Detect inherited contracts from libs (single pass over cached content)
+    this.detectInheritedContracts(contractFileContents, projectInfo);
 
     // Filter lib contracts to only include inherited ones
     const libContracts = contractsByCategory.get('libs') || [];
     const filteredLibContracts = libContracts.filter((contract) => {
-      // Include contract if it's inherited or if it's imported by main contracts
       return (
         projectInfo.inheritedContracts.has(contract.name) ||
-        this.isContractImported(contract.name, contracts)
+        this.isContractImported(contract.name, contractFileContents)
       );
     });
     contractsByCategory.set('libs', filteredLibContracts);
@@ -276,25 +288,23 @@ export class ProjectScanner {
   }
 
   /**
-   * Detect inherited contracts by parsing import statements
+   * Detect inherited contracts by parsing import statements.
+   * Uses pre-read file contents to avoid redundant disk reads.
    */
   private detectInheritedContracts(
-    contracts: Map<string, ContractInfo>,
+    contractFileContents: Map<string, string>,
     projectInfo: ProjectInfo
   ): void {
     projectInfo.inheritedContracts = new Set<string>();
 
-    for (const [filePath, contract] of contracts) {
-      if (contract.category === 'contracts') {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const imports = this.extractImports(content);
+    for (const [, content] of contractFileContents) {
+      const imports = this.extractImports(content);
 
-        for (const importPath of imports) {
-          if (importPath.includes('lib/')) {
-            const contractName = this.extractContractNameFromImport(importPath);
-            if (contractName) {
-              projectInfo.inheritedContracts.add(contractName);
-            }
+      for (const importPath of imports) {
+        if (importPath.includes('lib/')) {
+          const contractName = this.extractContractNameFromImport(importPath);
+          if (contractName) {
+            projectInfo.inheritedContracts.add(contractName);
           }
         }
       }
@@ -473,21 +483,22 @@ export class ProjectScanner {
   }
 
   /**
-   * Check if a contract is imported by any main contracts
+   * Check if a contract is imported by any main contracts.
+   * Uses pre-read file contents to avoid redundant disk reads.
    */
-  private isContractImported(contractName: string, contracts: Map<string, ContractInfo>): boolean {
-    for (const [filePath, contract] of contracts) {
-      if (contract.category === 'contracts') {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        // Check if this contract imports the given contract name
-        if (content.includes(`import`) && content.includes(contractName)) {
-          return true;
-        }
-        // Also check inheritance patterns
-        const inheritancePattern = new RegExp(`contract\\s+\\w+\\s+is\\s+.*${contractName}`, 'i');
-        if (inheritancePattern.test(content)) {
-          return true;
-        }
+  private isContractImported(
+    contractName: string,
+    contractFileContents: Map<string, string>
+  ): boolean {
+    for (const [, content] of contractFileContents) {
+      // Check if this contract imports the given contract name
+      if (content.includes(`import`) && content.includes(contractName)) {
+        return true;
+      }
+      // Also check inheritance patterns
+      const inheritancePattern = new RegExp(`contract\\s+\\w+\\s+is\\s+.*${contractName}`, 'i');
+      if (inheritancePattern.test(content)) {
+        return true;
       }
     }
     return false;

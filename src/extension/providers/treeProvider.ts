@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { SigScanManager } from '../manager';
 
-export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureTreeItem> {
+export class SignatureTreeProvider
+  implements vscode.TreeDataProvider<SignatureTreeItem>, vscode.Disposable
+{
   private _onDidChangeTreeData: vscode.EventEmitter<SignatureTreeItem | undefined | null | void> =
     new vscode.EventEmitter<SignatureTreeItem | undefined | null | void>();
   readonly onDidChangeTreeData: vscode.Event<SignatureTreeItem | undefined | null | void> =
@@ -12,6 +13,10 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
 
   refresh(): void {
     this._onDidChangeTreeData.fire();
+  }
+
+  dispose(): void {
+    this._onDidChangeTreeData.dispose();
   }
 
   getTreeItem(element: SignatureTreeItem): vscode.TreeItem {
@@ -62,7 +67,7 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
             'functions',
             element.filePath,
             undefined,
-            contract
+            contract.functions
           )
         );
       }
@@ -75,7 +80,7 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
             'events',
             element.filePath,
             undefined,
-            contract
+            contract.events
           )
         );
       }
@@ -88,7 +93,7 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
             'errors',
             element.filePath,
             undefined,
-            contract
+            contract.errors
           )
         );
       }
@@ -96,9 +101,8 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
       return Promise.resolve(items);
     }
 
-    if (element.type === 'functions' && element.contract) {
-      // Return individual functions
-      const functions = element.contract.functions.map(
+    if (element.type === 'functions' && element.items) {
+      const functions = element.items.map(
         (func: any) =>
           new SignatureTreeItem(
             func.name,
@@ -113,9 +117,8 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
       return Promise.resolve(functions);
     }
 
-    if (element.type === 'events' && element.contract) {
-      // Return individual events
-      const events = element.contract.events.map(
+    if (element.type === 'events' && element.items) {
+      const events = element.items.map(
         (event: any) =>
           new SignatureTreeItem(
             event.name,
@@ -131,9 +134,8 @@ export class SignatureTreeProvider implements vscode.TreeDataProvider<SignatureT
       return Promise.resolve(events);
     }
 
-    if (element.type === 'errors' && element.contract) {
-      // Return individual errors
-      const errors = element.contract.errors.map(
+    if (element.type === 'errors' && element.items) {
+      const errors = element.items.map(
         (error: any) =>
           new SignatureTreeItem(
             error.name,
@@ -161,7 +163,7 @@ export class SignatureTreeItem extends vscode.TreeItem {
     public readonly type: string,
     public readonly filePath?: string,
     public readonly description?: string,
-    public readonly contract?: any,
+    public readonly items?: any[],
     public readonly functionSig?: any,
     public readonly eventSig?: any,
     public readonly errorSig?: any

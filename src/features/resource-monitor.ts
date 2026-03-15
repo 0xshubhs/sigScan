@@ -5,7 +5,7 @@
  * from running when system resources are constrained.
  */
 
-export const MEMORY_THRESHOLD_MB = 500;
+export const MEMORY_THRESHOLD_MB = 300;
 export const CPU_THRESHOLD_PERCENT = 50;
 
 /**

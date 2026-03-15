@@ -166,6 +166,33 @@ function findOnPath(binName: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Shared line-offset utilities
+// ---------------------------------------------------------------------------
+
+function buildLineOffsets(source: string): number[] {
+  const lines = source.split('\n');
+  const offsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    offsets.push(offsets[i] + lines[i].length + 1);
+  }
+  return offsets;
+}
+
+function offsetToLine(lineOffsets: number[], offset: number): number {
+  let lo = 0;
+  let hi = lineOffsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (lineOffsets[mid] <= offset) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo + 1; // 1-based
+}
+
+// ---------------------------------------------------------------------------
 // Main compilation entry point
 // ---------------------------------------------------------------------------
 
@@ -191,7 +218,8 @@ export async function compileWithRunner(
     const reports: RunnerContractReport[] = JSON.parse(stdout);
 
     // Regex-parse the source for line locations, visibility, state mutability
-    const sourceMeta = extractFunctionMetadata(source);
+    const lineOffsets = buildLineOffsets(source);
+    const sourceMeta = extractFunctionMetadata(source, lineOffsets);
 
     // Merge runner gas data with source metadata
     const gasInfo: GasInfo[] = [];
@@ -208,8 +236,7 @@ export async function compileWithRunner(
         let gas: number | 'infinite' = func.gas;
 
         if (func.status === 'revert') {
-          const strategyNote = func.strategy ? ` (strategy: ${func.strategy})` : '';
-          warnings.push(`Function reverted with default arguments${strategyNote}`);
+          warnings.push('Estimated gas (function requires specific arguments to execute fully)');
         } else if (func.status === 'halt') {
           gas = 'infinite';
           warnings.push('Execution halted - possible unbounded gas');
@@ -228,7 +255,7 @@ export async function compileWithRunner(
     }
 
     // Append event topic decorations
-    gasInfo.push(...extractEventMetadata(source));
+    gasInfo.push(...extractEventMetadata(source, lineOffsets));
 
     return {
       success: true,
@@ -259,7 +286,7 @@ function spawnRunner(
     execFile(
       runnerPath,
       [filePath],
-      { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 },
+      { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
           reject(new Error(`sigscan-runner failed: ${stderr || err.message}`));
@@ -276,7 +303,10 @@ function spawnRunner(
  *
  * Returns a map of functionName → { loc, visibility, stateMutability, selector }.
  */
-function extractFunctionMetadata(source: string): Map<
+function extractFunctionMetadata(
+  source: string,
+  lineOffsets: number[]
+): Map<
   string,
   {
     loc: { line: number; endLine: number };
@@ -295,28 +325,6 @@ function extractFunctionMetadata(source: string): Map<
     }
   >();
 
-  const lines = source.split('\n');
-  const lineOffsets: number[] = [0];
-  for (let i = 0; i < lines.length; i++) {
-    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
-  }
-
-  function offsetToLine(offset: number): number {
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      if (lineOffsets[mid] <= offset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo + 1; // 1-based
-  }
-
-  // Matches function declarations including those with custom modifiers (onlyOwner, nonReentrant, etc.)
-  // The [^{;]* wildcard after visibility/mutability catches everything up to { or ;
   const fnRegex =
     /function\s+(\w+)\s*\(([^)]*)\)\s*(public|external|internal|private)?\s*(pure|view|payable|nonpayable)?[^{;]*[{;]/gs;
 
@@ -359,8 +367,8 @@ function extractFunctionMetadata(source: string): Map<
     if (!result.has(signature)) {
       result.set(signature, {
         loc: {
-          line: offsetToLine(startOffset),
-          endLine: offsetToLine(endOffset),
+          line: offsetToLine(lineOffsets, startOffset),
+          endLine: offsetToLine(lineOffsets, endOffset),
         },
         visibility: visibility || 'internal',
         stateMutability: stateMutability || 'nonpayable',
@@ -376,26 +384,8 @@ function extractFunctionMetadata(source: string): Map<
  * Extract event metadata from Solidity source.
  * Returns GasInfo[] entries with the event topic hash as selector, gas: 0.
  */
-function extractEventMetadata(source: string): GasInfo[] {
+function extractEventMetadata(source: string, lineOffsets: number[]): GasInfo[] {
   const events: GasInfo[] = [];
-  const lines = source.split('\n');
-  const lineOffsets: number[] = [0];
-  for (let i = 0; i < lines.length; i++) {
-    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
-  }
-  function offsetToLine(offset: number): number {
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      if (lineOffsets[mid] <= offset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo + 1; // 1-based
-  }
 
   const eventRegex = /event\s+(\w+)\s*\(([^)]*)\)\s*;/gs;
   let match;
@@ -423,8 +413,8 @@ function extractEventMetadata(source: string): GasInfo[] {
       selector: topic.substring(0, 10), // Show first 4 bytes like function selectors
       gas: 0,
       loc: {
-        line: offsetToLine(match.index),
-        endLine: offsetToLine(match.index + match[0].length),
+        line: offsetToLine(lineOffsets, match.index),
+        endLine: offsetToLine(lineOffsets, match.index + match[0].length),
       },
       visibility: 'event',
       stateMutability: 'n/a',
@@ -439,7 +429,8 @@ function extractEventMetadata(source: string): GasInfo[] {
  */
 function fallbackResult(filePath: string, source: string, errorMessage: string): CompilationOutput {
   const src = source || (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '');
-  const meta = extractFunctionMetadata(src);
+  const lineOffsets = buildLineOffsets(src);
+  const meta = extractFunctionMetadata(src, lineOffsets);
   const gasInfo: GasInfo[] = [];
 
   for (const [sig, data] of meta) {
@@ -456,7 +447,7 @@ function fallbackResult(filePath: string, source: string, errorMessage: string):
   }
 
   // Include events even in fallback
-  gasInfo.push(...extractEventMetadata(src));
+  gasInfo.push(...extractEventMetadata(src, lineOffsets));
 
   return {
     success: false,
