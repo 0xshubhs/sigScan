@@ -159,15 +159,15 @@ describe('GasEstimator', () => {
       expect(['solc', 'heuristic']).toContain(estimate.source);
     });
 
-    it('should use solc-only mode (no heuristic fallback)', async () => {
+    it('should fall back to heuristic when no file path provided', async () => {
       const estimate = await estimator.estimateGas(
         simpleFunction,
         'add(uint256,uint256)'
-        // No file path - will still try solc, no heuristic fallback
+        // No file path — solc requires a file path, so heuristic is used
       );
 
-      // In solc-only mode, source is always 'solc' (even if estimation fails)
-      expect(estimate.source).toBe('solc');
+      // Without a file path, estimateGas always uses heuristic analysis
+      expect(estimate.source).toBe('heuristic');
     });
 
     it('should use solc if available and file path provided', async () => {
