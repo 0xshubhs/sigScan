@@ -1,9 +1,7 @@
-# This workflow has been consolidated into pr-validation.yml
-# Kept as empty file to avoid GitHub referencing a deleted workflow
 name: Build and Release VS Code Extension (disabled)
 on: workflow_dispatch
 jobs:
   noop:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "This workflow is disabled. See pr-validation.yml and release.yml instead."
+      - run: echo "Disabled — consolidated into release.yml."
