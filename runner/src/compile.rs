@@ -87,10 +87,6 @@ fn forge_build(foundry_root: &Path) -> Result<()> {
         .args([
             "build",
             "--force",
-            "--skip",
-            "*/test/*",
-            "--skip",
-            "*/script/*",
             "--extra-output",
             "abi",
             "evm.bytecode.object",

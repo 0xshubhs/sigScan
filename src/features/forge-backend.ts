@@ -10,9 +10,29 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { execFile } from 'child_process';
 import { keccak256 } from 'js-sha3';
 import { GasInfo, CompilationOutput } from './SolcManager';
+
+// ---------------------------------------------------------------------------
+// PATH augmentation — VS Code extension host may not inherit shell PATH
+// ---------------------------------------------------------------------------
+
+function getAugmentedEnv(): NodeJS.ProcessEnv {
+  const home = os.homedir();
+  const extraPaths = [
+    path.join(home, '.foundry', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+  ].filter((p) => fs.existsSync(p));
+
+  return {
+    ...process.env,
+    PATH: [...extraPaths, process.env.PATH || ''].join(path.delimiter),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Session-level cache for forge availability
@@ -26,12 +46,13 @@ let forgeVersionCache: string | null = null;
  * Result is cached for the lifetime of the process.
  */
 export async function isForgeAvailable(): Promise<boolean> {
-  if (forgeAvailableCache !== null) {
-    return forgeAvailableCache;
+  // Don't cache negative results — PATH may become available after extension loads
+  if (forgeAvailableCache === true) {
+    return true;
   }
 
   return new Promise((resolve) => {
-    execFile('forge', ['--version'], { timeout: 5000 }, (err, stdout) => {
+    execFile('forge', ['--version'], { timeout: 5000, env: getAugmentedEnv() }, (err, stdout) => {
       if (err) {
         forgeAvailableCache = false;
         resolve(false);
@@ -200,7 +221,7 @@ function runForgeBuild(projectRoot: string): Promise<void> {
     execFile(
       'forge',
       ['build', '--extra-output', 'evm.gasEstimates'],
-      { cwd: projectRoot, timeout: 120_000 },
+      { cwd: projectRoot, timeout: 120_000, env: getAugmentedEnv() },
       (err, _stdout, stderr) => {
         if (err) {
           reject(new Error(`forge build failed: ${stderr || err.message}`));
@@ -275,7 +296,10 @@ function parseForgeArtifact(
       loc,
       visibility: abiInfo?.visibility || 'external',
       stateMutability: abiInfo?.stateMutability || 'nonpayable',
-      warnings: gasValue === 0 ? ['Gas estimate not available from forge'] : [],
+      warnings:
+        gasValue === 0
+          ? ['Gas estimate not available (forge does not produce estimates for test contracts)']
+          : [],
     });
   }
 

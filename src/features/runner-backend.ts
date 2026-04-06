@@ -12,8 +12,28 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { execFile } from 'child_process';
 import { keccak256 } from 'js-sha3';
+
+// ---------------------------------------------------------------------------
+// PATH augmentation — VS Code extension host may not inherit shell PATH
+// ---------------------------------------------------------------------------
+
+function getAugmentedEnv(): NodeJS.ProcessEnv {
+  const home = os.homedir();
+  const extraPaths = [
+    path.join(home, '.foundry', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+  ].filter((p) => fs.existsSync(p));
+
+  return {
+    ...process.env,
+    PATH: [...extraPaths, process.env.PATH || ''].join(path.delimiter),
+  };
+}
 import { GasInfo, CompilationOutput } from './SolcManager';
 
 // ---------------------------------------------------------------------------
@@ -119,8 +139,9 @@ let runnerPathCache: string | null = null;
  * Result is cached for the lifetime of the process.
  */
 export async function isRunnerAvailable(): Promise<boolean> {
-  if (runnerAvailableCache !== null) {
-    return runnerAvailableCache;
+  // Don't cache negative results — binary may appear after extension loads
+  if (runnerAvailableCache === true) {
+    return true;
   }
 
   const runnerPath = discoverRunnerPath();
@@ -130,7 +151,7 @@ export async function isRunnerAvailable(): Promise<boolean> {
   }
 
   return new Promise((resolve) => {
-    execFile(runnerPath, ['--help'], { timeout: 5000 }, (err) => {
+    execFile(runnerPath, ['--help'], { timeout: 5000, env: getAugmentedEnv() }, (err) => {
       if (err) {
         runnerAvailableCache = false;
         resolve(false);
@@ -179,7 +200,7 @@ function discoverRunnerPath(): string | null {
       return configPath;
     }
 
-    const ext = vscode.extensions.getExtension('0xshubhs.sigscan');
+    const ext = vscode.extensions.getExtension('0xshubhs.0xtools');
     if (ext) {
       const bundledPath = path.join(ext.extensionPath, 'bin', binName);
       if (fs.existsSync(bundledPath)) {
@@ -359,7 +380,7 @@ function spawnRunner(
     execFile(
       runnerPath,
       [filePath],
-      { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 },
+      { timeout: 120_000, maxBuffer: 2 * 1024 * 1024, env: getAugmentedEnv() },
       (err, stdout, stderr) => {
         if (err) {
           reject(new Error(`sigscan-runner failed: ${stderr || err.message}`));
@@ -548,7 +569,7 @@ function spawnRunnerSubcommand<T>(args: string[]): Promise<T> {
     execFile(
       runnerPath,
       args,
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 },
+      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, env: getAugmentedEnv() },
       (err, stdout, stderr) => {
         if (err) {
           reject(new Error(`sigscan-runner ${args[0]} failed: ${stderr || err.message}`));

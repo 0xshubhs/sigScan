@@ -68,14 +68,13 @@ function formatGas(gas: number | 'infinite'): string {
   if (gas === 'infinite') {
     return '∞';
   }
-
   if (gas >= 1_000_000) {
     return `${(gas / 1_000_000).toFixed(2)}M`;
   }
-  if (gas >= 1_000) {
+  if (gas >= 100_000) {
     return `${(gas / 1_000).toFixed(1)}k`;
   }
-  return gas.toString();
+  return gas.toLocaleString();
 }
 
 /**

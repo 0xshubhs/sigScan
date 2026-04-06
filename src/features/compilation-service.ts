@@ -318,10 +318,16 @@ export class CompilationService extends EventEmitter {
           const runnerOutput = await compileWithRunner(filePath, source);
           if (hasRealGas(runnerOutput)) {
             output = runnerOutput;
+          } else {
+            console.warn('[0xtools] Runner returned no real gas data:', runnerOutput?.errors);
           }
-        } catch {
-          // Runner failed — fall through to forge/solc
+        } catch (e) {
+          console.warn('[0xtools] Runner backend failed:', e instanceof Error ? e.message : e);
         }
+      } else {
+        console.warn(
+          `[0xtools] Runner skipped: preferRunner=${preferRunner}, filePath=${!!filePath}, available=${await isRunnerAvailable()}`
+        );
       }
 
       // --- Priority 2: Forge backend (Foundry projects) ---
@@ -331,14 +337,28 @@ export class CompilationService extends EventEmitter {
           const forgeOutput = await compileWithForge(filePath!, foundryRoot);
           if (hasRealGas(forgeOutput)) {
             output = forgeOutput;
+          } else if (forgeOutput && forgeOutput.success && forgeOutput.gasInfo.length > 0) {
+            // Forge compiled successfully with selectors but no gas estimates
+            // (common for test contracts). Accept this over solc-js which can't resolve imports.
+            output = forgeOutput;
+            console.warn('[0xtools] Forge compiled OK but no gas estimates (test contract?)');
+          } else {
+            console.warn('[0xtools] Forge returned no real gas data:', forgeOutput?.errors);
           }
-        } catch {
-          // Forge failed — fall through to solc
+        } catch (e) {
+          console.warn('[0xtools] Forge backend failed:', e instanceof Error ? e.message : e);
         }
+      } else if (!hasRealGas(output)) {
+        console.warn(
+          `[0xtools] Forge skipped: foundryRoot=${foundryRoot}, available=${await isForgeAvailable()}`
+        );
       }
 
       // --- Priority 3: Solc-js (WASM, universal fallback) ---
-      if (!hasRealGas(output)) {
+      // Skip solc-js if forge already gave us valid selectors (e.g. test contracts).
+      // Solc-js can't resolve forge imports and its regex fallback is worse than forge's ABI.
+      const forgeHasSelectors = output && output.success && output.gasInfo.length > 0;
+      if (!hasRealGas(output) && !forgeHasSelectors) {
         this.emit('compilation:start', { uri, version: pragma || 'bundled' });
 
         if (pragma) {
@@ -356,6 +376,9 @@ export class CompilationService extends EventEmitter {
         }
 
         output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
+        if (!hasRealGas(output)) {
+          console.warn('[0xtools] Solc-js returned no real gas data:', output?.errors);
+        }
       }
 
       // If all backends produced output but none had real gas, prefer the one with most gasInfo entries

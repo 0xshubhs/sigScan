@@ -311,14 +311,15 @@ export function createRemixStyleDecorations(
 
     let gasText = '';
     if (!noGas && !isEvent && info.gas !== 'infinite') {
+      const g = info.gas as number;
       gasText =
-        info.gas >= 1_000_000
-          ? `${(info.gas / 1_000_000).toFixed(2)}M`
-          : info.gas >= 1_000
-            ? `${(info.gas / 1_000).toFixed(1)}k`
-            : info.gas.toString();
+        g >= 1_000_000
+          ? `${(g / 1_000_000).toFixed(2)}M`
+          : g >= 100_000
+            ? `${(g / 1_000).toFixed(1)}k`
+            : g.toLocaleString();
     } else if (info.gas === 'infinite') {
-      gasText = 'var';
+      gasText = '∞';
     }
 
     // Reverted functions still get gradient color (the gas is real, just from a revert path)
