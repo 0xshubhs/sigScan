@@ -11,6 +11,8 @@ import {
 } from '../../features/contract-discovery';
 import { runBuild, detectProjectKind, type ProjectKind } from '../../features/build-pipeline';
 import { parseBuildDiagnostics, groupByFile } from '../../features/build-diagnostics';
+import { discoverScripts, type ScriptEntry } from '../../features/script-discovery';
+import { runScript } from '../../features/script-runner';
 import {
   getDefaultKeystoreDir,
   listKeystores,
@@ -46,6 +48,8 @@ import type {
   KeystoreInfo,
   NetworkConfig,
   ProjectGroup,
+  ScriptRunState,
+  ScriptSummary,
   TxLogEntry,
 } from '../../shared/deploy-run-protocol';
 import { BUILT_IN_NETWORKS } from '../../shared/deploy-run-protocol';
@@ -87,6 +91,13 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   // decrypt one on unlock we capture the address here and overlay it on the
   // keystore list so subsequent UI / balance fetches have a real address to use.
   private addressOverlay: Map<string, string> = new Map();
+
+  // Deploy scripts discovered in the workspace + per-script run state.
+  private scripts: ScriptEntry[] = [];
+  private scriptsByKey: Map<string, ScriptEntry> = new Map();
+  private scriptRunStates: Map<string, ScriptRunState> = new Map();
+  private scriptResults: Map<string, { error?: string; deployed: string[]; txHashes: string[]; durationMs: number }> = new Map();
+  private runningScripts: Set<string> = new Set();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -131,6 +142,11 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     const solWatcher = vscode.workspace.createFileSystemWatcher('**/*.sol');
     const fyAbiWatcher = vscode.workspace.createFileSystemWatcher('**/out/**/*.json');
     const hhAbiWatcher = vscode.workspace.createFileSystemWatcher('**/artifacts/**/*.json');
+    // Hardhat deploy scripts live in scripts/ or deploy/ as .ts/.js — watch
+    // both so the panel picks up new ones without a manual refresh.
+    const tsScriptWatcher = vscode.workspace.createFileSystemWatcher(
+      '**/{scripts,deploy}/**/*.{ts,js}'
+    );
 
     let timer: NodeJS.Timeout | undefined;
     const schedule = (): void => {
@@ -140,12 +156,12 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       }, 400);
     };
 
-    for (const w of [solWatcher, fyAbiWatcher, hhAbiWatcher]) {
+    for (const w of [solWatcher, fyAbiWatcher, hhAbiWatcher, tsScriptWatcher]) {
       w.onDidCreate(schedule);
       w.onDidChange(schedule);
       w.onDidDelete(schedule);
     }
-    this.fileWatcher = vscode.Disposable.from(solWatcher, fyAbiWatcher, hhAbiWatcher);
+    this.fileWatcher = vscode.Disposable.from(solWatcher, fyAbiWatcher, hhAbiWatcher, tsScriptWatcher);
   }
 
   /** External entry — called from extension.ts when anvil state changes outside the panel. */
@@ -317,6 +333,16 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
         if (this.network.kind !== 'anvil') {
           await this.refreshAllBalancesForCurrentNetwork({ force: true });
         }
+        return { kind: 'status', payload: this.currentStatus() };
+      }
+
+      case 'refreshScripts': {
+        await this.refreshContracts();
+        return { kind: 'status', payload: this.currentStatus() };
+      }
+
+      case 'runScript': {
+        await this.runOneScript(req.scriptKey, req.hardhatNetwork);
         return { kind: 'status', payload: this.currentStatus() };
       }
 
@@ -522,6 +548,8 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     if (!root) {
       this.contracts = [];
       this.contractsByKey = new Map();
+      this.scripts = [];
+      this.scriptsByKey = new Map();
       this.pushStatus();
       return;
     }
@@ -530,6 +558,15 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       found = await discoverWorkspace(root);
     } catch {
       found = [];
+    }
+    // Discover scripts in parallel — small fs walk, no I/O bottleneck.
+    try {
+      const scripts = await discoverScripts(root);
+      this.scripts = scripts;
+      this.scriptsByKey = new Map(scripts.map((s) => [s.key, s]));
+    } catch {
+      this.scripts = [];
+      this.scriptsByKey = new Map();
     }
     // Preserve transient buildStates ('building' / 'failed') that the on-disk
     // discovery doesn't capture.
@@ -700,6 +737,110 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     this.pushStatus();
   }
 
+  private async runOneScript(scriptKey: string, hardhatNetwork?: string): Promise<void> {
+    if (this.runningScripts.has(scriptKey)) return;
+    const script = this.scriptsByKey.get(scriptKey);
+    if (!script) throw new Error(`script not found: ${scriptKey}`);
+
+    this.runningScripts.add(scriptKey);
+    this.scriptRunStates.set(scriptKey, 'running');
+    this.pushStatus();
+    void this.sendEvent({ kind: 'scriptStarted', scriptKey });
+
+    let rpcUrl: string;
+    try {
+      rpcUrl = this.activeRpcUrl();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.runningScripts.delete(scriptKey);
+      this.scriptRunStates.set(scriptKey, 'error');
+      this.scriptResults.set(scriptKey, { error: message, deployed: [], txHashes: [], durationMs: 0 });
+      this.pushStatus();
+      void this.sendEvent({
+        kind: 'scriptFinished',
+        scriptKey,
+        ok: false,
+        durationMs: 0,
+        error: message,
+        deployed: [],
+        txHashes: [],
+      });
+      return;
+    }
+
+    // Resolve the signer source. Foundry scripts need a private key or
+    // keystore; Hardhat scripts may use the project's hardhat.config network
+    // accounts, so 'none' is acceptable for them.
+    let signer:
+      | { kind: 'privateKey'; privateKey: string }
+      | { kind: 'keystore'; name: string; password: string }
+      | { kind: 'none' };
+    try {
+      const src = await this.resolveSignerSource();
+      if (src.kind === 'privateKey') signer = { kind: 'privateKey', privateKey: src.privateKey };
+      else signer = { kind: 'keystore', name: this.accountSelection.kind === 'keystore' ? this.accountSelection.name : '', password: src.password };
+    } catch {
+      // Hardhat: fall back to 'none' so user's hardhat.config can provide accounts.
+      signer = { kind: 'none' };
+    }
+
+    const result = await runScript({
+      script,
+      rpcUrl,
+      networkLabel: this.network.name,
+      hardhatNetwork,
+      signer,
+      onLine: (line, stream) => {
+        void this.sendEvent({ kind: 'scriptLog', scriptKey, stream, line });
+      },
+    });
+
+    this.runningScripts.delete(scriptKey);
+    this.scriptRunStates.set(scriptKey, result.ok ? 'success' : 'error');
+    this.scriptResults.set(scriptKey, {
+      error: result.errorMessage,
+      deployed: result.deployedContracts.map((c) => c.address),
+      txHashes: result.txHashes,
+      durationMs: result.durationMs,
+    });
+
+    // Append a tx-log entry summarising the script run so it shows in the receipt feed.
+    const summaryTx: TxLogEntry = {
+      id: makeId(),
+      kind: 'send',
+      contractName: `script: ${script.name}`,
+      funcName: 'run',
+      status: result.ok ? 'success' : 'error',
+      deployedAddress: result.deployedContracts[0]?.address,
+      txHash: result.txHashes[0],
+      networkLabel: this.network.name,
+      errorMessage: result.ok ? undefined : result.errorMessage,
+      at: Date.now(),
+    };
+    this.appendTx(summaryTx);
+
+    // For each deployed address, also try to register it as a DeployedInstance
+    // so the user can interact with it. We don't know the ABI yet, so this
+    // step is best-effort — find a matching built contract with that address.
+    for (const dc of result.deployedContracts) {
+      // Heuristic: don't auto-add — we can't tell which contract the script
+      // deployed. The user can use "At Address" to load it manually with the
+      // correct ABI. We still surface the address in the tx log for copy/paste.
+      void dc;
+    }
+
+    void this.sendEvent({
+      kind: 'scriptFinished',
+      scriptKey,
+      ok: result.ok,
+      durationMs: result.durationMs,
+      error: result.errorMessage,
+      deployed: result.deployedContracts.map((c) => c.address),
+      txHashes: result.txHashes,
+    });
+    this.pushStatus();
+  }
+
   private async refreshAllBalancesForCurrentNetwork(
     opts: { force?: boolean } = {}
   ): Promise<void> {
@@ -784,6 +925,24 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     }));
     const projectGroups = buildProjectGroups(contracts, this.buildingProjects);
 
+    const scriptSummaries: ScriptSummary[] = this.scripts.map((s) => {
+      const runState = this.scriptRunStates.get(s.key) ?? 'idle';
+      const result = this.scriptResults.get(s.key);
+      return {
+        key: s.key,
+        name: s.name,
+        relPath: s.relPath,
+        projectRoot: s.projectRoot,
+        projectType: s.projectType,
+        kind: s.kind,
+        runState,
+        lastError: result?.error,
+        lastDeployed: result?.deployed,
+        lastTxHashes: result?.txHashes,
+        lastDurationMs: result?.durationMs,
+      };
+    });
+
     return {
       anvil: {
         available: true,
@@ -807,6 +966,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       keystores: keystoreEntries,
       txLog: this.txLog,
       buildingProjects: Array.from(this.buildingProjects),
+      scripts: scriptSummaries,
     };
   }
 
@@ -1572,6 +1732,52 @@ body {
   gap: 6px;
 }
 .other-networks .vsc-button { align-self: flex-start; }
+
+/* ─── Scripts tree ──────────────────────────────────────────────── */
+.scripts-tree {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--vscode-editorWidget-border, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--vscode-input-background);
+}
+.script-list { list-style: none; padding: 0; margin: 0; }
+.script-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 22px;
+  font-size: 11.5px;
+  border-left: 2px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+  min-width: 0;
+}
+.script-row:hover {
+  background: var(--vscode-list-hoverBackground);
+  border-left-color: var(--vscode-button-background, var(--vscode-focusBorder));
+}
+.script-row + .script-row { border-top: 1px dashed var(--vscode-editorWidget-border, transparent); }
+.script-row .script-name {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.script-row .script-kind {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+}
+.script-row .script-duration {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.65;
+  flex-shrink: 0;
+}
 
 /* ─── Function rows ─────────────────────────────────────────────── */
 .fn-row {

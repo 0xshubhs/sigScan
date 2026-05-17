@@ -323,6 +323,26 @@ export interface ProjectGroup {
   isBuilding: boolean;
 }
 
+export type ScriptKind = 'foundry' | 'hardhat-ts' | 'hardhat-js';
+export type ScriptRunState = 'idle' | 'running' | 'success' | 'error';
+
+export interface ScriptSummary {
+  key: string;
+  name: string;
+  relPath: string;
+  projectRoot: string;
+  projectType: 'foundry' | 'hardhat' | 'solidity';
+  kind: ScriptKind;
+  runState: ScriptRunState;
+  /** Last error message — present when runState === 'error'. */
+  lastError?: string;
+  /** Last run's deployed contract addresses, parsed from output. */
+  lastDeployed?: string[];
+  /** Last run's transaction hashes, parsed from output. */
+  lastTxHashes?: string[];
+  lastDurationMs?: number;
+}
+
 export interface DeployedInstance {
   id: string;          // local UUID
   name: string;
@@ -370,6 +390,8 @@ export interface DeployRunStatus {
   txLog: TxLogEntry[];
   /** Build commands currently running, keyed by projectRoot. */
   buildingProjects: string[];
+  /** Discovered deploy scripts (forge .s.sol + hardhat scripts/). */
+  scripts: ScriptSummary[];
 }
 
 // ─── Requests ────────────────────────────────────────────────────────────
@@ -384,6 +406,8 @@ export type DeployRunRequest =
   | { kind: 'buildAll' }
   | { kind: 'refreshBalance' }
   | { kind: 'refreshAllBalances' }
+  | { kind: 'refreshScripts' }
+  | { kind: 'runScript'; scriptKey: string; hardhatNetwork?: string }
   | { kind: 'selectNetwork'; network: NetworkConfig }
   | { kind: 'selectAccount'; selection: AccountSelection }
   | { kind: 'refreshKeystores' }
@@ -437,7 +461,10 @@ export type DeployRunEvent =
   | { kind: 'log'; level: LogLevel; message: string }
   | { kind: 'buildStarted'; projectRoot: string; command: string }
   | { kind: 'buildLog'; projectRoot: string; stream: 'stdout' | 'stderr'; line: string }
-  | { kind: 'buildFinished'; projectRoot: string; ok: boolean; durationMs: number; error?: string };
+  | { kind: 'buildFinished'; projectRoot: string; ok: boolean; durationMs: number; error?: string }
+  | { kind: 'scriptStarted'; scriptKey: string }
+  | { kind: 'scriptLog'; scriptKey: string; stream: 'stdout' | 'stderr'; line: string }
+  | { kind: 'scriptFinished'; scriptKey: string; ok: boolean; durationMs: number; error?: string; deployed: string[]; txHashes: string[] };
 
 // ─── Envelopes ───────────────────────────────────────────────────────────
 
