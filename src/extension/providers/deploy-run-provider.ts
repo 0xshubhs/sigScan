@@ -1941,13 +1941,16 @@ body {
   background: var(--vscode-input-background);
   font-size: 11px;
   animation: tx-enter 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  transition: border-color 120ms ease;
   overflow: hidden;
+  /* Critical: prevent the parent flex column from shrinking entries to fit
+     max-height. Without this, collapsing an entry in the middle of a long
+     list causes neighbouring entries to be sized down and visually overlap
+     instead of letting the container scroll. */
+  flex-shrink: 0;
 }
 .tx-entry:hover {
   border-color: var(--vscode-focusBorder, var(--vscode-foreground));
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 }
 @keyframes tx-enter {
   from { opacity: 0; transform: translateY(-3px); }

@@ -296,10 +296,10 @@ function parseForgeArtifact(
       loc,
       visibility: abiInfo?.visibility || 'external',
       stateMutability: abiInfo?.stateMutability || 'nonpayable',
-      warnings:
-        gasValue === 0
-          ? ['Gas estimate not available (test/payable functions or no execution data)']
-          : [],
+      // No "no-gas" warning — when forge doesn't emit a gas estimate that's
+      // most often by design (payable, internal-only, no execution data), and
+      // pinning a warning on every such function reads like an error.
+      warnings: [],
     });
   }
 

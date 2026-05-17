@@ -150,11 +150,8 @@ export function createGasDecorations(
   }
 
   for (const info of gasInfo) {
-    // Skip functions whose gas couldn't be determined. forge omits estimates for
-    // some shapes (payable, internal-only callers, complex storage patterns) —
-    // rendering "0 gas" or "Gas: unavailable" in the gutter for those is misleading.
-    if (info.gas === 0) continue;
-
+    // No-gas functions still get a decoration — just no gas value. The
+    // selector inline is useful info that the user can copy from.
     // Get line (0-based for VS Code)
     const line = info.loc.line - 1;
     if (line < 0 || line >= document.lineCount) {

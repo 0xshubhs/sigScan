@@ -289,12 +289,12 @@ export function createRemixStyleDecorations(
   const content = document.getText();
 
   for (const info of gasInfo) {
-    // Skip functions whose gas couldn't be determined unless they're events
-    // (events get a different non-gas decoration below). Showing
-    // "Gas: unavailable" on a regular function adds no signal.
-    const isEvent = info.visibility === 'event';
-    if (!isEvent && info.gas === 0) continue;
-
+    // Note: we no longer early-skip functions with gas === 0. When forge can't
+    // determine gas (payable functions, internal-only callers, missing
+    // execution data) we still want to show the selector inline — that's the
+    // ONE piece of useful info we always have. The previous "Gas: unavailable"
+    // noise is removed below by simplifying the no-gas decoration to just the
+    // selector and dropping the warning hover line.
     let line = info.loc.line - 1;
 
     // If loc.line is 0 (unresolved), try to find the function in source via regex
@@ -320,7 +320,7 @@ export function createRemixStyleDecorations(
     const startPos = new vscode.Position(line, 0);
     const range = new vscode.Range(startPos, endPos);
 
-    // `isEvent` already computed above for the skip-zero-gas guard
+    const isEvent = info.visibility === 'event';
     const isReverted = info.warnings.some((w) => w.includes('reverted'));
     const noGas = info.gas === 0;
 
@@ -358,7 +358,10 @@ export function createRemixStyleDecorations(
     if (isEvent) {
       hoverMd.appendMarkdown(`**Type:** event\n\n**Topic:** \`${info.selector}\`\n\n`);
     } else if (!gasText) {
-      hoverMd.appendMarkdown('**Gas:** unavailable\n\n');
+      // No gas estimate available — common for payable functions, internal
+      // callers, or anything forge couldn't execute symbolically. Keep the
+      // hover quiet rather than complaining.
+      hoverMd.appendMarkdown(`**Selector:** \`${info.selector}\`\n\n`);
     } else if (isReverted) {
       hoverMd.appendMarkdown(
         `**Gas:** ~${gasText} (estimated — function requires specific args)\n\n`
