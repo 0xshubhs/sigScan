@@ -13,17 +13,50 @@ export interface KeystoreEntry {
 }
 
 interface KeystoreV3 {
-  version: 3;
+  version: number | string;
   address?: string;
+  /** Some old keystores (geth) use this capitalisation. */
+  Address?: string;
+  /** Some encoders nest the address under `id`/`meta` — we probe broadly. */
+  id?: string;
   crypto?: { ciphertext?: string };
+  Crypto?: { ciphertext?: string };
 }
 
 function isV3(obj: unknown): obj is KeystoreV3 {
   if (!obj || typeof obj !== 'object') return false;
   const o = obj as Record<string, unknown>;
-  if (o.version !== 3) return false;
-  const crypto = o.crypto as Record<string, unknown> | undefined;
+  // Accept "version: 3" and "version: '3'" — both are seen in the wild.
+  const v = o.version;
+  if (v !== 3 && v !== '3') return false;
+  // Either `crypto` (modern) or `Crypto` (legacy geth) with a ciphertext.
+  const crypto =
+    (o.crypto as Record<string, unknown> | undefined) ??
+    (o.Crypto as Record<string, unknown> | undefined);
   return !!crypto && typeof crypto.ciphertext === 'string';
+}
+
+/**
+ * Extract the address from a v3 keystore, tolerating the various places where
+ * different encoders stash it. Returns an empty string if none can be found —
+ * which is unusual but happens for keystores created without explicit address
+ * metadata (the address is then only recoverable by decrypting).
+ */
+function extractAddress(parsed: KeystoreV3, filename: string): string {
+  const candidates: Array<string | undefined> = [
+    parsed.address,
+    parsed.Address,
+    // geth-style filenames embed the address: "UTC--2024-01-01T00-00-00.000Z--<address>"
+    filename.split('--').pop(),
+  ];
+  for (const c of candidates) {
+    if (typeof c !== 'string') continue;
+    const trimmed = c.trim().replace(/^0x/i, '');
+    if (/^[0-9a-fA-F]{40}$/.test(trimmed)) {
+      return '0x' + trimmed.toLowerCase();
+    }
+  }
+  return '';
 }
 
 export function getDefaultKeystoreDir(): string {
@@ -56,13 +89,11 @@ export function listKeystores(dir: string = getDefaultKeystoreDir()): KeystoreEn
       continue;
     }
     if (!isV3(parsed)) continue;
-    const addr = (parsed as KeystoreV3).address ?? '';
-    out.push({
-      name,
-      // Foundry stores the address without the 0x prefix, lowercase per Web3 spec
-      address: addr.startsWith('0x') ? addr : '0x' + addr,
-      path: full,
-    });
+    const address = extractAddress(parsed, name);
+    // Empty `address` is fine here — some keystores (e.g. ethers-encrypted ones
+    // without explicit metadata) don't ship one in the JSON. The provider will
+    // populate it later from the decrypted wallet on first unlock.
+    out.push({ name, address, path: full });
   }
   return out;
 }

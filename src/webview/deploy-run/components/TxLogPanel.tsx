@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { TxLogEntry } from '../../../shared/deploy-run-protocol';
 import type { Bus } from '../bus';
 
@@ -5,6 +6,8 @@ interface Props {
   entries: TxLogEntry[];
   bus: Bus;
 }
+
+// ─── Formatters ─────────────────────────────────────────────────────────
 
 function shorten(s: string | undefined, head = 6, tail = 4): string {
   if (!s) return '';
@@ -14,7 +17,7 @@ function shorten(s: string | undefined, head = 6, tail = 4): string {
 
 function timeAgo(ts: number): string {
   const diff = Math.max(0, Date.now() - ts);
-  if (diff < 1000) return 'just now';
+  if (diff < 1000) return 'now';
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -38,12 +41,34 @@ function formatGas(g: string | number | undefined): string {
   return `${v < 10 ? v.toFixed(2) : v.toFixed(1)}M`;
 }
 
+function formatValueWei(wei: string | undefined): string {
+  if (!wei || wei === '0') return '0';
+  try {
+    const n = BigInt(wei);
+    if (n === 0n) return '0';
+    const eth = Number(n) / 1e18;
+    if (eth >= 0.0001) return `${eth.toFixed(eth < 1 ? 6 : 4).replace(/\.?0+$/, '')} ETH`;
+    return `${wei} wei`;
+  } catch {
+    return `${wei} wei`;
+  }
+}
+
 function statusGlyph(s: TxLogEntry['status']): string {
   switch (s) {
     case 'success':  return '●';
     case 'reverted': return '✕';
     case 'error':    return '!';
     case 'pending':  return '◐';
+  }
+}
+
+function statusLabel(s: TxLogEntry['status']): string {
+  switch (s) {
+    case 'success':  return 'OK';
+    case 'reverted': return 'REVERTED';
+    case 'error':    return 'ERROR';
+    case 'pending':  return 'PENDING';
   }
 }
 
@@ -71,25 +96,231 @@ function renderLabel(tx: TxLogEntry): JSX.Element {
   );
 }
 
+function formatEventValue(v: unknown): string {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'string') {
+    if (v.length > 22 && v.startsWith('0x')) return shorten(v, 8, 4);
+    return v;
+  }
+  if (typeof v === 'bigint' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function formatReturn(v: unknown): string {
+  if (v === null || v === undefined) return '(no return value)';
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'bigint') return v.toString();
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
+// ─── Components ─────────────────────────────────────────────────────────
+
+function CopyInline({ value }: { value: string }): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="copy-inline"
+      title={copied ? 'Copied!' : 'Copy'}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1000);
+      }}
+    >
+      {copied ? '✓' : '⧉'}
+    </button>
+  );
+}
+
 function EmptyState(): JSX.Element {
   return (
     <div className="tx-empty">
-      <svg className="empty-glyph" viewBox="0 0 56 56" fill="none" stroke="currentColor" strokeWidth="1.2">
-        <circle className="outer" cx="28" cy="28" r="22" strokeDasharray="2 4" strokeLinecap="round" opacity="0.5" />
-        <circle className="mid"   cx="28" cy="28" r="14" strokeDasharray="2 3" strokeLinecap="round" opacity="0.7" />
-        <circle className="inner" cx="28" cy="28" r="6"  fill="currentColor" stroke="none" opacity="0.4" />
-        <line x1="28" y1="6" x2="28" y2="2" strokeLinecap="round" opacity="0.6" />
-        <line x1="28" y1="54" x2="28" y2="50" strokeLinecap="round" opacity="0.6" />
-        <line x1="6" y1="28" x2="2" y2="28" strokeLinecap="round" opacity="0.6" />
-        <line x1="54" y1="28" x2="50" y2="28" strokeLinecap="round" opacity="0.6" />
+      <svg className="empty-glyph" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1">
+        <rect x="6" y="6" width="36" height="36" />
+        <line x1="6" y1="16" x2="42" y2="16" />
+        <line x1="6" y1="26" x2="42" y2="26" />
+        <line x1="6" y1="36" x2="42" y2="36" />
+        <line x1="16" y1="6" x2="16" y2="42" strokeDasharray="2 3" opacity="0.5" />
       </svg>
-      <div className="empty-title">Awaiting signal</div>
-      <div className="empty-hint">
-        Transactions flow through this panel in real time once you deploy or call a contract.
-      </div>
+      <div className="empty-title">AWAITING SIGNAL</div>
+      <div className="empty-hint">Transactions stream here in real time.</div>
     </div>
   );
 }
+
+interface EntryProps {
+  tx: TxLogEntry;
+  defaultOpen: boolean;
+}
+
+function TxEntry({ tx, defaultOpen }: EntryProps): JSX.Element {
+  const [open, setOpen] = useState(defaultOpen);
+  const hasMeta = tx.gasUsed || tx.blockNumber !== undefined || tx.txHash;
+
+  return (
+    <div className={`tx-entry ${tx.status}`}>
+      <div
+        className="tx-head"
+        onClick={() => setOpen((o) => !o)}
+        title={open ? 'Collapse' : 'Expand'}
+      >
+        <span className={`tx-kind kind-${tx.kind}`}>{kindAbbr(tx.kind)}</span>
+        <span className={`tx-status-icon s-${tx.status}`}>{statusGlyph(tx.status)}</span>
+        <span className="tx-label">{renderLabel(tx)}</span>
+        <span className="tx-time">{timeAgo(tx.at)}</span>
+        <span className="tx-expand-caret">{open ? '▾' : '▸'}</span>
+      </div>
+
+      {open && (
+        <div className="tx-body">
+          {/* STATUS */}
+          <div className="dt">Status</div>
+          <div className={`dd dd-status s-${tx.status}`}>{statusLabel(tx.status)}</div>
+
+          {/* CONTRACT NAME (deploy & send/call) */}
+          {tx.kind === 'deploy' ? (
+            <>
+              <div className="dt">Contract</div>
+              <div className="dd"><span className="mono">{tx.contractName}</span></div>
+            </>
+          ) : (
+            <>
+              <div className="dt">Function</div>
+              <div className="dd">
+                <span className="label-fn mono">{tx.funcName}()</span>
+              </div>
+            </>
+          )}
+
+          {/* DEPLOYED ADDRESS — centrepiece for deploy entries */}
+          {tx.kind === 'deploy' && tx.deployedAddress && (
+            <>
+              <div className="dt">Deployed</div>
+              <div className="dd dd-address-deploy">
+                <span className="mono">{tx.deployedAddress}</span>
+                <CopyInline value={tx.deployedAddress} />
+              </div>
+            </>
+          )}
+
+          {/* TARGET ADDRESS for send/call */}
+          {tx.kind !== 'deploy' && tx.toAddress && (
+            <>
+              <div className="dt">To</div>
+              <div className="dd">
+                <span className="mono">{shorten(tx.toAddress, 8, 6)}</span>
+                <CopyInline value={tx.toAddress} />
+              </div>
+            </>
+          )}
+
+          {/* FROM ADDRESS */}
+          {tx.fromAddress && (
+            <>
+              <div className="dt">From</div>
+              <div className="dd">
+                <span className="mono">{shorten(tx.fromAddress, 8, 6)}</span>
+                <CopyInline value={tx.fromAddress} />
+              </div>
+            </>
+          )}
+
+          {/* VALUE — only when non-zero, since most calls send 0 */}
+          {tx.valueWei && tx.valueWei !== '0' && (
+            <>
+              <div className="dt">Value</div>
+              <div className="dd">{formatValueWei(tx.valueWei)}</div>
+            </>
+          )}
+
+          {/* TX META */}
+          {hasMeta && (
+            <>
+              {tx.txHash && (
+                <>
+                  <div className="dt">Tx</div>
+                  <div className="dd">
+                    <span className="mono">{shorten(tx.txHash, 8, 6)}</span>
+                    <CopyInline value={tx.txHash} />
+                  </div>
+                </>
+              )}
+              {tx.blockNumber !== undefined && (
+                <>
+                  <div className="dt">Block</div>
+                  <div className="dd"><span className="mono">#{tx.blockNumber}</span></div>
+                </>
+              )}
+              {tx.gasUsed && (
+                <>
+                  <div className="dt">Gas</div>
+                  <div className="dd dd-gas"><span className="mono">{formatGas(tx.gasUsed)}</span></div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* NETWORK */}
+          {tx.networkLabel && (
+            <>
+              <div className="dt">Network</div>
+              <div className="dd"><span className="mono">{tx.networkLabel}</span></div>
+            </>
+          )}
+
+          {/* EVENTS — full-row span sub-section */}
+          {tx.decodedEvents && tx.decodedEvents.length > 0 && (
+            <>
+              <div className="tx-section section-events">Events · {tx.decodedEvents.length}</div>
+              {tx.decodedEvents.map((e, i) => (
+                <div key={`${e.name}-${i}`} className="tx-event-line">
+                  <span className="ev-name">{e.name}</span>
+                  <span className="ev-args">
+                    {' ('}
+                    {Object.entries(e.args).map(([k, v], idx) => (
+                      <span key={k}>
+                        {idx > 0 && ', '}
+                        <span className="ev-arg-key">{k}</span>={formatEventValue(v)}
+                      </span>
+                    ))}
+                    {')'}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* RETURN VALUE for view/pure calls */}
+          {tx.returnValue !== undefined && tx.kind === 'call' && tx.status === 'success' && (
+            <>
+              <div className="tx-section section-return">Return</div>
+              <div className="tx-return-block">{formatReturn(tx.returnValue)}</div>
+            </>
+          )}
+
+          {/* REVERT block */}
+          {tx.errorMessage && (
+            <>
+              <div className="tx-section section-revert">Revert</div>
+              <div className="tx-revert-block">{tx.errorMessage}</div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────
 
 export function TxLogPanel({ entries, bus }: Props): JSX.Element {
   return (
@@ -97,7 +328,6 @@ export function TxLogPanel({ entries, bus }: Props): JSX.Element {
       <h3 className="section-title">
         Tx Log
         {entries.length > 0 && <span className="count">· {entries.length}</span>}
-        <span className="rule" />
         <span className="right">
           <button
             className="vsc-button small"
@@ -114,70 +344,11 @@ export function TxLogPanel({ entries, bus }: Props): JSX.Element {
 
       {entries.length > 0 && (
         <div className="tx-log">
-          {entries.map((tx) => (
-            <div
-              key={tx.id}
-              className={`tx-entry ${tx.status}`}
-              title={tx.txHash ? `Tx hash: ${tx.txHash}` : undefined}
-            >
-              <div className="tx-head">
-                <span className={`tx-kind kind-${tx.kind}`}>{kindAbbr(tx.kind)}</span>
-                <span className={`tx-status-icon s-${tx.status}`}>{statusGlyph(tx.status)}</span>
-                <span className="tx-label">{renderLabel(tx)}</span>
-                <span className="tx-time">{timeAgo(tx.at)}</span>
-              </div>
-
-              {(tx.gasUsed || tx.blockNumber !== undefined || tx.txHash) && (
-                <div className="tx-meta">
-                  {tx.gasUsed && (
-                    <span className="meta-item">
-                      <span className="meta-key">gas</span>
-                      <span className="meta-val">{formatGas(tx.gasUsed)}</span>
-                    </span>
-                  )}
-                  {tx.blockNumber !== undefined && (
-                    <span className="meta-item">
-                      <span className="meta-key">blk</span>
-                      <span className="meta-val">#{tx.blockNumber}</span>
-                    </span>
-                  )}
-                  {tx.txHash && (
-                    <span className="meta-item meta-hash" title={tx.txHash}>
-                      <span className="meta-key">tx</span>
-                      <span className="meta-val">{shorten(tx.txHash, 6, 4)}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {tx.decodedEvents && tx.decodedEvents.length > 0 && (
-                <div className="tx-events">
-                  {tx.decodedEvents.map((e, i) => (
-                    <span
-                      key={`${e.name}-${i}`}
-                      className="tx-event"
-                      title={Object.entries(e.args)
-                        .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
-                        .join('\n')}
-                    >
-                      {e.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {tx.returnValue !== undefined && tx.status === 'success' && tx.kind === 'call' && (
-                <div className="tx-return">
-                  {typeof tx.returnValue === 'object'
-                    ? JSON.stringify(tx.returnValue, null, 2)
-                    : String(tx.returnValue)}
-                </div>
-              )}
-
-              {tx.errorMessage && (
-                <div className="tx-error">{tx.errorMessage}</div>
-              )}
-            </div>
+          {entries.map((tx, i) => (
+            // Auto-expand the newest entry so the user sees the full receipt
+            // (deployed address, events, etc.) without clicking. Older entries
+            // collapse to the one-line header.
+            <TxEntry key={tx.id} tx={tx} defaultOpen={i === 0} />
           ))}
         </div>
       )}

@@ -82,6 +82,12 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   private readonly buildDiagnostics: vscode.DiagnosticCollection =
     vscode.languages.createDiagnosticCollection('0xtools-build');
 
+  // Some keystores don't include the address in their JSON metadata (e.g. those
+  // created via ethers' encrypt() without an explicit address field). When we
+  // decrypt one on unlock we capture the address here and overlay it on the
+  // keystore list so subsequent UI / balance fetches have a real address to use.
+  private addressOverlay: Map<string, string> = new Map();
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly getAnvil: GetAnvil
@@ -264,19 +270,32 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
         return { kind: 'status', payload: this.currentStatus() };
 
       case 'unlockKeystore': {
-        // Validate the password by attempting a decryption. We discard the wallet
-        // and just cache the password (ethers re-decrypts on each signing call,
-        // which is fine — ~1s scrypt cost amortized over a session of clicks).
+        // Validate the password by attempting a decryption. We discard the
+        // wallet *after* capturing its address — that's the only way to learn
+        // the address for keystores whose JSON omits it (some ethers-encrypted
+        // ones do).
         try {
           const json = readKeystoreJson(this.keystorePathFor(req.name));
           const { Wallet } = await import('ethers');
-          await Wallet.fromEncryptedJson(json, req.password);
+          const wallet = await Wallet.fromEncryptedJson(json, req.password);
+          const addr = (wallet as { address?: string }).address;
+          if (addr) this.addressOverlay.set(req.name, addr);
         } catch {
           return { kind: 'error', message: 'invalid password' };
         }
         storePassword(req.name, req.password, (req.ttlMinutes ?? 15) * 60 * 1000);
+        // If the user already had this keystore selected with an empty address,
+        // patch the selection so the next sign call has something to use.
+        const known = this.addressOverlay.get(req.name);
+        if (
+          known &&
+          this.accountSelection.kind === 'keystore' &&
+          this.accountSelection.name === req.name &&
+          !this.accountSelection.address
+        ) {
+          this.accountSelection = { kind: 'keystore', name: req.name, address: known };
+        }
         this.pushStatus();
-        // Unlock often immediately precedes a deploy/call — pre-warm the balance.
         if (this.network.kind !== 'anvil') void this.refreshBalanceFor(req.name);
         return { kind: 'status', payload: this.currentStatus() };
       }
@@ -319,6 +338,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           kind: 'deploy',
           contractName: contract.name,
           status: 'pending',
+          fromAddress: this.activeFromAddress(),
+          valueWei: req.valueWei,
+          networkLabel: this.network.name,
           at: Date.now(),
         };
         this.appendTx(entry);
@@ -347,6 +369,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
             txHash: result.txHash,
             blockNumber: result.blockNumber,
             gasUsed: result.gasUsed,
+            deployedAddress: result.address,
           });
           this.pushStatus();
           return {
@@ -369,9 +392,13 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
         const entry: TxLogEntry = {
           id: makeId(),
           kind: 'call',
-          contractName: req.address,
+          contractName: this.instanceNameFor(req.address) ?? shortenAddr(req.address),
           funcName: req.funcName,
           status: 'pending',
+          toAddress: req.address,
+          fromAddress: this.activeFromAddress(),
+          valueWei: req.valueWei,
+          networkLabel: this.network.name,
           at: Date.now(),
         };
         this.appendTx(entry);
@@ -407,9 +434,13 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
         const entry: TxLogEntry = {
           id: makeId(),
           kind: 'send',
-          contractName: req.address,
+          contractName: this.instanceNameFor(req.address) ?? shortenAddr(req.address),
           funcName: req.funcName,
           status: 'pending',
+          toAddress: req.address,
+          fromAddress: this.activeFromAddress(),
+          valueWei: req.valueWei,
+          networkLabel: this.network.name,
           at: Date.now(),
         };
         this.appendTx(entry);
@@ -615,6 +646,20 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private activeFromAddress(): string | undefined {
+    const sel = this.accountSelection;
+    if (sel.kind === 'anvil') return this.getAnvil().getAccounts()[sel.index]?.address;
+    if (sel.kind === 'keystore') {
+      // We pulled the address into the selection itself when the user picked it.
+      return sel.address;
+    }
+    return undefined;
+  }
+
+  private instanceNameFor(address: string): string | undefined {
+    return this.instances.find((i) => i.address.toLowerCase() === address.toLowerCase())?.name;
+  }
+
   private activeRpcUrl(): string {
     if (this.network.kind === 'anvil') {
       const anvil = this.getAnvil();
@@ -634,14 +679,16 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     opts: { force?: boolean } = {}
   ): Promise<void> {
     if (this.network.kind === 'anvil' || !this.network.chainId) return;
-    const ks = listKeystores().find((k) => k.name === keystoreName);
-    if (!ks) return;
+    const raw = listKeystores().find((k) => k.name === keystoreName);
+    if (!raw) return;
+    const address = raw.address || this.addressOverlay.get(keystoreName) || '';
+    if (!address) return; // address still unknown — wait for an unlock to learn it
     const key = this.balanceCacheKey(keystoreName, this.network.chainId);
     this.balanceStatusByKey.set(key, 'fetching');
     this.balanceErrorByKey.delete(key);
     this.pushStatus();
 
-    const result = await fetchBalance(ks.address, this.network, { force: opts.force });
+    const result = await fetchBalance(address, this.network, { force: opts.force });
     if (result.ok && result.balance) {
       this.balanceByKey.set(key, result.balance);
       this.balanceStatusByKey.set(key, 'ok');
@@ -704,9 +751,12 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     const state = anvil.getState();
     const chainId = this.network.chainId;
     const keystoreEntries: KeystoreInfo[] = listKeystores().map((k) => {
+      // Overlay the address learned from a prior unlock when the keystore JSON
+      // didn't include one (ethers-encrypted keystores often omit it).
+      const effectiveAddress = k.address || this.addressOverlay.get(k.name) || '';
       const info: KeystoreInfo = {
         name: k.name,
-        address: k.address,
+        address: effectiveAddress,
         unlocked: isUnlocked(k.name),
       };
       if (chainId !== undefined && this.network.kind !== 'anvil') {
@@ -805,6 +855,11 @@ function makeId(): string {
   return crypto.randomBytes(8).toString('hex');
 }
 
+function shortenAddr(a: string): string {
+  if (!a || a.length < 14) return a || '';
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
 function buildProjectGroups(
   contracts: ContractSummary[],
   buildingProjects: Set<string>
@@ -873,262 +928,273 @@ void BUILT_IN_NETWORKS;
 // Themed via VS Code CSS variables — palette flips with the active theme.
 // Design direction: "Observability Terminal" — bracket-marker section headers,
 // color-as-data status rails, monospace-forward typography, event-stream tx log.
+// Themed via VS Code CSS variables — palette flips with the active theme.
+// Design direction: brutalist-minimal. Hard 1px borders, no radius, no shadow.
+// Status communicated as solid color rails (3px) on the left edge of every card.
+// ALL-CAPS section markers framed with bracket characters. Monospace everywhere
+// data appears; proportional only for prose-y hints.
 const PANEL_CSS = `
 * { box-sizing: border-box; }
 *:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
-  outline-offset: 1px;
+  outline-offset: 0;
 }
 body {
   margin: 0;
   padding: 0;
   color: var(--vscode-foreground);
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-  font-family: var(--vscode-font-family);
+  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, monospace);
   font-size: var(--vscode-font-size, 13px);
   font-weight: var(--vscode-font-weight, 400);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ─── Layout ────────────────────────────────────────────────────────── */
+/* ─── Layout ─────────────────────────────────────────────────────── */
 .panel {
   display: flex; flex-direction: column;
   gap: 14px;
-  padding: 12px 12px 16px;
+  padding: 8px 10px 14px;
   min-width: 0;
 }
 
+/* ─── Panel header — banner bar with double-rule below ───────────── */
 .panel-header {
   position: relative;
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 2px 0 10px;
-  margin-bottom: 2px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  margin: -2px -2px 0;
+  border: 1px solid var(--vscode-foreground);
+  background: var(--vscode-foreground);
+  color: var(--vscode-editor-background);
 }
-.panel-header::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
-  background: linear-gradient(
-    to right,
-    var(--vscode-charts-green, #4ec9b0) 0,
-    var(--vscode-charts-green, #4ec9b0) 24px,
-    var(--vscode-panel-border, var(--vscode-editorWidget-border, transparent)) 24px
-  );
-  opacity: 0.55;
-}
+.panel-header .header-dot { display: none; }
 .panel-header .title {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--vscode-foreground);
 }
 .panel-header .title-accent {
-  color: var(--vscode-descriptionForeground);
-  font-weight: 500;
-}
-.panel-header .header-dot {
-  position: relative; top: 1px;
+  opacity: 0.7;
+  font-weight: 400;
+  letter-spacing: 0.14em;
 }
 
-/* ─── Sections — bracket-marker headers ───────────────────────────── */
-.section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* ─── Sections — bracket-marker uppercase labels ─────────────────── */
+.section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .section-title {
   display: flex; align-items: center; gap: 6px;
-  margin: 0;
+  margin: 8px 0 0;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-foreground);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--vscode-foreground);
 }
 .section-title::before {
-  content: '◆';
-  color: var(--vscode-charts-green, #4ec9b0);
-  font-size: 8px;
-  opacity: 0.7;
+  content: '┌';
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  opacity: 0.6;
 }
 .section-title .count {
   color: var(--vscode-descriptionForeground);
   font-weight: 400;
-  opacity: 0.7;
+  letter-spacing: 0.08em;
+  margin-left: 2px;
 }
 .section-title .rule {
-  flex: 1; height: 1px;
-  background: linear-gradient(
-    to right,
-    var(--vscode-editorWidget-border, transparent) 0,
-    transparent 100%
-  );
-  margin: 0 4px;
-  opacity: 0.6;
+  display: none;
 }
 .section-title .right {
   display: flex; gap: 4px; align-items: center;
   margin-left: auto;
-  font-family: var(--vscode-font-family);
+  font-family: var(--vscode-editor-font-family, monospace);
   font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 9.5px;
 }
 
-/* ─── Generic rows / labels ────────────────────────────────────────── */
+/* ─── Rows ───────────────────────────────────────────────────────── */
 .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .row-label {
-  min-width: 64px;
-  font-size: 11px;
+  min-width: 60px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
   color: var(--vscode-descriptionForeground);
-  letter-spacing: 0.02em;
 }
 .muted { color: var(--vscode-descriptionForeground); }
-.small { font-size: 11px; }
+.small { font-size: 10.5px; }
 .mono { font-family: var(--vscode-editor-font-family, monospace); }
 .hint {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--vscode-descriptionForeground);
   opacity: 0.85;
-  padding-left: 2px;
+  padding-left: 4px;
+  border-left: 1px solid var(--vscode-descriptionForeground);
+  line-height: 1.4;
 }
 
-/* ─── Inputs ───────────────────────────────────────────────────────── */
+/* ─── Inputs — flat, square, no radius ──────────────────────────── */
 .vsc-select, .vsc-input {
   flex: 1; min-width: 0;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
-  border-radius: 2px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-foreground));
+  border-radius: 0;
   padding: 4px 6px;
-  font-family: inherit;
-  font-size: 12px;
-  outline: none;
-  transition: border-color 100ms ease, background 100ms ease;
-}
-.vsc-input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); opacity: 0.6; }
-.vsc-select:hover:not(:disabled), .vsc-input:hover:not(:disabled) {
-  border-color: var(--vscode-inputOption-hoverBackground, var(--vscode-focusBorder));
-}
-.vsc-select:focus, .vsc-input:focus { border-color: var(--vscode-focusBorder); }
-.vsc-select:disabled, .vsc-input:disabled { opacity: 0.55; cursor: not-allowed; }
-
-/* ─── Buttons ──────────────────────────────────────────────────────── */
-.button-row { display: flex; gap: 6px; flex-wrap: wrap; }
-.vsc-button {
-  background: var(--vscode-button-secondaryBackground, transparent);
-  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-  border: 1px solid var(--vscode-button-border, var(--vscode-input-border, transparent));
-  padding: 4px 12px;
-  border-radius: 2px;
-  cursor: pointer;
-  font-family: inherit;
+  font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  transition: background 100ms ease, transform 80ms ease, border-color 100ms ease;
+  outline: none;
+}
+.vsc-input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+  opacity: 0.5;
+  font-style: normal;
+}
+.vsc-select:hover:not(:disabled), .vsc-input:hover:not(:disabled) {
+  border-color: var(--vscode-focusBorder, var(--vscode-foreground));
+}
+.vsc-select:focus, .vsc-input:focus {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-editor-background);
+}
+.vsc-select:disabled, .vsc-input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ─── Buttons — square, ALL CAPS, inverted on hover ─────────────── */
+.button-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.vsc-button {
+  background: transparent;
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-foreground);
+  padding: 3px 10px;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   white-space: nowrap;
+  transition: background 60ms linear, color 60ms linear;
 }
 .vsc-button:hover:not(:disabled) {
-  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+  background: var(--vscode-foreground);
+  color: var(--vscode-editor-background);
 }
-.vsc-button:active:not(:disabled) { transform: translateY(1px); }
-.vsc-button:disabled { opacity: 0.45; cursor: default; }
+.vsc-button:disabled { opacity: 0.35; cursor: default; }
 .vsc-button.primary {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border-color: transparent;
-  font-weight: 600;
+  background: var(--vscode-foreground);
+  color: var(--vscode-editor-background);
 }
-.vsc-button.primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+.vsc-button.primary:hover:not(:disabled) {
+  background: transparent;
+  color: var(--vscode-foreground);
+}
 .vsc-button.warning {
-  background: var(--vscode-statusBarItem-warningBackground, #cca700);
-  color: var(--vscode-statusBarItem-warningForeground, #000);
-  border-color: transparent;
+  border-color: var(--vscode-charts-yellow, #cca700);
+  color: var(--vscode-charts-yellow, #cca700);
+}
+.vsc-button.warning:hover:not(:disabled) {
+  background: var(--vscode-charts-yellow, #cca700);
+  color: var(--vscode-editor-background, #000);
 }
 .vsc-button.danger {
-  background: var(--vscode-statusBarItem-errorBackground, #f44747);
-  color: var(--vscode-statusBarItem-errorForeground, #fff);
-  border-color: transparent;
+  border-color: var(--vscode-errorForeground, #f44747);
+  color: var(--vscode-errorForeground, #f44747);
 }
-.vsc-button.small { padding: 2px 8px; font-size: 10.5px; }
+.vsc-button.danger:hover:not(:disabled) {
+  background: var(--vscode-errorForeground, #f44747);
+  color: var(--vscode-editor-background, #fff);
+}
+.vsc-button.small { padding: 1px 6px; font-size: 9.5px; letter-spacing: 0.08em; }
 .vsc-button.cta {
-  position: relative;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   font-size: 11px;
   padding: 6px 14px;
-}
-.vsc-button.cta::before {
-  content: ''; position: absolute; inset: 0; border-radius: 2px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent 60%);
-  pointer-events: none;
+  font-weight: 700;
+  letter-spacing: 0.16em;
 }
 
-/* ─── Status dot — pulsing when active ────────────────────────────── */
+/* ─── Status dot — solid square swatch (brutalist) ──────────────── */
 .status-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block;
+  width: 8px; height: 8px;
   background: var(--vscode-descriptionForeground);
-  position: relative;
   flex-shrink: 0;
+  position: relative;
 }
 .status-dot.running {
   background: var(--vscode-charts-green, #4ec9b0);
 }
 .status-dot.running::after {
-  content: ''; position: absolute; inset: -3px; border-radius: 50%;
-  background: var(--vscode-charts-green, #4ec9b0);
-  opacity: 0.4;
-  animation: dot-pulse 1.8s ease-in-out infinite;
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 1px solid var(--vscode-charts-green, #4ec9b0);
+  opacity: 0.5;
+  animation: dot-blink 1.6s steps(2, end) infinite;
 }
 .status-dot.idle {
   background: var(--vscode-charts-red, #f44747);
-  opacity: 0.55;
+  opacity: 0.7;
 }
-@keyframes dot-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.35; }
-  50% { transform: scale(1.6); opacity: 0; }
+@keyframes dot-blink {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .status-dot.running::after { animation: none; opacity: 0.25; }
+  .status-dot.running::after { animation: none; opacity: 0.3; }
 }
 
-/* ─── Environment pill ────────────────────────────────────────────── */
+/* ─── Environment pill — sharp box with vertical status rail ────── */
 .env-pill {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px;
-  border-radius: 3px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border, #4f4f4f));
-  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
-  font-size: 11.5px;
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
+  background: var(--vscode-input-background);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
   position: relative;
-  overflow: hidden;
 }
 .env-pill::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
   background: var(--vscode-descriptionForeground);
-  opacity: 0.5;
 }
-.env-pill.on::before { background: var(--vscode-charts-green, #4ec9b0); opacity: 1; }
-.env-pill.off::before { background: var(--vscode-charts-red, #f44747); opacity: 0.55; }
+.env-pill.on::before { background: var(--vscode-charts-green, #4ec9b0); }
+.env-pill.off::before { background: var(--vscode-errorForeground, #f44747); }
 .env-pill .env-name {
-  font-weight: 600;
-  color: var(--vscode-foreground);
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .env-pill .env-meta {
   color: var(--vscode-descriptionForeground);
   margin-left: auto;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10.5px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
 }
 
-/* ─── Account list ────────────────────────────────────────────────── */
-.accounts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1px; }
+/* ─── Account list ──────────────────────────────────────────────── */
+.accounts-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0; }
 .account-row {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 5px 8px;
-  border-radius: 2px;
+  padding: 4px 8px;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
   cursor: pointer;
-  border-left: 2px solid transparent;
-  transition: background 80ms ease, border-color 80ms ease;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+  transition: background 80ms linear, border-color 80ms linear;
 }
 .account-row:hover {
   background: var(--vscode-list-hoverBackground);
@@ -1137,25 +1203,45 @@ body {
 .account-row.selected {
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground);
-  border-left-color: var(--vscode-list-activeSelectionForeground);
+  border-left-color: var(--vscode-charts-green, #4ec9b0);
 }
+.account-row:last-child { border-bottom: none; }
 .account-row .address { font-family: var(--vscode-editor-font-family, monospace); }
 .address { font-family: var(--vscode-editor-font-family, monospace); }
 
+/* ─── Balance chip — square swatch ──────────────────────────────── */
 .balance-chip {
   display: inline-flex; align-items: center;
   padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--vscode-badge-background, var(--vscode-input-background));
-  color: var(--vscode-badge-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-foreground);
+  background: transparent;
+  color: var(--vscode-foreground);
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   white-space: nowrap;
+  text-transform: uppercase;
 }
+.balance-chip.fetching {
+  border-color: var(--vscode-charts-yellow, #cca700);
+  color: var(--vscode-charts-yellow, #cca700);
+  animation: chip-pulse 1.2s steps(2, end) infinite;
+}
+.balance-chip.error {
+  border-color: var(--vscode-errorForeground, #f44747);
+  color: var(--vscode-errorForeground, #f44747);
+  font-weight: 700;
+  width: 16px;
+  justify-content: center;
+}
+@keyframes chip-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .balance-chip.fetching { animation: none; } }
 
-/* Generic icon-button base — scoped variants in instance-header / account-chip override */
+/* ─── Generic icon button ───────────────────────────────────────── */
 .icon-btn {
   background: transparent;
   color: var(--vscode-icon-foreground, var(--vscode-foreground));
@@ -1163,185 +1249,148 @@ body {
   padding: 1px 5px;
   cursor: pointer;
   opacity: 0.55;
-  border-radius: 2px;
+  border-radius: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
-  font-family: inherit;
+  font-weight: 600;
   line-height: 1;
-  transition: opacity 100ms ease, background 100ms ease, color 100ms ease;
+  transition: opacity 80ms linear, border-color 80ms linear, color 80ms linear, background 80ms linear;
 }
 .icon-btn:hover {
   opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  border-color: var(--vscode-foreground);
 }
 .icon-btn.row-copy { font-size: 10.5px; }
 
-/* ─── Active account chip ─────────────────────────────────────────── */
+/* ─── Active account chip — bordered with vertical rail ─────────── */
 .account-chip {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px;
-  border-radius: 3px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border, #4f4f4f));
-  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
-  font-size: 11.5px;
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
+  background: var(--vscode-input-background);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
   position: relative;
   overflow: hidden;
   min-width: 0;
 }
 .account-chip::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
   background: var(--vscode-descriptionForeground);
-  opacity: 0.5;
 }
-.account-chip.on::before { background: var(--vscode-charts-green, #4ec9b0); opacity: 1; }
-.account-chip.locked::before { background: var(--vscode-charts-yellow, #cca700); opacity: 1; }
+.account-chip.on::before { background: var(--vscode-charts-green, #4ec9b0); }
+.account-chip.locked::before { background: var(--vscode-charts-yellow, #cca700); }
 .account-chip .chip-icon { font-size: 11px; flex-shrink: 0; }
 .account-chip .chip-name {
-  font-weight: 600;
-  color: var(--vscode-foreground);
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
+  font-size: 10.5px;
   flex-shrink: 0;
-  max-width: 80px;
+  max-width: 88px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .account-chip .chip-addr {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 10.5px;
   color: var(--vscode-descriptionForeground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   flex: 1;
   min-width: 0;
-  transition: color 100ms ease;
 }
-.account-chip .chip-addr:hover { color: var(--vscode-foreground); }
 .account-chip .chip-bal {
   margin-left: auto;
   padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--vscode-badge-background, var(--vscode-input-background));
-  color: var(--vscode-badge-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-foreground);
+  color: var(--vscode-foreground);
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
   flex-shrink: 0;
 }
 .account-chip .chip-bal.fetching {
-  opacity: 0.6;
-  animation: chip-pulse 1.2s ease-in-out infinite;
-  font-weight: 500;
+  border-color: var(--vscode-charts-yellow, #cca700);
+  color: var(--vscode-charts-yellow, #cca700);
+  animation: chip-pulse 1.2s steps(2, end) infinite;
 }
 .account-chip .chip-bal.error {
-  background: var(--vscode-inputValidation-errorBackground, rgba(244,71,71,0.15));
+  border-color: var(--vscode-errorForeground, #f44747);
   color: var(--vscode-errorForeground, #f44747);
-  font-weight: 500;
-}
-.account-chip .icon-btn {
-  background: transparent;
-  color: var(--vscode-icon-foreground, var(--vscode-foreground));
-  border: 1px solid transparent;
-  padding: 2px 6px;
-  cursor: pointer;
-  opacity: 0.55;
-  border-radius: 2px;
-  font-size: 11px;
-  transition: opacity 100ms ease, background 100ms ease;
-  flex-shrink: 0;
-}
-.account-chip .icon-btn:hover {
-  opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
-}
-.balance-chip.fetching {
-  opacity: 0.6;
-  animation: chip-pulse 1.2s ease-in-out infinite;
-}
-.balance-chip.error {
-  background: var(--vscode-inputValidation-errorBackground, rgba(244,71,71,0.15));
-  color: var(--vscode-errorForeground, #f44747);
-  font-weight: 700;
-  width: 14px;
-  justify-content: center;
-}
-@keyframes chip-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .balance-chip.fetching { animation: none; }
 }
 
-/* ─── Contract tree ───────────────────────────────────────────────── */
+/* ─── Contract tree ─────────────────────────────────────────────── */
 .contract-tree {
-  display: flex; flex-direction: column; gap: 4px;
-  background: var(--vscode-textCodeBlock-background, transparent);
-  border: 1px solid var(--vscode-editorWidget-border, transparent);
-  border-radius: 3px;
-  padding: 4px;
+  display: flex; flex-direction: column; gap: 0;
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
+  padding: 0;
 }
 .proj-group {
-  border-radius: 2px;
-  overflow: hidden;
+  border-bottom: 1px solid var(--vscode-foreground);
 }
-.proj-group + .proj-group {
-  margin-top: 2px;
-  border-top: 1px dashed var(--vscode-editorWidget-border, transparent);
-  padding-top: 2px;
-}
+.proj-group:last-child { border-bottom: none; }
 .proj-header {
   display: flex; align-items: center; gap: 6px;
-  padding: 5px 6px;
+  padding: 5px 8px;
   cursor: pointer; user-select: none;
-  border-radius: 2px;
-  transition: background 80ms ease;
+  background: var(--vscode-sideBarSectionHeader-background, transparent);
+  transition: background 60ms linear;
 }
 .proj-header:hover { background: var(--vscode-list-hoverBackground); }
 .proj-header .proj-name {
-  font-weight: 600;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
   color: var(--vscode-foreground);
-  letter-spacing: 0.01em;
 }
 .proj-header .proj-tag {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 9.5px;
+  font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 1px 6px;
-  border-radius: 2px;
-  background: var(--vscode-badge-background, var(--vscode-input-background));
-  color: var(--vscode-badge-foreground, var(--vscode-descriptionForeground));
-  opacity: 0.85;
+  letter-spacing: 0.12em;
+  padding: 1px 5px;
+  border: 1px solid var(--vscode-descriptionForeground);
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
 }
 .proj-header .proj-count {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--vscode-descriptionForeground);
+  letter-spacing: 0.04em;
 }
-.dir-group { padding-left: 10px; }
+.dir-group {
+  padding: 0;
+  border-top: 1px dashed var(--vscode-editorWidget-border, transparent);
+}
 .dir-header {
   display: flex; align-items: center; gap: 4px;
-  padding: 3px 6px;
+  padding: 3px 10px;
   color: var(--vscode-descriptionForeground);
   cursor: pointer; user-select: none;
-  border-radius: 2px;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  transition: background 80ms ease;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: transparent;
+  transition: background 60ms linear, color 60ms linear;
 }
 .dir-header:hover { background: var(--vscode-list-hoverBackground); color: var(--vscode-foreground); }
-.contract-list { list-style: none; padding: 0; margin: 0 0 0 18px; }
+.contract-list { list-style: none; padding: 0; margin: 0; }
 .contract-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 3px 6px;
-  border-radius: 2px;
+  padding: 3px 8px 3px 20px;
   cursor: pointer;
-  font-size: 12px;
-  border-left: 2px solid transparent;
-  transition: background 80ms ease, border-color 80ms ease;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  border-left: 3px solid transparent;
+  transition: background 60ms linear, border-color 60ms linear;
   min-width: 0;
 }
 .contract-row:hover {
@@ -1351,107 +1400,119 @@ body {
 .contract-row.selected {
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground);
-  border-left-color: var(--vscode-list-activeSelectionForeground);
+  border-left-color: var(--vscode-charts-green, #4ec9b0);
 }
 .contract-row .contract-name {
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .contract-row .file-suffix {
   margin-left: auto;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--vscode-descriptionForeground);
   opacity: 0.7;
   flex-shrink: 0;
 }
 .caret {
-  width: 12px;
+  width: 10px;
   text-align: center;
   color: var(--vscode-descriptionForeground);
   font-size: 9px;
   opacity: 0.7;
   flex-shrink: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
 }
 
+/* ─── Build badges — solid color swatches ───────────────────────── */
 .build-badge {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 14px; height: 14px;
-  text-align: center; font-size: 10px;
-  border-radius: 50%;
+  width: 11px; height: 11px;
+  text-align: center; font-size: 9px;
+  background: transparent;
   flex-shrink: 0;
+  border: 1px solid transparent;
 }
-.build-badge.badge-ok { color: var(--vscode-charts-green, #4ec9b0); }
-.build-badge.badge-err { color: var(--vscode-errorForeground, #f44747); }
+.build-badge.badge-ok {
+  background: var(--vscode-charts-green, #4ec9b0);
+  color: var(--vscode-editor-background, #000);
+  border-color: var(--vscode-charts-green, #4ec9b0);
+}
+.build-badge.badge-err {
+  background: var(--vscode-errorForeground, #f44747);
+  color: var(--vscode-editor-background, #fff);
+  border-color: var(--vscode-errorForeground, #f44747);
+}
 .build-badge.badge-info {
   color: var(--vscode-charts-yellow, #cca700);
+  border-color: var(--vscode-charts-yellow, #cca700);
   animation: badge-spin 1.4s linear infinite;
 }
-.build-badge.badge-muted { color: var(--vscode-descriptionForeground); opacity: 0.6; }
-@keyframes badge-spin {
-  to { transform: rotate(360deg); }
+.build-badge.badge-muted {
+  color: var(--vscode-descriptionForeground);
+  border-color: var(--vscode-descriptionForeground);
+  opacity: 0.6;
+  background: transparent;
 }
+@keyframes badge-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .build-badge.badge-info { animation: none; } }
 
-/* ─── Selected contract chip + value/gas row ──────────────────────── */
+/* ─── Selected contract chip + value/gas row ────────────────────── */
 .selected-chip {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px;
   background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
-  border: 1px solid var(--vscode-editorWidget-border, transparent);
-  border-radius: 2px;
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11.5px;
-  position: relative;
+  font-size: 11px;
 }
 .selected-chip::before {
   content: '▸';
   color: var(--vscode-charts-green, #4ec9b0);
-  font-size: 9px;
-  opacity: 0.7;
+  font-size: 10px;
 }
 .selected-chip .selected-name {
-  font-weight: 600;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--vscode-foreground);
 }
 .selected-chip .selected-path {
   color: var(--vscode-descriptionForeground);
-  font-size: 10px;
+  font-size: 9.5px;
   margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* ─── Instance card ───────────────────────────────────────────────── */
+/* ─── Instance card — bordered with status rail ─────────────────── */
 .instance-card {
-  border: 1px solid var(--vscode-editorWidget-border, transparent);
-  border-radius: 4px;
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
   background: var(--vscode-editor-background);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   overflow: hidden;
-  transition: border-color 120ms ease, transform 120ms ease;
   position: relative;
 }
 .instance-card::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
   background: var(--vscode-charts-green, #4ec9b0);
-  opacity: 0;
-  transition: opacity 120ms ease;
 }
-.instance-card:hover {
-  border-color: var(--vscode-focusBorder);
-}
-.instance-card:hover::before { opacity: 0.6; }
 .instance-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 8px 6px 12px;
   cursor: pointer; user-select: none;
   background: var(--vscode-sideBarSectionHeader-background, transparent);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
 }
 .instance-header:hover { background: var(--vscode-list-hoverBackground); }
 .instance-header .name {
-  font-weight: 600;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--vscode-foreground);
-  letter-spacing: 0.01em;
   flex-shrink: 0;
 }
 .instance-header .at-divider {
@@ -1462,38 +1523,22 @@ body {
 }
 .instance-header .addr {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--vscode-descriptionForeground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .instance-header .icon-btn {
-  background: transparent;
-  color: var(--vscode-icon-foreground, var(--vscode-foreground));
-  border: 1px solid transparent;
-  padding: 2px 6px;
-  cursor: pointer;
   opacity: 0.55;
-  border-radius: 2px;
-  font-size: 11px;
-  transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease;
   flex-shrink: 0;
 }
-.instance-header .icon-btn:hover {
-  opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
-  border-color: var(--vscode-editorWidget-border, transparent);
-}
 .instance-body {
-  padding: 8px 10px;
+  padding: 8px 10px 8px 12px;
   display: flex; flex-direction: column; gap: 4px;
-  border-top: 1px solid var(--vscode-editorWidget-border, transparent);
-}
-.instance-body > * + * {
-  padding-top: 4px;
-  border-top: 1px dashed transparent;
+  border-top: 1px solid var(--vscode-foreground);
+  background: var(--vscode-input-background);
 }
 
-/* ─── Function rows ───────────────────────────────────────────────── */
+/* ─── Function rows ─────────────────────────────────────────────── */
 .fn-row {
   display: flex; gap: 4px;
   align-items: stretch;
@@ -1507,53 +1552,74 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 0;
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  border-radius: 0;
 }
 .fn-row .fn-btn.view {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border-color: transparent;
+  background: var(--vscode-charts-blue, #3794ff);
+  color: var(--vscode-editor-background, #fff);
+  border-color: var(--vscode-charts-blue, #3794ff);
 }
-.fn-row .fn-btn.view:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+.fn-row .fn-btn.view:hover:not(:disabled) {
+  background: transparent;
+  color: var(--vscode-charts-blue, #3794ff);
+}
 .fn-row .fn-btn.send {
-  background: var(--vscode-statusBarItem-warningBackground, #cca700);
-  color: var(--vscode-statusBarItem-warningForeground, #000);
-  border-color: transparent;
+  background: var(--vscode-charts-yellow, #cca700);
+  color: var(--vscode-editor-background, #000);
+  border-color: var(--vscode-charts-yellow, #cca700);
+}
+.fn-row .fn-btn.send:hover:not(:disabled) {
+  background: transparent;
+  color: var(--vscode-charts-yellow, #cca700);
 }
 .fn-row .fn-btn.payable {
-  background: var(--vscode-statusBarItem-errorBackground, #f44747);
-  color: var(--vscode-statusBarItem-errorForeground, #fff);
-  border-color: transparent;
+  background: var(--vscode-errorForeground, #f44747);
+  color: var(--vscode-editor-background, #fff);
+  border-color: var(--vscode-errorForeground, #f44747);
 }
-.fn-row .fn-inline { flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family, monospace); }
+.fn-row .fn-btn.payable:hover:not(:disabled) {
+  background: transparent;
+  color: var(--vscode-errorForeground, #f44747);
+}
+.fn-row .fn-inline {
+  flex: 1; min-width: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
 .fn-row .caret-toggle {
   background: transparent;
-  border: 1px solid var(--vscode-input-border, transparent);
-  color: var(--vscode-descriptionForeground);
-  padding: 2px 6px;
-  border-radius: 2px;
+  border: 1px solid var(--vscode-foreground);
+  color: var(--vscode-foreground);
+  padding: 2px 5px;
+  border-radius: 0;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 9px;
   flex-shrink: 0;
 }
-.fn-row .caret-toggle:hover { border-color: var(--vscode-focusBorder); color: var(--vscode-foreground); }
+.fn-row .caret-toggle:hover {
+  background: var(--vscode-foreground);
+  color: var(--vscode-editor-background);
+}
 .fn-expanded {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 6px 6px 6px 8px;
-  border-left: 2px solid var(--vscode-editorWidget-border, transparent);
-  margin: 4px 0 6px 6px;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 6px 6px 6px 10px;
+  border-left: 3px solid var(--vscode-foreground);
+  margin: 4px 0 4px 4px;
   background: var(--vscode-textCodeBlock-background, transparent);
-  border-radius: 0 2px 2px 0;
 }
 .fn-expanded .arg-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .fn-expanded .arg-label {
-  min-width: 80px;
-  max-width: 110px;
-  font-size: 10.5px;
+  min-width: 70px;
+  max-width: 100px;
+  font-size: 10px;
   color: var(--vscode-descriptionForeground);
   font-family: var(--vscode-editor-font-family, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   flex-shrink: 0;
 }
@@ -1561,12 +1627,12 @@ body {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 10.5px;
   background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
-  padding: 4px 8px;
-  border-radius: 2px;
+  padding: 4px 6px;
   margin: 2px 0;
   white-space: pre-wrap;
   word-break: break-all;
-  border-left: 2px solid var(--vscode-editorWidget-border, transparent);
+  border: 1px solid var(--vscode-editorWidget-border, transparent);
+  border-left-width: 3px;
 }
 .fn-result.error {
   color: var(--vscode-errorForeground);
@@ -1576,39 +1642,39 @@ body {
   border-left-color: var(--vscode-charts-green, #4ec9b0);
 }
 
-/* ─── Low-level interactions sub-block ────────────────────────────── */
+/* ─── Low-level interactions ────────────────────────────────────── */
 .lowlevel {
   margin-top: 8px;
   padding: 8px 0 0;
-  border-top: 1px dashed var(--vscode-editorWidget-border, transparent);
+  border-top: 1px dashed var(--vscode-foreground);
 }
 .lowlevel .ll-title {
   display: flex; align-items: center; gap: 6px;
-  font-size: 9.5px;
+  font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--vscode-descriptionForeground);
+  letter-spacing: 0.14em;
+  color: var(--vscode-foreground);
   margin-bottom: 6px;
   font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 700;
 }
 .lowlevel .ll-title::before {
-  content: '⌁';
+  content: '◢';
   color: var(--vscode-charts-yellow, #cca700);
-  font-size: 11px;
+  font-size: 9px;
 }
 
-/* ─── Tx Log — the centerpiece ────────────────────────────────────── */
+/* ─── Tx log — Remix-style receipts ─────────────────────────────── */
 .tx-log {
   display: flex; flex-direction: column;
-  gap: 3px;
-  max-height: 320px;
+  gap: 4px;
+  max-height: 360px;
   overflow-y: auto;
   padding-right: 2px;
 }
 .tx-log::-webkit-scrollbar { width: 6px; }
 .tx-log::-webkit-scrollbar-thumb {
   background: var(--vscode-scrollbarSlider-background, rgba(128,128,128,0.3));
-  border-radius: 3px;
 }
 .tx-log::-webkit-scrollbar-thumb:hover {
   background: var(--vscode-scrollbarSlider-hoverBackground, rgba(128,128,128,0.5));
@@ -1616,28 +1682,21 @@ body {
 
 .tx-entry {
   position: relative;
-  display: flex; flex-direction: column;
-  padding: 6px 8px 6px 14px;
-  border-radius: 3px;
-  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
-  border: 1px solid transparent;
-  font-size: 11px;
-  animation: tx-enter 180ms ease-out;
-  transition: border-color 100ms ease;
-  min-width: 0;
-}
-.tx-entry:hover {
-  border-color: var(--vscode-editorWidget-border, transparent);
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
+  background: var(--vscode-input-background);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  animation: tx-enter 140ms steps(3, end);
 }
 @keyframes tx-enter {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: translateY(-2px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .tx-entry::before {
   content: '';
   position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
   background: var(--vscode-descriptionForeground);
-  border-radius: 3px 0 0 3px;
 }
 .tx-entry.pending::before {
   background: linear-gradient(
@@ -1647,7 +1706,7 @@ body {
     var(--vscode-charts-yellow, #cca700) 100%
   );
   background-size: 100% 200%;
-  animation: rail-scan 1.2s ease-in-out infinite;
+  animation: rail-scan 1.2s linear infinite;
 }
 .tx-entry.success::before { background: var(--vscode-charts-green, #4ec9b0); }
 .tx-entry.reverted::before, .tx-entry.error::before {
@@ -1664,40 +1723,38 @@ body {
 
 .tx-head {
   display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px 5px 12px;
   min-width: 0;
+  cursor: pointer;
+  user-select: none;
 }
+.tx-head:hover { background: var(--vscode-list-hoverBackground); }
 .tx-kind {
   display: inline-flex; align-items: center;
   padding: 1px 5px;
-  border-radius: 2px;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   flex-shrink: 0;
+  border: 1px solid currentColor;
+  background: transparent;
 }
-.tx-kind.kind-deploy {
-  background: var(--vscode-charts-blue, #3794ff);
-  color: var(--vscode-button-foreground, #fff);
-}
-.tx-kind.kind-send {
-  background: var(--vscode-charts-yellow, #cca700);
-  color: #000;
-}
-.tx-kind.kind-call {
-  background: var(--vscode-charts-purple, #b180d7);
-  color: var(--vscode-button-foreground, #fff);
-}
+.tx-kind.kind-deploy { color: var(--vscode-charts-blue, #3794ff); }
+.tx-kind.kind-send   { color: var(--vscode-charts-yellow, #cca700); }
+.tx-kind.kind-call   { color: var(--vscode-charts-purple, #b180d7); }
+
 .tx-status-icon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 12px; height: 12px;
+  width: 11px; height: 11px;
   font-size: 10px;
   flex-shrink: 0;
 }
-.tx-status-icon.s-success { color: var(--vscode-charts-green, #4ec9b0); }
-.tx-status-icon.s-reverted, .tx-status-icon.s-error { color: var(--vscode-errorForeground, #f44747); }
-.tx-status-icon.s-pending {
+.tx-status-icon.s-success  { color: var(--vscode-charts-green, #4ec9b0); }
+.tx-status-icon.s-reverted,
+.tx-status-icon.s-error    { color: var(--vscode-errorForeground, #f44747); }
+.tx-status-icon.s-pending  {
   color: var(--vscode-charts-yellow, #cca700);
   animation: spin 1.4s linear infinite;
 }
@@ -1706,142 +1763,189 @@ body {
 
 .tx-label {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--vscode-foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0;
   flex: 1;
+  font-size: 11px;
 }
 .tx-label .label-fn { color: var(--vscode-charts-green, #4ec9b0); }
-.tx-label .label-ctor { color: var(--vscode-charts-blue, #3794ff); font-style: italic; }
+.tx-label .label-ctor {
+  color: var(--vscode-charts-blue, #3794ff);
+  text-transform: lowercase;
+  font-style: italic;
+}
 .tx-time {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--vscode-descriptionForeground);
   opacity: 0.7;
   flex-shrink: 0;
+  letter-spacing: 0.04em;
 }
-
-.tx-meta {
-  display: flex; flex-wrap: wrap; gap: 4px 10px;
-  margin-top: 4px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  color: var(--vscode-descriptionForeground);
-  align-items: center;
-}
-.tx-meta .meta-item {
-  display: inline-flex; align-items: baseline; gap: 3px;
-}
-.tx-meta .meta-key {
-  opacity: 0.55;
+.tx-expand-caret {
   font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.tx-meta .meta-val { color: var(--vscode-foreground); opacity: 0.85; }
-.tx-meta .meta-hash {
-  font-size: 9.5px;
-  opacity: 0.75;
-  cursor: help;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+  margin-left: 2px;
 }
 
-.tx-events {
-  display: flex; flex-wrap: wrap; gap: 3px;
-  margin-top: 5px;
-}
-.tx-event {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 1px 6px 1px 5px;
-  background: var(--vscode-badge-background, var(--vscode-input-background));
-  color: var(--vscode-badge-foreground, var(--vscode-foreground));
-  border-radius: 8px;
+/* Definition-list body for expanded tx entries */
+.tx-body {
+  border-top: 1px dashed var(--vscode-foreground);
+  padding: 6px 10px 8px 12px;
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 3px 8px;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 9.5px;
-  font-weight: 500;
-  opacity: 0.9;
+  font-size: 10.5px;
 }
-.tx-event::before {
-  content: '';
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: var(--vscode-charts-green, #4ec9b0);
+.tx-body .dt {
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding-top: 1px;
+}
+.tx-body .dd {
+  color: var(--vscode-foreground);
+  min-width: 0;
+  word-break: break-all;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tx-body .dd .copy-inline {
+  opacity: 0.4;
+  font-size: 10px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0 2px;
   flex-shrink: 0;
 }
-
-.tx-error {
-  margin-top: 5px;
-  padding: 4px 6px;
-  border-radius: 2px;
-  background: var(--vscode-inputValidation-errorBackground, rgba(244,71,71,0.08));
-  border-left: 2px solid var(--vscode-errorForeground, #f44747);
-  color: var(--vscode-errorForeground, #f44747);
+.tx-body .dd .copy-inline:hover { opacity: 1; }
+.tx-body .dd .addr-pill {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10.5px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.4;
+  background: transparent;
+  border: 1px dashed var(--vscode-descriptionForeground);
+  padding: 1px 5px;
+  font-size: 10px;
 }
+.tx-body .dd.dd-address-deploy {
+  font-weight: 700;
+  color: var(--vscode-charts-green, #4ec9b0);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.tx-body .dd.dd-gas { color: var(--vscode-foreground); }
+.tx-body .dd.dd-status { font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.tx-body .dd.dd-status.s-success  { color: var(--vscode-charts-green, #4ec9b0); }
+.tx-body .dd.dd-status.s-reverted,
+.tx-body .dd.dd-status.s-error    { color: var(--vscode-errorForeground, #f44747); }
+.tx-body .dd.dd-status.s-pending  { color: var(--vscode-charts-yellow, #cca700); }
 
-.tx-return {
-  margin-top: 5px;
-  padding: 4px 6px;
-  border-radius: 2px;
-  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
-  border-left: 2px solid var(--vscode-charts-green, #4ec9b0);
+/* Sub-section dividers inside expanded body — full-row spans */
+.tx-section {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--vscode-foreground);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--vscode-foreground);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tx-section::before {
+  content: '┼';
+  color: var(--vscode-charts-green, #4ec9b0);
+  opacity: 0.7;
+}
+.tx-section.section-events::before { color: var(--vscode-charts-blue, #3794ff); }
+.tx-section.section-revert::before { color: var(--vscode-errorForeground, #f44747); content: '✕'; }
+.tx-section.section-return::before { color: var(--vscode-charts-green, #4ec9b0); content: '→'; }
+.tx-section.section-state::before  { color: var(--vscode-charts-yellow, #cca700); }
+
+.tx-event-line {
+  grid-column: 1 / -1;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 10.5px;
+  background: var(--vscode-textCodeBlock-background, transparent);
+  padding: 3px 8px;
+  border-left: 2px solid var(--vscode-charts-blue, #3794ff);
   white-space: pre-wrap;
   word-break: break-all;
 }
+.tx-event-line .ev-name {
+  color: var(--vscode-charts-blue, #3794ff);
+  font-weight: 700;
+}
+.tx-event-line .ev-args { color: var(--vscode-foreground); opacity: 0.85; }
+.tx-event-line .ev-arg-key { color: var(--vscode-descriptionForeground); opacity: 0.7; }
 
-/* ─── Tx log empty state ──────────────────────────────────────────── */
+.tx-return-block,
+.tx-revert-block {
+  grid-column: 1 / -1;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  padding: 4px 8px;
+  background: var(--vscode-textCodeBlock-background, transparent);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.tx-return-block { border-left: 2px solid var(--vscode-charts-green, #4ec9b0); }
+.tx-revert-block {
+  border-left: 2px solid var(--vscode-errorForeground, #f44747);
+  color: var(--vscode-errorForeground, #f44747);
+}
+
+/* ─── Tx log empty state — brutalist abstract glyph ─────────────── */
 .tx-empty {
   display: flex; flex-direction: column; align-items: center;
   gap: 10px;
-  padding: 28px 12px 24px;
+  padding: 22px 12px 18px;
   color: var(--vscode-descriptionForeground);
   text-align: center;
+  border: 1px dashed var(--vscode-foreground);
+  background: transparent;
 }
 .tx-empty .empty-glyph {
-  width: 56px; height: 56px;
-  opacity: 0.45;
-}
-.tx-empty .empty-glyph circle.outer { animation: empty-pulse 3s ease-in-out infinite; transform-origin: center; }
-.tx-empty .empty-glyph circle.mid   { animation: empty-pulse 3s ease-in-out 0.3s infinite; transform-origin: center; }
-.tx-empty .empty-glyph circle.inner { animation: empty-pulse 3s ease-in-out 0.6s infinite; transform-origin: center; }
-@keyframes empty-pulse {
-  0%, 100% { opacity: 0.5; r: var(--r, 8); }
-  50% { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tx-empty .empty-glyph circle { animation: none; }
+  width: 48px; height: 48px;
+  opacity: 0.55;
 }
 .tx-empty .empty-title {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
+  font-size: 9.5px;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
-  opacity: 0.7;
+  letter-spacing: 0.2em;
+  font-weight: 700;
 }
 .tx-empty .empty-hint {
-  font-size: 10.5px;
-  opacity: 0.55;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 9.5px;
+  opacity: 0.6;
   max-width: 220px;
+  letter-spacing: 0.04em;
 }
 
-/* ─── Error banner ────────────────────────────────────────────────── */
+/* ─── Error banner ──────────────────────────────────────────────── */
 .error-banner {
   background: var(--vscode-inputValidation-errorBackground, rgba(244,71,71,0.08));
   color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground, #f44747));
-  border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground, #be1100));
+  border: 1px solid var(--vscode-errorForeground, #be1100);
   border-left-width: 3px;
-  padding: 8px 10px;
-  border-radius: 2px;
-  font-size: 11.5px;
+  padding: 6px 10px;
+  font-size: 10.5px;
   display: flex; gap: 8px; align-items: flex-start;
   font-family: var(--vscode-editor-font-family, monospace);
-  line-height: 1.45;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1850,78 +1954,56 @@ body {
   flex-shrink: 0;
   font-weight: 700;
   color: var(--vscode-errorForeground, #f44747);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
-  padding-top: 1px;
+  padding-top: 0;
 }
 
-/* ─── Panel footer ────────────────────────────────────────────────── */
+/* ─── Footer ─────────────────────────────────────────────────────── */
 .panel-footer {
   position: relative;
   display: flex; align-items: center; gap: 6px;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
+  font-size: 9px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  padding-top: 10px;
+  padding: 6px 0 0;
+  margin-top: 4px;
   color: var(--vscode-descriptionForeground);
-  opacity: 0.65;
-}
-.panel-footer::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-  background: linear-gradient(
-    to right,
-    transparent,
-    var(--vscode-panel-border, var(--vscode-editorWidget-border, transparent)) 30%,
-    var(--vscode-panel-border, var(--vscode-editorWidget-border, transparent)) 70%,
-    transparent
-  );
-  opacity: 0.5;
+  opacity: 0.55;
+  border-top: 1px solid var(--vscode-descriptionForeground);
 }
 
-/* ─── Password modal ──────────────────────────────────────────────── */
+/* ─── Password modal ────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.6);
   display: flex; align-items: center; justify-content: center;
   padding: 12px; z-index: 1000;
-  animation: backdrop-fade 120ms ease-out;
+  animation: backdrop-fade 100ms linear;
 }
 @keyframes backdrop-fade { from { opacity: 0; } to { opacity: 1; } }
 .modal {
   background: var(--vscode-editor-background);
-  border: 1px solid var(--vscode-editorWidget-border, transparent);
-  border-top: 2px solid var(--vscode-charts-yellow, #cca700);
-  border-radius: 4px;
+  border: 1px solid var(--vscode-foreground);
+  border-top: 3px solid var(--vscode-charts-yellow, #cca700);
+  border-radius: 0;
   padding: 14px;
   width: 100%; max-width: 320px;
   display: flex; flex-direction: column; gap: 10px;
-  animation: modal-rise 160ms ease-out;
-}
-@keyframes modal-rise {
-  from { transform: translateY(8px); opacity: 0; }
-  to   { transform: translateY(0); opacity: 1; }
 }
 .modal h4 {
   margin: 0;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   color: var(--vscode-foreground);
-  display: flex; align-items: center; gap: 6px;
-}
-.modal h4::before {
-  content: '◆';
-  color: var(--vscode-charts-yellow, #cca700);
-  font-size: 9px;
 }
 
-/* ─── Loading skeleton ────────────────────────────────────────────── */
-.skel-stack { display: flex; flex-direction: column; gap: 12px; padding: 14px 12px; }
+/* ─── Loading skeleton ──────────────────────────────────────────── */
+.skel-stack { display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; }
 .skel-bar {
   background: linear-gradient(
     90deg,
@@ -1931,27 +2013,26 @@ body {
   );
   background-size: 200% 100%;
   animation: skel-shimmer 1.6s ease-in-out infinite;
-  border-radius: 2px;
+  border: 1px solid var(--vscode-foreground);
+  border-radius: 0;
   height: 12px;
 }
-.skel-bar.t  { height: 9px;  width: 30%; }
-.skel-bar.b  { height: 28px; width: 100%; }
-.skel-bar.s  { height: 14px; width: 70%; }
-.skel-bar.xs { height: 9px;  width: 45%; }
+.skel-bar.t  { height: 8px;  width: 30%; }
+.skel-bar.b  { height: 26px; width: 100%; }
+.skel-bar.s  { height: 12px; width: 70%; }
+.skel-bar.xs { height: 8px;  width: 45%; }
 @keyframes skel-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .skel-bar { animation: none; }
-}
+@media (prefers-reduced-motion: reduce) { .skel-bar { animation: none; } }
 
-/* ─── Narrow-width adjustments ────────────────────────────────────── */
+/* ─── Narrow-width tweaks ───────────────────────────────────────── */
 @media (max-width: 300px) {
-  .panel { padding: 10px 8px 12px; gap: 12px; }
-  .row-label { min-width: 56px; font-size: 10.5px; }
-  .vsc-button { padding: 4px 8px; }
-  .tx-meta { gap: 3px 8px; }
+  .panel { padding: 8px 6px 12px; gap: 12px; }
+  .row-label { min-width: 50px; font-size: 9.5px; }
+  .vsc-button { padding: 3px 8px; }
   .fn-row .fn-btn { min-width: 80px; max-width: 120px; }
+  .tx-body { grid-template-columns: 52px 1fr; gap: 2px 6px; }
 }
 `;

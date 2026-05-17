@@ -345,6 +345,16 @@ export interface TxLogEntry {
   errorMessage?: string;
   decodedEvents?: Array<{ name: string; args: Record<string, unknown> }>;
   returnValue?: unknown;
+  /** Address of the newly deployed contract (deploy entries only). */
+  deployedAddress?: string;
+  /** Sender / from-address — present for all entries we sign. */
+  fromAddress?: string;
+  /** Target contract address (send/call entries). */
+  toAddress?: string;
+  /** Value carried by the transaction, as a decimal-string wei amount. */
+  valueWei?: string;
+  /** Network identifier the tx ran on — anvil chain id, sepolia, etc. */
+  networkLabel?: string;
   at: number;          // epoch ms
 }
 

@@ -16,6 +16,7 @@ interface Props {
 }
 
 function shorten(addr: string): string {
+  if (!addr) return '— unlock to view';
   return addr.length < 14 ? addr : `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
@@ -190,7 +191,11 @@ export function AccountSection({ network, anvil, keystores, selection, bus }: Pr
           )}
           {keystores.length > 0 && (
             <ul className="accounts-list">
-              {keystores.map((ks) => {
+              {keystores
+                // The active keystore is already rendered as a prominent chip
+                // above — listing it again creates the "doubled row" the user hit.
+                .filter((k) => !(selection.kind === 'keystore' && selection.name === k.name))
+                .map((ks) => {
                 const isSel = selection.kind === 'keystore' && selection.name === ks.name;
                 const balanceText = ks.balance?.formatted;
                 const isFetching = ks.balanceStatus === 'fetching';
