@@ -527,7 +527,8 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     void this.sendEvent({
       kind: 'buildStarted',
       projectRoot,
-      command: kind === 'foundry' ? 'forge build' : kind === 'hardhat' ? 'npx hardhat compile' : '(unknown)',
+      // User-facing label; the actual command used is an implementation detail.
+      command: kind === 'hardhat' ? 'Compiling (Hardhat)' : kind === 'foundry' ? 'Compiling (Foundry)' : 'Compiling',
     });
 
     const result = await runBuild({
@@ -1098,6 +1099,108 @@ body {
   font-weight: 500;
   letter-spacing: 0.01em;
   white-space: nowrap;
+}
+
+/* Generic icon-button base — scoped variants in instance-header / account-chip override */
+.icon-btn {
+  background: transparent;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  border: 1px solid transparent;
+  padding: 1px 5px;
+  cursor: pointer;
+  opacity: 0.55;
+  border-radius: 2px;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+  transition: opacity 100ms ease, background 100ms ease, color 100ms ease;
+}
+.icon-btn:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+.icon-btn.row-copy { font-size: 10.5px; }
+
+/* ─── Active account chip ─────────────────────────────────────────── */
+.account-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border, #4f4f4f));
+  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
+  font-size: 11.5px;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+.account-chip::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  background: var(--vscode-descriptionForeground);
+  opacity: 0.5;
+}
+.account-chip.on::before { background: var(--vscode-charts-green, #4ec9b0); opacity: 1; }
+.account-chip.locked::before { background: var(--vscode-charts-yellow, #cca700); opacity: 1; }
+.account-chip .chip-icon { font-size: 11px; flex-shrink: 0; }
+.account-chip .chip-name {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  letter-spacing: 0.01em;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  flex-shrink: 0;
+  max-width: 80px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.account-chip .chip-addr {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  transition: color 100ms ease;
+}
+.account-chip .chip-addr:hover { color: var(--vscode-foreground); }
+.account-chip .chip-bal {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background, var(--vscode-input-background));
+  color: var(--vscode-badge-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.account-chip .chip-bal.fetching {
+  opacity: 0.6;
+  animation: chip-pulse 1.2s ease-in-out infinite;
+  font-weight: 500;
+}
+.account-chip .chip-bal.error {
+  background: var(--vscode-inputValidation-errorBackground, rgba(244,71,71,0.15));
+  color: var(--vscode-errorForeground, #f44747);
+  font-weight: 500;
+}
+.account-chip .icon-btn {
+  background: transparent;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  border: 1px solid transparent;
+  padding: 2px 6px;
+  cursor: pointer;
+  opacity: 0.55;
+  border-radius: 2px;
+  font-size: 11px;
+  transition: opacity 100ms ease, background 100ms ease;
+  flex-shrink: 0;
+}
+.account-chip .icon-btn:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
 }
 .balance-chip.fetching {
   opacity: 0.6;

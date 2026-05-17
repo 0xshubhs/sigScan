@@ -39,10 +39,10 @@ function basenameOf(p: string): string {
 
 function StateBadge({ state }: { state: ContractSummary['buildState'] }): JSX.Element {
   const labels: Record<ContractSummary['buildState'], { glyph: string; label: string; cls: string }> = {
-    'not-built': { glyph: '○', label: 'not built', cls: 'badge-muted' },
-    building: { glyph: '⏳', label: 'building', cls: 'badge-info' },
-    built: { glyph: '✓', label: 'built', cls: 'badge-ok' },
-    failed: { glyph: '✗', label: 'failed', cls: 'badge-err' },
+    'not-built': { glyph: '○', label: 'Not yet compiled', cls: 'badge-muted' },
+    building: { glyph: '⏳', label: 'Compiling…', cls: 'badge-info' },
+    built: { glyph: '✓', label: 'Compiled', cls: 'badge-ok' },
+    failed: { glyph: '✗', label: 'Compile failed', cls: 'badge-err' },
   };
   const b = labels[state];
   return <span className={`build-badge ${b.cls}`} title={b.label}>{b.glyph}</span>;
@@ -170,8 +170,13 @@ export function ContractsSection(props: Props): JSX.Element {
         <span className="right">
           <button className="vsc-button small" onClick={onRefresh} title="Re-scan the workspace">scan</button>
           {totalContracts > 0 && totalBuilt < totalContracts && (
-            <button className="vsc-button small primary" onClick={buildAll} disabled={anyBuilding}>
-              {anyBuilding ? 'Building…' : 'Build All'}
+            <button
+              className="vsc-button small primary"
+              onClick={buildAll}
+              disabled={anyBuilding}
+              title="Compile all unbuilt contracts in the workspace"
+            >
+              {anyBuilding ? 'Compiling…' : 'Compile All'}
             </button>
           )}
         </span>
@@ -179,7 +184,7 @@ export function ContractsSection(props: Props): JSX.Element {
 
       {totalContracts === 0 && (
         <div className="muted small">
-          No <span className="mono">.sol</span> files found in the workspace. Open a folder containing Solidity sources.
+          No <span className="mono">.sol</span> files found in the workspace. Open a folder containing Solidity sources to get started.
         </div>
       )}
 
@@ -205,9 +210,9 @@ export function ContractsSection(props: Props): JSX.Element {
                       e.stopPropagation();
                       buildProject(g.projectRoot);
                     }}
-                    title={g.projectType === 'foundry' ? 'forge build' : 'npx hardhat compile'}
+                    title={g.isBuilding ? 'Compiling…' : 'Compile this project'}
                   >
-                    {g.isBuilding ? '…' : 'build'}
+                    {g.isBuilding ? '…' : 'compile'}
                   </button>
                 </div>
 
@@ -261,10 +266,10 @@ export function ContractsSection(props: Props): JSX.Element {
           {selected.buildState !== 'built' && (
             <div className="muted small">
               {selected.buildState === 'building'
-                ? 'Building…'
+                ? 'Compiling…'
                 : selected.buildState === 'failed'
-                  ? `Build failed${selected.lastError ? `: ${selected.lastError}` : ''}`
-                  : 'Build this project to enable deploy.'}
+                  ? `Compile failed${selected.lastError ? ' — see Problems panel' : ''}`
+                  : 'Compile this project to enable deploy.'}
             </div>
           )}
 

@@ -24,8 +24,20 @@ export function AccountSection({ network, anvil, keystores, selection, bus }: Pr
   const [pwdFor, setPwdFor] = useState<string | null>(null);
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwdError, setPwdError] = useState<string | null>(null);
+  // Tracks the most-recently-copied address so we can flash a transient ✓ on
+  // the button that was clicked. Keyed by the address itself so the same chip
+  // and the inline keystore row can share feedback state.
+  const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
 
   const isAnvilMode = network.kind === 'anvil';
+
+  function copyAddress(address: string): void {
+    void navigator.clipboard.writeText(address);
+    setCopiedAddr(address);
+    setTimeout(() => {
+      setCopiedAddr((cur) => (cur === address ? null : cur));
+    }, 1200);
+  }
 
   async function selectAnvilAccount(index: number, address: string): Promise<void> {
     await bus.request({ kind: 'selectAccount', selection: { kind: 'anvil', index, address } });
@@ -58,6 +70,18 @@ export function AccountSection({ network, anvil, keystores, selection, bus }: Pr
     void bus.request({ kind: 'refreshKeystores' });
   }
 
+  // Resolve the currently active account for the prominent chip at the top of
+  // this section. For anvil mode, look it up by index; for keystore mode, find
+  // the matching entry (which carries balance/status fields).
+  const activeAnvilAccount =
+    selection.kind === 'anvil' && network.kind === 'anvil'
+      ? anvil.accounts[selection.index]
+      : null;
+  const activeKeystore =
+    selection.kind === 'keystore'
+      ? keystores.find((k) => k.name === selection.name)
+      : null;
+
   return (
     <section className="section">
       <h3 className="section-title">
@@ -69,6 +93,65 @@ export function AccountSection({ network, anvil, keystores, selection, bus }: Pr
           </span>
         )}
       </h3>
+
+      {/* Active account chip — always visible when an account is picked. Mirrors
+          the env-pill style so the active wallet is unmissable, especially right
+          after a keystore unlock. */}
+      {activeAnvilAccount && (
+        <div className="account-chip on">
+          <span className="chip-icon">⚡</span>
+          <span className="chip-name">#{(selection as { index: number }).index}</span>
+          <code className="chip-addr" title={activeAnvilAccount.address}>
+            {activeAnvilAccount.address}
+          </code>
+          <button
+            className="icon-btn"
+            title={copiedAddr === activeAnvilAccount.address ? 'Copied!' : 'Copy address'}
+            onClick={() => copyAddress(activeAnvilAccount.address)}
+          >
+            {copiedAddr === activeAnvilAccount.address ? '✓' : '⧉'}
+          </button>
+          <span className="chip-bal">{activeAnvilAccount.balance}</span>
+        </div>
+      )}
+      {activeKeystore && (
+        <div className={`account-chip ${activeKeystore.unlocked ? 'on' : 'locked'}`}>
+          <span className="chip-icon">{activeKeystore.unlocked ? '🔓' : '🔐'}</span>
+          <span className="chip-name" title={activeKeystore.name}>{activeKeystore.name}</span>
+          <code className="chip-addr" title={activeKeystore.address}>
+            {activeKeystore.address}
+          </code>
+          <button
+            className="icon-btn"
+            title={copiedAddr === activeKeystore.address ? 'Copied!' : 'Copy address'}
+            onClick={() => copyAddress(activeKeystore.address)}
+          >
+            {copiedAddr === activeKeystore.address ? '✓' : '⧉'}
+          </button>
+          {activeKeystore.balance?.formatted && (
+            <span className="chip-bal" title={`${activeKeystore.balance.wei} wei on chain ${activeKeystore.balance.chainId}`}>
+              {activeKeystore.balance.formatted}
+            </span>
+          )}
+          {activeKeystore.balanceStatus === 'fetching' && (
+            <span className="chip-bal fetching">···</span>
+          )}
+          {activeKeystore.balanceStatus === 'error' && (
+            <span className="chip-bal error" title={activeKeystore.balanceError ?? 'failed to fetch balance'}>
+              balance unavailable
+            </span>
+          )}
+          {!isAnvilMode && (
+            <button
+              className="icon-btn"
+              title="Refresh balance"
+              onClick={() => void bus.request({ kind: 'refreshBalance' })}
+            >
+              ↻
+            </button>
+          )}
+        </div>
+      )}
 
       {isAnvilMode && (
         <>
@@ -150,6 +233,16 @@ export function AccountSection({ network, anvil, keystores, selection, bus }: Pr
                           !
                         </span>
                       )}
+                      <button
+                        className="icon-btn row-copy"
+                        title={copiedAddr === ks.address ? 'Copied!' : 'Copy address'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyAddress(ks.address);
+                        }}
+                      >
+                        {copiedAddr === ks.address ? '✓' : '⧉'}
+                      </button>
                       {isSel && (
                         <button
                           className="icon-btn"
