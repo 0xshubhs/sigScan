@@ -11,7 +11,6 @@ import { NetworkSection } from './components/NetworkSection';
 import { AccountSection } from './components/AccountSection';
 import { ContractsSection } from './components/ContractsSection';
 import { InstancesSection } from './components/InstancesSection';
-import { ScriptsSection } from './components/ScriptsSection';
 import { TxLogPanel } from './components/TxLogPanel';
 import { StatusDot } from './components/StatusDot';
 
@@ -150,13 +149,6 @@ export function App({ bus }: AppProps): JSX.Element {
         instances={status.instances}
         currentNetwork={status.network.kind}
         bus={bus}
-      />
-
-      <ScriptsSection
-        scripts={status.scripts}
-        bus={bus}
-        canRun={canDeploy.ok}
-        noRunReason={canDeploy.reason}
       />
 
       <TxLogPanel entries={status.txLog} bus={bus} />

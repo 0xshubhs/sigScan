@@ -316,8 +316,17 @@ export interface ContractSummary {
 export interface ProjectGroup {
   projectRoot: string;
   projectType: 'foundry' | 'hardhat' | 'solidity';
-  /** Group contracts by directory under projectRoot for tree-style display. */
-  byDirectory: Array<{ dir: string; contracts: ContractSummary[] }>;
+  /**
+   * Files grouped by directory under projectRoot for tree-style display.
+   * Each directory bucket contains both contracts (.sol) and scripts
+   * (.s.sol / .ts / .js) so the panel can render them inline next to
+   * each other — the way they actually live on disk.
+   */
+  byDirectory: Array<{
+    dir: string;
+    contracts: ContractSummary[];
+    scripts: ScriptSummary[];
+  }>;
   built: number;
   total: number;
   isBuilding: boolean;

@@ -923,7 +923,6 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       buildState: c.buildState,
       lastError: c.lastError,
     }));
-    const projectGroups = buildProjectGroups(contracts, this.buildingProjects);
 
     const scriptSummaries: ScriptSummary[] = this.scripts.map((s) => {
       const runState = this.scriptRunStates.get(s.key) ?? 'idle';
@@ -942,6 +941,8 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
         lastDurationMs: result?.durationMs,
       };
     });
+
+    const projectGroups = buildProjectGroups(contracts, scriptSummaries, this.buildingProjects);
 
     return {
       anvil: {
@@ -1022,36 +1023,70 @@ function shortenAddr(a: string): string {
 
 function buildProjectGroups(
   contracts: ContractSummary[],
+  scripts: ScriptSummary[],
   buildingProjects: Set<string>
 ): ProjectGroup[] {
-  const byProject = new Map<string, ContractSummary[]>();
+  // Bucket contracts AND scripts by project root, so a project shows up even if
+  // it only has scripts (no contracts compiled yet).
+  const projects = new Set<string>();
+  const contractsByProject = new Map<string, ContractSummary[]>();
+  const scriptsByProject = new Map<string, ScriptSummary[]>();
+  const projectTypeByRoot = new Map<string, ProjectGroup['projectType']>();
+
   for (const c of contracts) {
-    const list = byProject.get(c.projectRoot) ?? [];
+    projects.add(c.projectRoot);
+    if (!projectTypeByRoot.has(c.projectRoot)) projectTypeByRoot.set(c.projectRoot, c.projectType);
+    const list = contractsByProject.get(c.projectRoot) ?? [];
     list.push(c);
-    byProject.set(c.projectRoot, list);
+    contractsByProject.set(c.projectRoot, list);
   }
+  for (const s of scripts) {
+    projects.add(s.projectRoot);
+    if (!projectTypeByRoot.has(s.projectRoot)) projectTypeByRoot.set(s.projectRoot, s.projectType);
+    const list = scriptsByProject.get(s.projectRoot) ?? [];
+    list.push(s);
+    scriptsByProject.set(s.projectRoot, list);
+  }
+
   const groups: ProjectGroup[] = [];
-  for (const [projectRoot, list] of byProject) {
-    const byDirMap = new Map<string, ContractSummary[]>();
-    for (const c of list) {
-      const dir = c.sourcePath ? path.dirname(c.sourcePath) : '(root)';
-      const arr = byDirMap.get(dir) ?? [];
-      arr.push(c);
-      byDirMap.set(dir, arr);
+  for (const projectRoot of projects) {
+    const projContracts = contractsByProject.get(projectRoot) ?? [];
+    const projScripts = scriptsByProject.get(projectRoot) ?? [];
+
+    // Merge by directory — same Map carries both contracts and scripts.
+    const byDirMap = new Map<string, { contracts: ContractSummary[]; scripts: ScriptSummary[] }>();
+    function bucket(dir: string): { contracts: ContractSummary[]; scripts: ScriptSummary[] } {
+      let b = byDirMap.get(dir);
+      if (!b) {
+        b = { contracts: [], scripts: [] };
+        byDirMap.set(dir, b);
+      }
+      return b;
     }
+    for (const c of projContracts) {
+      const dir = c.sourcePath ? path.dirname(c.sourcePath) : '(root)';
+      bucket(dir).contracts.push(c);
+    }
+    for (const s of projScripts) {
+      const dir = s.relPath ? path.dirname(s.relPath) : '(root)';
+      bucket(dir).scripts.push(s);
+    }
+
     const byDirectory = Array.from(byDirMap.entries())
-      .map(([dir, contracts]) => ({
+      .map(([dir, { contracts, scripts }]) => ({
         dir,
         contracts: contracts.sort((a, b) => a.name.localeCompare(b.name)),
+        scripts: scripts.sort((a, b) => a.name.localeCompare(b.name)),
       }))
       .sort((a, b) => a.dir.localeCompare(b.dir));
-    const built = list.filter((c) => c.buildState === 'built').length;
+
+    const built = projContracts.filter((c) => c.buildState === 'built').length;
     groups.push({
       projectRoot,
-      projectType: list[0]?.projectType ?? 'solidity',
+      projectType: projectTypeByRoot.get(projectRoot) ?? 'solidity',
       byDirectory,
       built,
-      total: list.length,
+      total: projContracts.length,
       isBuilding: buildingProjects.has(projectRoot),
     });
   }
@@ -1733,49 +1768,28 @@ body {
 }
 .other-networks .vsc-button { align-self: flex-start; }
 
-/* ─── Scripts tree ──────────────────────────────────────────────── */
-.scripts-tree {
-  display: flex; flex-direction: column;
-  border: 1px solid var(--vscode-editorWidget-border, transparent);
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--vscode-input-background);
+/* ─── Script rows (rendered inline in the contracts tree) ────────── */
+.contract-row.script-row {
+  cursor: default;
 }
-.script-list { list-style: none; padding: 0; margin: 0; }
-.script-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px 6px 22px;
-  font-size: 11.5px;
-  border-left: 2px solid transparent;
-  transition: background 120ms ease, border-color 120ms ease;
-  min-width: 0;
+.contract-row.script-row:hover {
+  border-left-color: var(--vscode-charts-yellow, #cca700);
 }
-.script-row:hover {
-  background: var(--vscode-list-hoverBackground);
-  border-left-color: var(--vscode-button-background, var(--vscode-focusBorder));
-}
-.script-row + .script-row { border-top: 1px dashed var(--vscode-editorWidget-border, transparent); }
-.script-row .script-name {
+.contract-row.script-row .vsc-button { padding: 2px 9px; }
+.script-kind-tag {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.script-row .script-kind {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 9.5px;
+  font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 1px 6px;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
-  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 18%, transparent);
+  color: var(--vscode-charts-yellow, #cca700);
   flex-shrink: 0;
 }
-.script-row .script-duration {
+.script-duration {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 10px;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.65;
   flex-shrink: 0;
 }
 

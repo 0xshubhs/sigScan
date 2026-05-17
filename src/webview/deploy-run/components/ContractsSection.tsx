@@ -3,6 +3,7 @@ import type {
   AbiEntry,
   ContractSummary,
   ProjectGroup,
+  ScriptSummary,
   ValueUnit,
 } from '../../../shared/deploy-run-protocol';
 import { valueToWei } from '../../../shared/deploy-run-protocol';
@@ -10,6 +11,46 @@ import { ContractGUI } from './ContractGUI';
 import { ValueUI } from './ValueUI';
 import { GasLimitUI } from './GasLimitUI';
 import type { Bus } from '../bus';
+
+function scriptStatusGlyph(s: ScriptSummary['runState']): {
+  glyph: string;
+  cls: string;
+  label: string;
+} {
+  switch (s) {
+    case 'idle':    return { glyph: '▶', cls: 'badge-muted', label: 'Ready to run' };
+    case 'running': return { glyph: '⏳', cls: 'badge-info',  label: 'Running…' };
+    case 'success': return { glyph: '✓', cls: 'badge-ok',    label: 'Last run succeeded' };
+    case 'error':   return { glyph: '✗', cls: 'badge-err',   label: 'Last run failed' };
+  }
+}
+
+function fmtMs(ms: number | undefined): string {
+  if (!ms) return '';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
+}
+
+/**
+ * Returns the reason the Run button should be disabled, or null when it's OK.
+ * Foundry scripts need a private-key (anvil) or unlocked keystore. Hardhat
+ * scripts are more flexible — they can use accounts from hardhat.config so
+ * we only require that a network is picked.
+ */
+function scriptDisabledReason(
+  s: ScriptSummary,
+  canRun: boolean,
+  fallback: string | null
+): string | null {
+  if (s.kind === 'foundry') {
+    // Foundry scripts strictly need a signer + RPC, same as a contract deploy.
+    return canRun ? null : (fallback ?? 'cannot run — check network + account');
+  }
+  // Hardhat: as long as we have a network, we can shell out. Account selection
+  // is optional because hardhat.config may provide its own accounts.
+  return null;
+}
 
 interface Props {
   contracts: ContractSummary[];
@@ -218,13 +259,14 @@ export function ContractsSection(props: Props): JSX.Element {
 
                 {projOpen && g.byDirectory.map((d) => {
                   const dirKey = `${g.projectRoot}::${d.dir}`;
+                  const totalInDir = d.contracts.length + d.scripts.length;
                   const dirOpen = openDirs.has(dirKey) || g.byDirectory.length <= 2;
                   return (
                     <div key={dirKey} className="dir-group">
                       <div className="dir-header" onClick={() => toggleDir(dirKey)}>
                         <span className="caret">{dirOpen ? '▾' : '▸'}</span>
                         <span>{d.dir || '(root)'}</span>
-                        <span className="muted small">· {d.contracts.length}</span>
+                        <span className="muted small">· {totalInDir}</span>
                       </div>
                       {dirOpen && (
                         <ul className="contract-list">
@@ -240,6 +282,42 @@ export function ContractsSection(props: Props): JSX.Element {
                                 <StateBadge state={c.buildState} />
                                 <span className="contract-name">{c.name}</span>
                                 <span className="file-suffix">{c.file}</span>
+                              </li>
+                            );
+                          })}
+                          {d.scripts.map((s) => {
+                            const status = scriptStatusGlyph(s.runState);
+                            const kindLabel =
+                              s.kind === 'foundry' ? 'sol' : s.kind === 'hardhat-ts' ? 'ts' : 'js';
+                            const disabledReason = scriptDisabledReason(s, canDeploy, noDeployReason);
+                            return (
+                              <li
+                                key={s.key}
+                                className="contract-row script-row"
+                                title={s.lastError ? `last run failed: ${s.lastError}` : s.relPath}
+                              >
+                                <span className={`build-badge ${status.cls}`} title={status.label}>
+                                  {status.glyph}
+                                </span>
+                                <span className="contract-name">{s.name}</span>
+                                <span className="script-kind-tag">{kindLabel}</span>
+                                <span style={{ marginLeft: 'auto' }} />
+                                {s.lastDurationMs !== undefined && s.runState !== 'running' && (
+                                  <span className="script-duration small muted">
+                                    {fmtMs(s.lastDurationMs)}
+                                  </span>
+                                )}
+                                <button
+                                  className="vsc-button small primary"
+                                  disabled={s.runState === 'running' || !!disabledReason}
+                                  title={disabledReason ?? 'Run this script on the active network'}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void bus.request({ kind: 'runScript', scriptKey: s.key });
+                                  }}
+                                >
+                                  {s.runState === 'running' ? '…' : 'run'}
+                                </button>
                               </li>
                             );
                           })}
