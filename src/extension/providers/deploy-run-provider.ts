@@ -10,6 +10,7 @@ import {
   type DiscoveredContract,
 } from '../../features/contract-discovery';
 import { runBuild, detectProjectKind, type ProjectKind } from '../../features/build-pipeline';
+import { parseBuildDiagnostics, groupByFile } from '../../features/build-diagnostics';
 import {
   getDefaultKeystoreDir,
   listKeystores,
@@ -75,6 +76,11 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   private balanceByKey: Map<string, KeystoreBalance> = new Map();
   private balanceStatusByKey: Map<string, BalanceStatus> = new Map();
   private balanceErrorByKey: Map<string, string> = new Map();
+
+  // VS Code diagnostic collection for forge/hardhat build errors — populated on
+  // build failure, cleared on the next build attempt for the same project.
+  private readonly buildDiagnostics: vscode.DiagnosticCollection =
+    vscode.languages.createDiagnosticCollection('0xtools-build');
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -531,10 +537,19 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       command: kind === 'hardhat' ? 'Compiling (Hardhat)' : kind === 'foundry' ? 'Compiling (Foundry)' : 'Compiling',
     });
 
+    // Clear stale diagnostics for any file under this project before re-running.
+    this.clearBuildDiagnosticsForProject(projectRoot);
+
+    // Accumulate every line so we can re-parse the entire output post-mortem.
+    // Solc's rich error format spans 3–5 lines per issue, so per-line parsing
+    // would miss the location-pairing logic.
+    const fullOutput: string[] = [];
+
     const result = await runBuild({
       projectRoot,
       kind,
       onLine: (line, stream) => {
+        fullOutput.push(line);
         void this.sendEvent({ kind: 'buildLog', projectRoot, stream, line });
       },
     });
@@ -554,11 +569,50 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           c.lastError = result.errorMessage;
         }
       }
+      // Parse + publish diagnostics so the user sees red squigglies in their
+      // .sol files and a Problems-panel entry that jumps to the exact line.
+      this.publishBuildDiagnostics(projectRoot, fullOutput.join('\n'));
     }
 
     this.buildingProjects.delete(projectRoot);
     // Re-discover artifacts so the panel picks up freshly built ones.
     await this.refreshContracts();
+  }
+
+  private clearBuildDiagnosticsForProject(projectRoot: string): void {
+    const root = projectRoot.toLowerCase();
+    const toClear: vscode.Uri[] = [];
+    this.buildDiagnostics.forEach((uri) => {
+      if (uri.fsPath.toLowerCase().startsWith(root)) toClear.push(uri);
+    });
+    for (const uri of toClear) this.buildDiagnostics.delete(uri);
+  }
+
+  private publishBuildDiagnostics(projectRoot: string, output: string): void {
+    const parsed = parseBuildDiagnostics(output, projectRoot);
+    if (parsed.length === 0) return;
+    const byFile = groupByFile(parsed);
+    for (const [filePath, items] of byFile) {
+      const uri = vscode.Uri.file(filePath);
+      const diags = items.map((p) => {
+        const lineIdx = Math.max(0, p.line - 1);
+        const colIdx = Math.max(0, p.column - 1);
+        // Single-character range at the start of the location — VS Code shows
+        // a squiggly under that character and the message in the Problems panel.
+        const range = new vscode.Range(lineIdx, colIdx, lineIdx, colIdx + 1);
+        const severity =
+          p.severity === 'warning'
+            ? vscode.DiagnosticSeverity.Warning
+            : p.severity === 'info'
+              ? vscode.DiagnosticSeverity.Information
+              : vscode.DiagnosticSeverity.Error;
+        const d = new vscode.Diagnostic(range, p.message, severity);
+        d.source = '0xtools';
+        if (p.code) d.code = p.code;
+        return d;
+      });
+      this.buildDiagnostics.set(uri, diags);
+    }
   }
 
   private activeRpcUrl(): string {
