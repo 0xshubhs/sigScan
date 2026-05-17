@@ -5,18 +5,19 @@ const path = require('path');
 module.exports = (_env, argv) => {
   const isProduction = argv.mode === 'production';
 
-  return {
+  /** @type {import('webpack').Configuration} */
+  const extensionConfig = {
+    name: 'extension',
     target: 'node',
-    // mode is controlled by the CLI --mode flag; do NOT hardcode it here
     entry: {
       'extension/extension': './src/extension/extension.ts',
-      'cli/index': './src/cli/index.ts'
+      'cli/index': './src/cli/index.ts',
     },
     output: {
       path: path.resolve(__dirname, 'dist'),
       filename: '[name].js',
       libraryTarget: 'commonjs2',
-      chunkFormat: 'commonjs'
+      chunkFormat: 'commonjs',
     },
     externals: {
       vscode: 'commonjs vscode',
@@ -25,55 +26,56 @@ module.exports = (_env, argv) => {
       // solc is ~9 MB of WASM; keep it external — loaded from node_modules at runtime.
       // SolcManager.ts already lazy-loads it via require('solc'), so this is safe.
       solc: 'commonjs solc',
+      // ws is pulled in by ethers' WebSocket provider — we only use HTTP RPC so this
+      // path is never hit, but webpack still tries to bundle it. Mark external.
+      ws: 'commonjs ws',
     },
     resolve: {
       extensions: ['.ts', '.js'],
       fallback: {
-        fsevents: false
-      }
+        fsevents: false,
+      },
     },
     module: {
       rules: [
         {
           test: /\.ts$/,
-          exclude: [/node_modules/, /__tests__/, /\.test\.ts$/, /\.spec\.ts$/],
+          exclude: [/node_modules/, /__tests__/, /\.test\.ts$/, /\.spec\.ts$/, /[\\/]webview[\\/]/],
           use: {
             loader: 'ts-loader',
             options: {
               // Skip type-checking during build (use `tsc --noEmit` separately)
-              transpileOnly: true
-            }
-          }
-        }
-      ]
+              transpileOnly: true,
+            },
+          },
+        },
+      ],
     },
-    // Filesystem cache for dramatically faster rebuilds
     cache: {
       type: 'filesystem',
+      name: 'extension',
       buildDependencies: {
-        config: [__filename]
-      }
+        config: [__filename],
+      },
     },
     optimization: {
       minimize: isProduction,
-      // Enable tree-shaking: mark all modules as side-effect-free unless stated otherwise
       sideEffects: true,
-      // Deterministic module/chunk ids for better long-term caching
       moduleIds: 'deterministic',
-      // Split common code between extension and cli entry points
-      splitChunks: isProduction ? {
-        chunks: 'all',
-        minSize: 30000,
-        cacheGroups: {
-          // Separate large dependencies (solc, semver, etc.) into a shared chunk
-          vendors: {
-            test: /[\\/]node_modules[\\/]/,
-            name: 'vendors',
+      splitChunks: isProduction
+        ? {
             chunks: 'all',
-            priority: -10
+            minSize: 30000,
+            cacheGroups: {
+              vendors: {
+                test: /[\\/]node_modules[\\/]/,
+                name: 'vendors',
+                chunks: 'all',
+                priority: -10,
+              },
+            },
           }
-        }
-      } : false
+        : false,
     },
     devtool: isProduction ? 'source-map' : 'eval-source-map',
     ignoreWarnings: [
@@ -81,6 +83,57 @@ module.exports = (_env, argv) => {
         module: /node_modules\/chokidar/,
         message: /Can't resolve 'fsevents'/,
       },
-    ]
+    ],
   };
+
+  /** @type {import('webpack').Configuration} */
+  const webviewConfig = {
+    name: 'webview',
+    target: 'web',
+    entry: {
+      'webview/deploy-run': './src/webview/deploy-run/index.tsx',
+    },
+    output: {
+      path: path.resolve(__dirname, 'dist'),
+      filename: '[name].js',
+      // webview bundle is loaded via <script src> in an iframe; no library wrapping
+      libraryTarget: 'window',
+    },
+    resolve: {
+      extensions: ['.tsx', '.ts', '.js'],
+    },
+    module: {
+      rules: [
+        {
+          test: /\.tsx?$/,
+          exclude: [/node_modules/, /__tests__/, /\.test\.tsx?$/],
+          use: {
+            loader: 'ts-loader',
+            options: {
+              transpileOnly: true,
+              configFile: path.resolve(__dirname, 'tsconfig.webview.json'),
+            },
+          },
+        },
+      ],
+    },
+    cache: {
+      type: 'filesystem',
+      name: 'webview',
+      buildDependencies: {
+        config: [__filename],
+      },
+    },
+    optimization: {
+      minimize: isProduction,
+      moduleIds: 'deterministic',
+    },
+    devtool: isProduction ? 'source-map' : 'eval-source-map',
+    performance: {
+      // React + ReactDOM gzipped is ~45kb; the webview bundle is small enough not to warn
+      hints: false,
+    },
+  };
+
+  return [extensionConfig, webviewConfig];
 };

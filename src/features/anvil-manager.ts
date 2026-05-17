@@ -25,6 +25,7 @@ export interface AnvilConfig {
   chainId?: number;
   gasLimit?: number;
   gasPrice?: number;
+  hardfork?: string;
   silent?: boolean;
 }
 
@@ -364,6 +365,9 @@ export class AnvilManager {
     }
     if (c.gasPrice !== undefined) {
       args.push('--gas-price', String(c.gasPrice));
+    }
+    if (c.hardfork) {
+      args.push('--hardfork', c.hardfork);
     }
     if (c.silent) {
       args.push('--silent');

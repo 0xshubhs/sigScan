@@ -18,6 +18,8 @@ import { GasDecorationManager } from '../features/gas-decorations';
 
 // SelectorHoverProvider is eagerly loaded (used for frequent hover events)
 import { SelectorHoverProvider } from './providers/selector-hover-provider';
+// Deploy & Run sidebar — eagerly loaded so the activity bar item is wired at activation
+import { DeployRunViewProvider } from './providers/deploy-run-provider';
 // Notebook provider — lazy loaded when registering serializer/controller
 type NotebookProviderModule = typeof import('./providers/notebook-provider');
 
@@ -37,6 +39,18 @@ let _anvilManager: InstanceType<typeof import('../features/anvil-manager').Anvil
   null;
 let _forkSimulator: InstanceType<typeof import('../features/fork-simulator').ForkSimulator> | null =
   null;
+
+// Deploy & Run sidebar — set in activate(), read by anvil command handlers so
+// CLI-style start/stop calls also refresh the sidebar UI.
+let _deployRunProvider: DeployRunViewProvider | null = null;
+
+function getAnvilManager(): InstanceType<typeof import('../features/anvil-manager').AnvilManager> {
+  if (!_anvilManager) {
+    const { AnvilManager } = require('../features/anvil-manager');
+    _anvilManager = new AnvilManager();
+  }
+  return _anvilManager!;
+}
 
 // Singleton RPC provider — shared across all on-chain commands
 let _rpcProvider: InstanceType<typeof import('../features/rpc-provider').RpcProvider> | null = null;
@@ -197,6 +211,14 @@ export function activate(context: vscode.ExtensionContext) {
     showCollapseAll: true,
   });
 
+  // Register the Deploy & Run sidebar (Activity Bar → 0xTools → Deploy & Run)
+  _deployRunProvider = new DeployRunViewProvider(context.extensionUri, getAnvilManager);
+  const deployRunDisposable = vscode.window.registerWebviewViewProvider(
+    DeployRunViewProvider.viewType,
+    _deployRunProvider,
+    { webviewOptions: { retainContextWhenHidden: true } }
+  );
+
   // Register commands
   const commands = [
     vscode.commands.registerCommand('sigscan.scanProject', () => {
@@ -298,6 +320,14 @@ export function activate(context: vscode.ExtensionContext) {
   const selectorHoverProvider = new SelectorHoverProvider();
 
   const newCommands = [
+    // Deploy & Run sidebar
+    vscode.commands.registerCommand('sigscan.deployRun.show', async () => {
+      await vscode.commands.executeCommand('zeroXTools.deployRun.focus');
+    }),
+    vscode.commands.registerCommand('sigscan.deployRun.refresh', () => {
+      _deployRunProvider?.pushStatus();
+    }),
+
     // Collision detection
     vscode.commands.registerCommand('sigscan.detectCollisions', async () => {
       const scanResult = sigScanManager.getLastScanResult();
@@ -1266,6 +1296,7 @@ export function activate(context: vscode.ExtensionContext) {
           );
         }
       );
+      _deployRunProvider?.pushStatus();
     }),
 
     // Stop Anvil
@@ -1276,6 +1307,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       await _anvilManager.stop();
       vscode.window.showInformationMessage('Anvil stopped');
+      _deployRunProvider?.pushStatus();
     }),
 
     // Forge script runner
@@ -2354,6 +2386,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Add to context
   context.subscriptions.push(
     treeView,
+    deployRunDisposable,
     hoverProvider,
     selectorHover,
     notebookSerializer,

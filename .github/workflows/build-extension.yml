@@ -1,7 +1,0 @@
-name: Build and Release VS Code Extension (disabled)
-on: workflow_dispatch
-jobs:
-  noop:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Disabled — consolidated into release.yml."

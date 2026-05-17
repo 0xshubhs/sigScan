@@ -10,7 +10,7 @@ import { ExportOptions } from '../types';
 const program = new Command();
 
 program
-  .name('sigscan')
+  .name('0xtools')
   .description(
     'The ultimate Solidity development toolkit — gas analysis, security audits, on-chain inspection, Foundry/Hardhat integration, and more'
   )

@@ -28,7 +28,8 @@
     "workspaceContains:**/*.sol",
     "workspaceContains:foundry.toml",
     "workspaceContains:hardhat.config.js",
-    "workspaceContains:hardhat.config.ts"
+    "workspaceContains:hardhat.config.ts",
+    "onView:zeroXTools.deployRun"
   ],
   "sideEffects": false,
   "main": "./dist/extension/extension.js",
@@ -331,6 +332,18 @@
         "category": "0xTools"
       },
       {
+        "command": "sigscan.deployRun.show",
+        "title": "Show Deploy & Run Panel",
+        "category": "0xTools",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "sigscan.deployRun.refresh",
+        "title": "Refresh Deploy & Run Panel",
+        "category": "0xTools",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "sigscan.runForgeScript",
         "title": "Run Forge Script",
         "category": "0xTools",
@@ -454,7 +467,7 @@
         },
         "sigscan.realtime.solcIdleMs": {
           "type": "number",
-          "default": 10000,
+          "default": 1e4,
           "minimum": 0,
           "maximum": 60000,
           "description": "Run accurate solc gas estimation after this many milliseconds of no typing (0 = disabled, 10000 = 10 seconds recommended)"
@@ -472,7 +485,7 @@
         "sigscan.runnerBinaryPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the sigscan-runner binary. Leave empty for auto-discovery (bundled, PATH, or workspace)."
+          "description": "Path to the 0xtools-runner binary. Leave empty for auto-discovery (bundled, PATH, or workspace)."
         },
         "sigscan.logLevel": {
           "type": "string",
@@ -483,7 +496,7 @@
         "sigscan.preferRunner": {
           "type": "boolean",
           "default": true,
-          "description": "Use sigscan-runner (EVM execution) as the primary gas backend when available. Disable to use forge/solc instead."
+          "description": "Use 0xtools-runner (EVM execution) as the primary gas backend when available. Disable to use forge/solc instead."
         },
         "sigscan.defaultChain": {
           "type": "string",
@@ -518,16 +531,34 @@
         "type": "sigscan-notebook",
         "displayName": "0xTools Notebook",
         "selector": [
-          { "filenamePattern": "*.sigscan" }
+          {
+            "filenamePattern": "*.sigscan"
+          }
         ]
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zeroXTools",
+          "title": "0xTools",
+          "icon": "resources/deploy-run-activity.svg"
+        }
+      ]
+    },
     "views": {
       "explorer": [
         {
           "id": "sigScanExplorer",
           "name": "Contract Signatures",
           "when": "sigscan:hasContracts"
+        }
+      ],
+      "zeroXTools": [
+        {
+          "id": "zeroXTools.deployRun",
+          "name": "Deploy & Run",
+          "type": "webview"
         }
       ]
     },
@@ -536,6 +567,12 @@
         {
           "command": "sigscan.refreshSignatures",
           "when": "view == sigScanExplorer",
+          "group": "navigation",
+          "icon": "$(refresh)"
+        },
+        {
+          "command": "sigscan.deployRun.refresh",
+          "when": "view == zeroXTools.deployRun",
           "group": "navigation",
           "icon": "$(refresh)"
         }
@@ -602,13 +639,14 @@
   "dependencies": {
     "chokidar": "^3.5.3",
     "commander": "^9.4.1",
+    "ethers": "^6.14.0",
     "glob": "^8.0.3",
     "js-sha3": "^0.8.0",
     "semver": "^7.7.3",
     "solc": "^0.8.28"
   },
   "bin": {
-    "sigscan": "./dist/cli/index.js"
+    "0xtools": "./dist/cli/index.js"
   },
   "repository": {
     "type": "git",
