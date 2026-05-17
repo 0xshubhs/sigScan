@@ -145,7 +145,11 @@ export function App({ bus }: AppProps): JSX.Element {
         onRefresh={handleRefreshContracts}
       />
 
-      <InstancesSection instances={status.instances} bus={bus} />
+      <InstancesSection
+        instances={status.instances}
+        currentNetwork={status.network.kind}
+        bus={bus}
+      />
 
       <TxLogPanel entries={status.txLog} bus={bus} />
 

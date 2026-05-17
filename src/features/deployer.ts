@@ -255,6 +255,16 @@ export async function sendTransaction(req: SendRequest): Promise<SendResult> {
   if (!isAddress(req.to)) throw new Error(`invalid address: ${req.to}`);
   const provider = new JsonRpcProvider(req.rpcUrl);
   try {
+    // Verify the address actually has bytecode on this RPC's chain. Without
+    // this check ethers throws "could not decode result data" for empty
+    // responses — opaque to anyone who didn't realize they switched networks.
+    const code = await provider.getCode(req.to);
+    if (!code || code === '0x') {
+      throw new Error(
+        `No contract found at ${req.to} on this network. ` +
+          `Was this deployed to a different network?`
+      );
+    }
     const wallet = await resolveSigner(req.signer, provider);
     const contract = new Contract(req.to, req.abi as InterfaceAbi, wallet as ContractRunner);
     const overrides: Record<string, bigint> = {};
@@ -285,6 +295,14 @@ export async function callFunction(req: CallRequest): Promise<CallResult> {
   if (!isAddress(req.to)) throw new Error(`invalid address: ${req.to}`);
   const provider = new JsonRpcProvider(req.rpcUrl);
   try {
+    // Same pre-check as sendTransaction — see explanation there.
+    const code = await provider.getCode(req.to);
+    if (!code || code === '0x') {
+      throw new Error(
+        `No contract found at ${req.to} on this network. ` +
+          `Was this deployed to a different network?`
+      );
+    }
     const contract = new Contract(req.to, req.abi as InterfaceAbi, provider);
     const fn = contract.getFunction(req.funcName);
     const overrides: Record<string, bigint> = {};

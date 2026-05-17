@@ -148,6 +148,12 @@ export function InstanceCard({ instance, bus, onRemove }: Props): JSX.Element {
         <span className="name">{instance.name}</span>
         <span className="at-divider">@</span>
         <span className="addr" title={instance.address}>{shorten(instance.address)}</span>
+        <span
+          className="instance-net-tag"
+          title={`Deployed on ${instance.network}`}
+        >
+          {instance.network}
+        </span>
         <span style={{ marginLeft: 'auto' }} />
         <button
           className="icon-btn"

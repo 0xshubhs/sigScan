@@ -1531,6 +1531,28 @@ body {
   opacity: 0.55;
   flex-shrink: 0;
 }
+.instance-header .instance-net-tag {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 1px 5px;
+  border: 1px solid var(--vscode-descriptionForeground);
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Section showing instances deployed on other networks */
+.other-networks {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--vscode-descriptionForeground);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.other-networks .vsc-button { align-self: flex-start; }
 .instance-body {
   padding: 8px 10px 8px 12px;
   display: flex; flex-direction: column; gap: 4px;
