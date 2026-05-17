@@ -141,9 +141,19 @@ export function createGasDecorations(
 ): Map<vscode.TextEditorDecorationType, vscode.DecorationOptions[]> {
   const decorations = new Map<vscode.TextEditorDecorationType, vscode.DecorationOptions[]>();
 
+  // Skip gas annotations entirely for Foundry test (*.t.sol) and script
+  // (*.s.sol) files. forge intentionally doesn't emit gas estimates for these,
+  // and "Gas: unavailable" pinned to every function reads like noise, not signal.
+  const lowerPath = document.uri.fsPath.toLowerCase();
+  if (lowerPath.endsWith('.t.sol') || lowerPath.endsWith('.s.sol')) {
+    return decorations;
+  }
+
   for (const info of gasInfo) {
-    // Skip internal/private functions if configured
-    // (can add configuration check here later)
+    // Skip functions whose gas couldn't be determined. forge omits estimates for
+    // some shapes (payable, internal-only callers, complex storage patterns) —
+    // rendering "0 gas" or "Gas: unavailable" in the gutter for those is misleading.
+    if (info.gas === 0) continue;
 
     // Get line (0-based for VS Code)
     const line = info.loc.line - 1;

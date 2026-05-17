@@ -298,7 +298,7 @@ function parseForgeArtifact(
       stateMutability: abiInfo?.stateMutability || 'nonpayable',
       warnings:
         gasValue === 0
-          ? ['Gas estimate not available (forge does not produce estimates for test contracts)']
+          ? ['Gas estimate not available (test/payable functions or no execution data)']
           : [],
     });
   }

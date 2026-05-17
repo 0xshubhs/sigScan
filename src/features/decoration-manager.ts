@@ -277,9 +277,24 @@ export function createRemixStyleDecorations(
   document: vscode.TextDocument
 ): vscode.DecorationOptions[] {
   const decorations: vscode.DecorationOptions[] = [];
+
+  // Skip gas annotations for Foundry test (*.t.sol) and script (*.s.sol) files.
+  // forge intentionally doesn't emit gas estimates for these — pinning
+  // "Gas: unavailable" to every function reads like noise, not signal.
+  const lowerPath = document.uri.fsPath.toLowerCase();
+  if (lowerPath.endsWith('.t.sol') || lowerPath.endsWith('.s.sol')) {
+    return decorations;
+  }
+
   const content = document.getText();
 
   for (const info of gasInfo) {
+    // Skip functions whose gas couldn't be determined unless they're events
+    // (events get a different non-gas decoration below). Showing
+    // "Gas: unavailable" on a regular function adds no signal.
+    const isEvent = info.visibility === 'event';
+    if (!isEvent && info.gas === 0) continue;
+
     let line = info.loc.line - 1;
 
     // If loc.line is 0 (unresolved), try to find the function in source via regex
@@ -305,7 +320,7 @@ export function createRemixStyleDecorations(
     const startPos = new vscode.Position(line, 0);
     const range = new vscode.Range(startPos, endPos);
 
-    const isEvent = info.visibility === 'event';
+    // `isEvent` already computed above for the skip-zero-gas guard
     const isReverted = info.warnings.some((w) => w.includes('reverted'));
     const noGas = info.gas === 0;
 
