@@ -14,11 +14,33 @@ export function InstancesSection({ instances, currentNetwork, bus }: Props): JSX
   const onNetwork = instances.filter((i) => i.network === currentNetwork);
   const onOtherNetworks = instances.filter((i) => i.network !== currentNetwork);
 
+  function handleRemoveAll(): void {
+    // Plain confirm rather than a modal — destructive but reversible-enough
+    // (re-deploy or re-add via At Address) that a one-click prompt is fine.
+    if (instances.length === 0) return;
+    const ok = window.confirm(
+      `Remove all ${instances.length} stored instance(s)? This wipes them from this workspace.`
+    );
+    if (!ok) return;
+    void bus.request({ kind: 'clearAllInstances' });
+  }
+
   return (
     <section className="section">
       <h3 className="section-title">
         Deployed Contracts
         {onNetwork.length > 0 && <span className="count">· {onNetwork.length}</span>}
+        {instances.length > 0 && (
+          <span className="right">
+            <button
+              className="vsc-button small"
+              onClick={handleRemoveAll}
+              title="Remove every stored instance (across all networks)"
+            >
+              remove all
+            </button>
+          </span>
+        )}
       </h3>
 
       {instances.length === 0 && <div className="muted small">No deployed contracts yet.</div>}

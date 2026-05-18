@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { AbiEntry } from '../../../shared/deploy-run-protocol';
+import type { AbiEntry, ValueUnit } from '../../../shared/deploy-run-protocol';
+import { ValueUI } from './ValueUI';
 
 type ButtonClass = 'view' | 'send' | 'payable';
 
@@ -11,6 +12,12 @@ export interface ContractGUIProps {
   onSubmit: (rawValues: string[]) => void | Promise<unknown>;
   // Optional "show last result" hook from the parent (decoded return for view calls etc.)
   result?: { kind: 'success' | 'error'; text: string } | null;
+  /**
+   * When the function is payable, the parent owns the per-row (value, unit)
+   * state and passes it through. Constructor deploys use the section-wide
+   * value/gas UI instead, so this is only wired for instance function rows.
+   */
+  payableValue?: { value: string; unit: ValueUnit; onChange: (value: string, unit: ValueUnit) => void };
 }
 
 function classify(funcAbi: AbiEntry, isDeploy: boolean | undefined): ButtonClass {
@@ -63,6 +70,18 @@ export function ContractGUI(props: ContractGUIProps): JSX.Element {
 
   return (
     <div>
+      {props.payableValue && (
+        <div className="fn-value-row" title="msg.value sent with this call">
+          <span className="fn-value-label">value</span>
+          <ValueUI
+            compact
+            value={props.payableValue.value}
+            unit={props.payableValue.unit}
+            onChange={props.payableValue.onChange}
+            disabled={busy}
+          />
+        </div>
+      )}
       <div className="fn-row">
         <button type="button" className={cls} disabled={busy} onClick={onClick} title={funcAbi.name ?? ''}>
           {busy ? '…' : label}

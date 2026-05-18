@@ -5,10 +5,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import type { AnvilManager } from '../../features/anvil-manager';
-import {
-  discoverWorkspace,
-  type DiscoveredContract,
-} from '../../features/contract-discovery';
+import { discoverWorkspace, type DiscoveredContract } from '../../features/contract-discovery';
 import { runBuild, detectProjectKind, type ProjectKind } from '../../features/build-pipeline';
 import { parseBuildDiagnostics, groupByFile } from '../../features/build-diagnostics';
 import { discoverScripts, type ScriptEntry } from '../../features/script-discovery';
@@ -47,18 +44,42 @@ import type {
   KeystoreBalance,
   KeystoreInfo,
   NetworkConfig,
+  NetworkKind,
   ProjectGroup,
   ScriptRunState,
   ScriptSummary,
   TxLogEntry,
+  VerifyStatus,
 } from '../../shared/deploy-run-protocol';
-import { BUILT_IN_NETWORKS } from '../../shared/deploy-run-protocol';
+import {
+  BUILT_IN_NETWORKS,
+  buildExplorerUrl,
+  explorerUrlForKind,
+} from '../../shared/deploy-run-protocol';
+import { verifySource } from '../../features/source-verifier';
 import * as path from 'path';
 
 type GetAnvil = () => AnvilManager;
 
 const ANVIL_NETWORK: NetworkConfig = { kind: 'anvil', name: 'Anvil (local)' };
 const TX_LOG_LIMIT = 50;
+
+// Bumped if the persisted DeployedInstance shape changes incompatibly. On a
+// version mismatch we discard the stored list rather than crash on a missing
+// field at runtime.
+const INSTANCES_PERSIST_KEY = 'zeroXTools.deployRun.instances.v1';
+
+/**
+ * Chain id (or "*" for default) → secret-store key under which we save the
+ * Etherscan-family API key. Maintained in one place so the command that *sets*
+ * the key and the verify handler that *reads* it agree on naming.
+ */
+export function etherscanSecretKey(chainId: number | undefined): string {
+  if (!chainId) {
+    return 'zeroXTools.etherscan.apiKey.default';
+  }
+  return `zeroXTools.etherscan.apiKey.${chainId}`;
+}
 
 export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'zeroXTools.deployRun';
@@ -96,13 +117,55 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   private scripts: ScriptEntry[] = [];
   private scriptsByKey: Map<string, ScriptEntry> = new Map();
   private scriptRunStates: Map<string, ScriptRunState> = new Map();
-  private scriptResults: Map<string, { error?: string; deployed: string[]; txHashes: string[]; durationMs: number }> = new Map();
+  private scriptResults: Map<
+    string,
+    { error?: string; deployed: string[]; txHashes: string[]; durationMs: number }
+  > = new Map();
   private runningScripts: Set<string> = new Set();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly getAnvil: GetAnvil
-  ) {}
+    private readonly getAnvil: GetAnvil,
+    private readonly context: vscode.ExtensionContext
+  ) {
+    // Hydrate persisted instances eagerly so the panel boots with them — even
+    // before the user opens the sidebar.
+    this.hydrateInstances();
+  }
+
+  private hydrateInstances(): void {
+    try {
+      const stored = this.context.workspaceState.get<DeployedInstance[]>(INSTANCES_PERSIST_KEY);
+      if (Array.isArray(stored)) {
+        this.instances = stored.filter(
+          (i): i is DeployedInstance =>
+            !!i && typeof i.id === 'string' && typeof i.address === 'string' && Array.isArray(i.abi)
+        );
+      }
+    } catch {
+      // Corrupted state — bail and start fresh. Don't let one bad payload
+      // brick the panel.
+      this.instances = [];
+    }
+  }
+
+  private persistInstances(): void {
+    // We strip out transient verify state before persisting so a stale
+    // "verifying" status from a previous session can't leak into the next one.
+    const sanitized = this.instances.map((i) => {
+      const { verifyStatus, verifyError, verifyUrl, ...rest } = i;
+      // Keep terminal verify outcomes but drop in-flight 'verifying'.
+      if (
+        verifyStatus === 'verified' ||
+        verifyStatus === 'already-verified' ||
+        verifyStatus === 'failed'
+      ) {
+        return { ...rest, verifyStatus, verifyError, verifyUrl };
+      }
+      return rest;
+    });
+    void this.context.workspaceState.update(INSTANCES_PERSIST_KEY, sanitized);
+  }
 
   resolveWebviewView(
     view: vscode.WebviewView,
@@ -116,7 +179,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     };
     view.webview.html = this.renderHtml(view.webview);
     view.webview.onDidReceiveMessage((message: Envelope) => {
-      if (message.type !== 'req') return;
+      if (message.type !== 'req') {
+        return;
+      }
       void this.handleRequest(message.id, message.req);
     });
     view.onDidDispose(() => {
@@ -134,8 +199,12 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   }
 
   private installFileWatcher(): void {
-    if (this.fileWatcher) return;
-    if (!vscode.workspace.workspaceFolders?.length) return;
+    if (this.fileWatcher) {
+      return;
+    }
+    if (!vscode.workspace.workspaceFolders?.length) {
+      return;
+    }
     // Watch source files AND artifact files. We debounce inside refreshContracts'
     // caller. The patterns intentionally exclude node_modules etc. via VS Code's
     // default exclude rules; the watcher fires per-file but discovery itself is cheap.
@@ -150,7 +219,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
 
     let timer: NodeJS.Timeout | undefined;
     const schedule = (): void => {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
       timer = setTimeout(() => {
         void this.refreshContracts();
       }, 400);
@@ -161,12 +232,19 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       w.onDidChange(schedule);
       w.onDidDelete(schedule);
     }
-    this.fileWatcher = vscode.Disposable.from(solWatcher, fyAbiWatcher, hhAbiWatcher, tsScriptWatcher);
+    this.fileWatcher = vscode.Disposable.from(
+      solWatcher,
+      fyAbiWatcher,
+      hhAbiWatcher,
+      tsScriptWatcher
+    );
   }
 
   /** External entry — called from extension.ts when anvil state changes outside the panel. */
   pushStatus(): void {
-    if (!this.view) return;
+    if (!this.view) {
+      return;
+    }
     void this.sendEvent({ kind: 'statusChanged', payload: this.currentStatus() });
   }
 
@@ -194,9 +272,15 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       case 'startAnvil': {
         const anvil = this.getAnvil();
         if (!(await anvil.isAvailable())) {
-          return { kind: 'error', message: 'anvil is not installed. Install Foundry: https://book.getfoundry.sh/getting-started/installation' };
+          return {
+            kind: 'error',
+            message:
+              'anvil is not installed. Install Foundry: https://book.getfoundry.sh/getting-started/installation',
+          };
         }
-        if (req.hardfork) this.selectedHardfork = req.hardfork;
+        if (req.hardfork) {
+          this.selectedHardfork = req.hardfork;
+        }
         await anvil.start({
           port: req.port,
           forkUrl: req.forkUrl,
@@ -214,17 +298,25 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
 
       case 'stopAnvil': {
         const anvil = this.getAnvil();
-        if (anvil.isRunning()) await anvil.stop();
-        if (this.accountSelection.kind === 'anvil') this.accountSelection = { kind: 'none' };
+        if (anvil.isRunning()) {
+          await anvil.stop();
+        }
+        if (this.accountSelection.kind === 'anvil') {
+          this.accountSelection = { kind: 'none' };
+        }
         this.pushStatus();
         return { kind: 'status', payload: this.currentStatus() };
       }
 
       case 'restartAnvil': {
         const anvil = this.getAnvil();
-        if (req.hardfork) this.selectedHardfork = req.hardfork;
+        if (req.hardfork) {
+          this.selectedHardfork = req.hardfork;
+        }
         const prevState = anvil.getState();
-        if (anvil.isRunning()) await anvil.stop();
+        if (anvil.isRunning()) {
+          await anvil.stop();
+        }
         await anvil.start({
           port: prevState?.port,
           forkUrl: prevState?.forkUrl,
@@ -295,7 +387,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           const { Wallet } = await import('ethers');
           const wallet = await Wallet.fromEncryptedJson(json, req.password);
           const addr = (wallet as { address?: string }).address;
-          if (addr) this.addressOverlay.set(req.name, addr);
+          if (addr) {
+            this.addressOverlay.set(req.name, addr);
+          }
         } catch {
           return { kind: 'error', message: 'invalid password' };
         }
@@ -312,7 +406,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           this.accountSelection = { kind: 'keystore', name: req.name, address: known };
         }
         this.pushStatus();
-        if (this.network.kind !== 'anvil') void this.refreshBalanceFor(req.name);
+        if (this.network.kind !== 'anvil') {
+          void this.refreshBalanceFor(req.name);
+        }
         return { kind: 'status', payload: this.currentStatus() };
       }
 
@@ -348,17 +444,23 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
 
       case 'deployContract': {
         const contract = this.contractsByKey.get(req.contractKey);
-        if (!contract) throw new Error(`contract not found: ${req.contractKey}`);
+        if (!contract) {
+          throw new Error(`contract not found: ${req.contractKey}`);
+        }
         if (!contract.abi || !contract.bytecode || contract.bytecode === '0x') {
-          throw new Error(
-            `${contract.name} has no compiled bytecode — build the project first.`
-          );
+          throw new Error(`${contract.name} has no compiled bytecode — build the project first.`);
         }
         const rpcUrl = this.activeRpcUrl();
         const signer = await this.resolveSignerSource();
         const ctorAbi = contract.abi.find((e) => e.type === 'constructor');
         const ctorInputs = (ctorAbi?.inputs ?? []) as AbiParameter[];
         const ctorArgs = parseArgs(req.ctorArgsRaw, ctorInputs);
+        // ABI-encode the ctor args ahead of the actual deploy so we can pin
+        // them on the DeployedInstance. `forge verify-contract` needs this
+        // exact byte string — re-deriving it later from raw user input is
+        // fragile (numbers vs strings, addresses vs lowercase) so we capture
+        // the canonical bytes once and persist them.
+        const ctorArgsEncoded = await encodeCtorArgsHex(ctorInputs, ctorArgs);
         const entry: TxLogEntry = {
           id: makeId(),
           kind: 'deploy',
@@ -367,6 +469,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           fromAddress: this.activeFromAddress(),
           valueWei: req.valueWei,
           networkLabel: this.network.name,
+          chainId: this.resolveCurrentChainId(),
           at: Date.now(),
         };
         this.appendTx(entry);
@@ -388,8 +491,15 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
             abi: contract.abi,
             deployedAt: Date.now(),
             fromKey: contract.key,
+            chainId: this.resolveCurrentChainId(),
+            txHash: result.txHash,
+            ctorArgsEncoded,
+            sourcePath: contract.sourcePath,
+            projectRoot: contract.projectRoot,
+            projectType: contract.projectType,
           };
           this.instances = [...this.instances, instance];
+          this.persistInstances();
           this.updateTx(entry.id, {
             status: 'success',
             txHash: result.txHash,
@@ -413,7 +523,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       case 'callFunction': {
         const rpcUrl = this.activeRpcUrl();
         const fnAbi = findFunctionInAbi(req.abi, req.funcName);
-        if (!fnAbi) throw new Error(`function not found in ABI: ${req.funcName}`);
+        if (!fnAbi) {
+          throw new Error(`function not found in ABI: ${req.funcName}`);
+        }
         const args = parseArgs(req.argsRaw, fnAbi.inputs ?? []);
         const entry: TxLogEntry = {
           id: makeId(),
@@ -425,6 +537,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           fromAddress: this.activeFromAddress(),
           valueWei: req.valueWei,
           networkLabel: this.network.name,
+          chainId: this.resolveCurrentChainId(),
           at: Date.now(),
         };
         this.appendTx(entry);
@@ -455,7 +568,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
         const rpcUrl = this.activeRpcUrl();
         const signer = await this.resolveSignerSource();
         const fnAbi = findFunctionInAbi(req.abi, req.funcName);
-        if (!fnAbi) throw new Error(`function not found in ABI: ${req.funcName}`);
+        if (!fnAbi) {
+          throw new Error(`function not found in ABI: ${req.funcName}`);
+        }
         const args = parseArgs(req.argsRaw, fnAbi.inputs ?? []);
         const entry: TxLogEntry = {
           id: makeId(),
@@ -467,6 +582,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           fromAddress: this.activeFromAddress(),
           valueWei: req.valueWei,
           networkLabel: this.network.name,
+          chainId: this.resolveCurrentChainId(),
           at: Date.now(),
         };
         this.appendTx(entry);
@@ -500,14 +616,18 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
 
       case 'loadAtAddress': {
         const contract = this.contractsByKey.get(req.contractKey);
-        if (!contract) throw new Error(`contract not found: ${req.contractKey}`);
+        if (!contract) {
+          throw new Error(`contract not found: ${req.contractKey}`);
+        }
         if (!contract.abi || contract.abi.length === 0) {
           throw new Error(
             `${contract.name} has no ABI — build the project first so we can interact with it.`
           );
         }
         const { isAddress } = await import('ethers');
-        if (!isAddress(req.address)) throw new Error(`invalid address: ${req.address}`);
+        if (!isAddress(req.address)) {
+          throw new Error(`invalid address: ${req.address}`);
+        }
         const instance: DeployedInstance = {
           id: makeId(),
           name: contract.name,
@@ -516,16 +636,51 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
           abi: contract.abi,
           deployedAt: Date.now(),
           fromKey: contract.key,
+          chainId: this.resolveCurrentChainId(),
+          sourcePath: contract.sourcePath,
+          projectRoot: contract.projectRoot,
+          projectType: contract.projectType,
         };
         this.instances = [...this.instances, instance];
+        this.persistInstances();
         this.pushStatus();
         return { kind: 'status', payload: this.currentStatus() };
       }
 
       case 'removeInstance': {
         this.instances = this.instances.filter((i) => i.id !== req.instanceId);
+        this.persistInstances();
         this.pushStatus();
         return { kind: 'ok' };
+      }
+
+      case 'clearAllInstances': {
+        this.instances = [];
+        this.persistInstances();
+        this.pushStatus();
+        return { kind: 'ok' };
+      }
+
+      case 'openExplorer': {
+        // The webview composes the URL using BUILT_IN_NETWORKS data it already
+        // has — we just open it. Reject non-http URLs to avoid a malicious
+        // payload coercing vscode into launching e.g. a file:// path.
+        try {
+          const parsed = vscode.Uri.parse(req.url, true);
+          if (parsed.scheme !== 'http' && parsed.scheme !== 'https') {
+            return { kind: 'error', message: `refusing to open non-http URL: ${req.url}` };
+          }
+          await vscode.env.openExternal(parsed);
+          return { kind: 'ok' };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { kind: 'error', message: `bad URL: ${msg}` };
+        }
+      }
+
+      case 'verifyInstance': {
+        await this.verifyOneInstance(req.instanceId);
+        return { kind: 'status', payload: this.currentStatus() };
       }
 
       case 'clearTxLog': {
@@ -573,7 +728,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     const prev = this.contractsByKey;
     for (const c of found) {
       const old = prev.get(c.key);
-      if (old?.buildState === 'building') c.buildState = 'building';
+      if (old?.buildState === 'building') {
+        c.buildState = 'building';
+      }
       if (old?.buildState === 'failed' && !c.abi) {
         c.buildState = 'failed';
         c.lastError = old.lastError;
@@ -585,7 +742,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async buildOne(projectRoot: string): Promise<void> {
-    if (this.buildingProjects.has(projectRoot)) return;
+    if (this.buildingProjects.has(projectRoot)) {
+      return;
+    }
     this.buildingProjects.add(projectRoot);
 
     // Mark every contract under this project as 'building' for UI feedback.
@@ -602,7 +761,12 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       kind: 'buildStarted',
       projectRoot,
       // User-facing label; the actual command used is an implementation detail.
-      command: kind === 'hardhat' ? 'Compiling (Hardhat)' : kind === 'foundry' ? 'Compiling (Foundry)' : 'Compiling',
+      command:
+        kind === 'hardhat'
+          ? 'Compiling (Hardhat)'
+          : kind === 'foundry'
+            ? 'Compiling (Foundry)'
+            : 'Compiling',
     });
 
     // Clear stale diagnostics for any file under this project before re-running.
@@ -651,14 +815,20 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     const root = projectRoot.toLowerCase();
     const toClear: vscode.Uri[] = [];
     this.buildDiagnostics.forEach((uri) => {
-      if (uri.fsPath.toLowerCase().startsWith(root)) toClear.push(uri);
+      if (uri.fsPath.toLowerCase().startsWith(root)) {
+        toClear.push(uri);
+      }
     });
-    for (const uri of toClear) this.buildDiagnostics.delete(uri);
+    for (const uri of toClear) {
+      this.buildDiagnostics.delete(uri);
+    }
   }
 
   private publishBuildDiagnostics(projectRoot: string, output: string): void {
     const parsed = parseBuildDiagnostics(output, projectRoot);
-    if (parsed.length === 0) return;
+    if (parsed.length === 0) {
+      return;
+    }
     const byFile = groupByFile(parsed);
     for (const [filePath, items] of byFile) {
       const uri = vscode.Uri.file(filePath);
@@ -676,7 +846,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
               : vscode.DiagnosticSeverity.Error;
         const d = new vscode.Diagnostic(range, p.message, severity);
         d.source = '0xtools';
-        if (p.code) d.code = p.code;
+        if (p.code) {
+          d.code = p.code;
+        }
         return d;
       });
       this.buildDiagnostics.set(uri, diags);
@@ -685,7 +857,9 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
 
   private activeFromAddress(): string | undefined {
     const sel = this.accountSelection;
-    if (sel.kind === 'anvil') return this.getAnvil().getAccounts()[sel.index]?.address;
+    if (sel.kind === 'anvil') {
+      return this.getAnvil().getAccounts()[sel.index]?.address;
+    }
     if (sel.kind === 'keystore') {
       // We pulled the address into the selection itself when the user picked it.
       return sel.address;
@@ -700,10 +874,14 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   private activeRpcUrl(): string {
     if (this.network.kind === 'anvil') {
       const anvil = this.getAnvil();
-      if (!anvil.isRunning()) throw new Error('anvil is not running');
+      if (!anvil.isRunning()) {
+        throw new Error('anvil is not running');
+      }
       return anvil.getRpcUrl();
     }
-    if (!this.network.rpcUrl) throw new Error(`no RPC URL configured for ${this.network.name}`);
+    if (!this.network.rpcUrl) {
+      throw new Error(`no RPC URL configured for ${this.network.name}`);
+    }
     return this.network.rpcUrl;
   }
 
@@ -715,11 +893,17 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     keystoreName: string,
     opts: { force?: boolean } = {}
   ): Promise<void> {
-    if (this.network.kind === 'anvil' || !this.network.chainId) return;
+    if (this.network.kind === 'anvil' || !this.network.chainId) {
+      return;
+    }
     const raw = listKeystores().find((k) => k.name === keystoreName);
-    if (!raw) return;
+    if (!raw) {
+      return;
+    }
     const address = raw.address || this.addressOverlay.get(keystoreName) || '';
-    if (!address) return; // address still unknown — wait for an unlock to learn it
+    if (!address) {
+      return;
+    } // address still unknown — wait for an unlock to learn it
     const key = this.balanceCacheKey(keystoreName, this.network.chainId);
     this.balanceStatusByKey.set(key, 'fetching');
     this.balanceErrorByKey.delete(key);
@@ -738,9 +922,13 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async runOneScript(scriptKey: string, hardhatNetwork?: string): Promise<void> {
-    if (this.runningScripts.has(scriptKey)) return;
+    if (this.runningScripts.has(scriptKey)) {
+      return;
+    }
     const script = this.scriptsByKey.get(scriptKey);
-    if (!script) throw new Error(`script not found: ${scriptKey}`);
+    if (!script) {
+      throw new Error(`script not found: ${scriptKey}`);
+    }
 
     this.runningScripts.add(scriptKey);
     this.scriptRunStates.set(scriptKey, 'running');
@@ -754,7 +942,12 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       const message = err instanceof Error ? err.message : String(err);
       this.runningScripts.delete(scriptKey);
       this.scriptRunStates.set(scriptKey, 'error');
-      this.scriptResults.set(scriptKey, { error: message, deployed: [], txHashes: [], durationMs: 0 });
+      this.scriptResults.set(scriptKey, {
+        error: message,
+        deployed: [],
+        txHashes: [],
+        durationMs: 0,
+      });
       this.pushStatus();
       void this.sendEvent({
         kind: 'scriptFinished',
@@ -777,8 +970,15 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       | { kind: 'none' };
     try {
       const src = await this.resolveSignerSource();
-      if (src.kind === 'privateKey') signer = { kind: 'privateKey', privateKey: src.privateKey };
-      else signer = { kind: 'keystore', name: this.accountSelection.kind === 'keystore' ? this.accountSelection.name : '', password: src.password };
+      if (src.kind === 'privateKey') {
+        signer = { kind: 'privateKey', privateKey: src.privateKey };
+      } else {
+        signer = {
+          kind: 'keystore',
+          name: this.accountSelection.kind === 'keystore' ? this.accountSelection.name : '',
+          password: src.password,
+        };
+      }
     } catch {
       // Hardhat: fall back to 'none' so user's hardhat.config can provide accounts.
       signer = { kind: 'none' };
@@ -814,6 +1014,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       deployedAddress: result.deployedContracts[0]?.address,
       txHash: result.txHashes[0],
       networkLabel: this.network.name,
+      chainId: this.resolveCurrentChainId(),
       errorMessage: result.ok ? undefined : result.errorMessage,
       at: Date.now(),
     };
@@ -841,10 +1042,135 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     this.pushStatus();
   }
 
-  private async refreshAllBalancesForCurrentNetwork(
-    opts: { force?: boolean } = {}
-  ): Promise<void> {
-    if (this.network.kind === 'anvil' || !this.network.chainId) return;
+  /**
+   * Run `forge verify-contract` for one stored instance and stream its output
+   * back to the webview as `verify*` events. Resolves the API key from the
+   * extension's SecretStorage (per-chain key, falling back to a default).
+   */
+  private async verifyOneInstance(instanceId: string): Promise<void> {
+    const inst = this.instances.find((i) => i.id === instanceId);
+    if (!inst) {
+      void this.sendEvent({
+        kind: 'verifyFinished',
+        instanceId,
+        ok: false,
+        status: 'failed',
+        error: 'instance no longer exists in the panel',
+      });
+      return;
+    }
+    if (!inst.sourcePath || !inst.projectRoot || !inst.projectType) {
+      void this.sendEvent({
+        kind: 'verifyFinished',
+        instanceId,
+        ok: false,
+        status: 'failed',
+        error:
+          'no source location stored for this instance — re-deploy or re-load it via At Address to enable verification.',
+      });
+      return;
+    }
+    if (!inst.chainId) {
+      void this.sendEvent({
+        kind: 'verifyFinished',
+        instanceId,
+        ok: false,
+        status: 'failed',
+        error:
+          'this instance has no chainId pinned — likely an anvil deploy. Verification only applies to public chains.',
+      });
+      return;
+    }
+    const explorerBase = explorerUrlForKind(inst.network);
+    if (!explorerBase) {
+      void this.sendEvent({
+        kind: 'verifyFinished',
+        instanceId,
+        ok: false,
+        status: 'failed',
+        error: `no block explorer configured for network "${inst.network}"`,
+      });
+      return;
+    }
+
+    // Resolve the API key — prefer a per-chain key, fall back to the default
+    // slot. We don't ship one; the user sets it via the command palette.
+    const perChain = await this.context.secrets.get(etherscanSecretKey(inst.chainId));
+    const fallback = perChain
+      ? undefined
+      : await this.context.secrets.get(etherscanSecretKey(undefined));
+    const apiKey = perChain ?? fallback;
+    if (!apiKey) {
+      void this.sendEvent({
+        kind: 'verifyFinished',
+        instanceId,
+        ok: false,
+        status: 'failed',
+        error:
+          'no Etherscan API key configured. Run "0xtools: Set Etherscan API Key" from the command palette first.',
+      });
+      return;
+    }
+
+    // Mark the instance as verifying so the webview can render a spinner.
+    this.updateInstance(instanceId, {
+      verifyStatus: 'verifying',
+      verifyError: undefined,
+      verifyUrl: undefined,
+    });
+    this.pushStatus();
+    void this.sendEvent({ kind: 'verifyStarted', instanceId });
+
+    const result = await verifySource({
+      projectRoot: inst.projectRoot,
+      projectType: inst.projectType,
+      sourcePath: inst.sourcePath,
+      contractName: inst.name,
+      address: inst.address,
+      chainId: inst.chainId,
+      apiKey,
+      ctorArgsEncoded: inst.ctorArgsEncoded,
+      onLine: (line, stream) => {
+        void this.sendEvent({ kind: 'verifyLog', instanceId, stream, line });
+      },
+    });
+
+    const explorerUrl = result.ok
+      ? (buildExplorerUrl(explorerBase, 'address', inst.address) ?? undefined)
+      : undefined;
+    this.updateInstance(instanceId, {
+      verifyStatus: result.status,
+      verifyError: result.errorMessage,
+      verifyUrl: explorerUrl,
+    });
+    this.persistInstances();
+    this.pushStatus();
+    void this.sendEvent({
+      kind: 'verifyFinished',
+      instanceId,
+      ok: result.ok,
+      status: result.status,
+      error: result.errorMessage,
+      explorerUrl,
+    });
+  }
+
+  private updateInstance(id: string, patch: Partial<DeployedInstance>): void {
+    this.instances = this.instances.map((i) => (i.id === id ? { ...i, ...patch } : i));
+  }
+
+  /** Resolve the chain id for the active network. Anvil's id comes from runtime state. */
+  private resolveCurrentChainId(): number | undefined {
+    if (this.network.kind === 'anvil') {
+      return this.getAnvil().getState()?.chainId;
+    }
+    return this.network.chainId;
+  }
+
+  private async refreshAllBalancesForCurrentNetwork(opts: { force?: boolean } = {}): Promise<void> {
+    if (this.network.kind === 'anvil' || !this.network.chainId) {
+      return;
+    }
     // Fetch only the currently selected keystore for now — fanning out to all
     // keystores would be wasteful (most users have 1-2 and only one is active).
     // The other keystores still get their balance lazy-fetched when selected.
@@ -857,12 +1183,16 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     const sel = this.accountSelection;
     if (sel.kind === 'anvil') {
       const acc = this.getAnvil().getAccounts()[sel.index];
-      if (!acc) throw new Error('selected anvil account is unavailable');
+      if (!acc) {
+        throw new Error('selected anvil account is unavailable');
+      }
       return { kind: 'privateKey', privateKey: acc.privateKey };
     }
     if (sel.kind === 'keystore') {
       const pwd = takePassword(sel.name);
-      if (!pwd) throw new Error(`keystore "${sel.name}" is locked — unlock it first`);
+      if (!pwd) {
+        throw new Error(`keystore "${sel.name}" is locked — unlock it first`);
+      }
       const json = readKeystoreJson(this.keystorePathFor(sel.name));
       return { kind: 'keystore', json, password: pwd };
     }
@@ -871,7 +1201,7 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
 
   private keystorePathFor(name: string): string {
     // discovery validates these — but we still join here for the signing path
-    return require('path').join(getDefaultKeystoreDir(), name);
+    return path.join(getDefaultKeystoreDir(), name);
   }
 
   private appendTx(entry: TxLogEntry): void {
@@ -903,11 +1233,17 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       if (chainId !== undefined && this.network.kind !== 'anvil') {
         const key = this.balanceCacheKey(k.name, chainId);
         const balance = this.balanceByKey.get(key);
-        if (balance) info.balance = balance;
+        if (balance) {
+          info.balance = balance;
+        }
         const status = this.balanceStatusByKey.get(key);
-        if (status) info.balanceStatus = status;
+        if (status) {
+          info.balanceStatus = status;
+        }
         const err = this.balanceErrorByKey.get(key);
-        if (err) info.balanceError = err;
+        if (err) {
+          info.balanceError = err;
+        }
       }
       return info;
     });
@@ -974,13 +1310,17 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
   // ─── Message senders ───────────────────────────────────────────────────
 
   private async sendResponse(id: string, res: DeployRunResponse): Promise<void> {
-    if (!this.view) return;
+    if (!this.view) {
+      return;
+    }
     const env: Envelope = { type: 'res', id, res };
     await this.view.webview.postMessage(env);
   }
 
   private async sendEvent(evt: DeployRunEvent): Promise<void> {
-    if (!this.view) return;
+    if (!this.view) {
+      return;
+    }
     const env: Envelope = { type: 'evt', evt };
     await this.view.webview.postMessage(env);
   }
@@ -1017,7 +1357,9 @@ function makeId(): string {
 }
 
 function shortenAddr(a: string): string {
-  if (!a || a.length < 14) return a || '';
+  if (!a || a.length < 14) {
+    return a || '';
+  }
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
@@ -1035,14 +1377,18 @@ function buildProjectGroups(
 
   for (const c of contracts) {
     projects.add(c.projectRoot);
-    if (!projectTypeByRoot.has(c.projectRoot)) projectTypeByRoot.set(c.projectRoot, c.projectType);
+    if (!projectTypeByRoot.has(c.projectRoot)) {
+      projectTypeByRoot.set(c.projectRoot, c.projectType);
+    }
     const list = contractsByProject.get(c.projectRoot) ?? [];
     list.push(c);
     contractsByProject.set(c.projectRoot, list);
   }
   for (const s of scripts) {
     projects.add(s.projectRoot);
-    if (!projectTypeByRoot.has(s.projectRoot)) projectTypeByRoot.set(s.projectRoot, s.projectType);
+    if (!projectTypeByRoot.has(s.projectRoot)) {
+      projectTypeByRoot.set(s.projectRoot, s.projectType);
+    }
     const list = scriptsByProject.get(s.projectRoot) ?? [];
     list.push(s);
     scriptsByProject.set(s.projectRoot, list);
@@ -1055,14 +1401,14 @@ function buildProjectGroups(
 
     // Merge by directory — same Map carries both contracts and scripts.
     const byDirMap = new Map<string, { contracts: ContractSummary[]; scripts: ScriptSummary[] }>();
-    function bucket(dir: string): { contracts: ContractSummary[]; scripts: ScriptSummary[] } {
+    const bucket = (dir: string): { contracts: ContractSummary[]; scripts: ScriptSummary[] } => {
       let b = byDirMap.get(dir);
       if (!b) {
         b = { contracts: [], scripts: [] };
         byDirMap.set(dir, b);
       }
       return b;
-    }
+    };
     for (const c of projContracts) {
       const dir = c.sourcePath ? path.dirname(c.sourcePath) : '(root)';
       bucket(dir).contracts.push(c);
@@ -1100,7 +1446,9 @@ function buildProjectGroups(
  *  - inputs.length === 0 → return []
  */
 function parseArgs(argsRaw: string[], inputs: AbiParameter[]): unknown[] {
-  if (inputs.length === 0) return [];
+  if (inputs.length === 0) {
+    return [];
+  }
   if (argsRaw.length === 1 && inputs.length > 1) {
     return parseFunctionParams(argsRaw[0]);
   }
@@ -1117,9 +1465,34 @@ function findFunctionInAbi(abi: AbiEntry[], name: string): AbiEntry | undefined 
   return abi.find((e) => e.type === 'function' && e.name === name);
 }
 
+/**
+ * ABI-encode constructor args to the exact hex string `forge verify-contract`
+ * wants for its --constructor-args flag (no 0x prefix). Returns empty string
+ * when there are no inputs. We use ethers' AbiCoder so the encoding matches
+ * what the on-chain deployment actually appended to the bytecode — that's
+ * what Etherscan hashes against the source.
+ */
+async function encodeCtorArgsHex(
+  inputs: AbiParameter[],
+  values: unknown[]
+): Promise<string | undefined> {
+  if (!inputs || inputs.length === 0) {
+    return undefined;
+  }
+  try {
+    const { AbiCoder } = await import('ethers');
+    const types = inputs.map((i) => i.type);
+    const encoded = AbiCoder.defaultAbiCoder().encode(types, values);
+    return encoded.startsWith('0x') ? encoded.slice(2) : encoded;
+  } catch {
+    // Best-effort: if encoding fails (mismatched types etc.) we'd rather
+    // record nothing than ship a wrong constructor-args blob to Etherscan.
+    return undefined;
+  }
+}
+
 // Available built-in networks — re-exported for the webview side via the shared protocol
 void BUILT_IN_NETWORKS;
-
 
 // Themed via VS Code CSS variables — the palette flips with the active theme.
 // Design direction: editor-native premium. Subtle 5px radius, hairline borders,
@@ -2319,6 +2692,127 @@ body {
   100% { background-position: -200% 0; }
 }
 @media (prefers-reduced-motion: reduce) { .skel-bar { animation: none; } }
+
+/* ─── Explorer link button (tx log + instance card) ────────────── */
+.explorer-link {
+  opacity: 0.55;
+  font-size: 11px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+  padding: 0 4px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  transition: opacity 120ms ease, background 120ms ease;
+  line-height: 1;
+}
+.explorer-link:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+/* ─── Payable value row inside a function card ─────────────────── */
+.fn-value-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+.fn-value-label {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.7;
+  flex-shrink: 0;
+  min-width: 34px;
+}
+
+/* ─── Verify section ───────────────────────────────────────────── */
+.verify-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.verify-row.v-verified, .verify-row.v-already-verified {
+  border-color: color-mix(in srgb, var(--vscode-charts-green, #4ec9b0) 35%, transparent);
+  background: color-mix(in srgb, var(--vscode-charts-green, #4ec9b0) 5%, transparent);
+}
+.verify-row.v-failed {
+  border-color: color-mix(in srgb, var(--vscode-errorForeground, #f44747) 35%, transparent);
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f44747) 5%, transparent);
+}
+.verify-row.v-verifying {
+  border-color: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 35%, transparent);
+}
+.verify-pill {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+  color: var(--vscode-foreground);
+  flex-shrink: 0;
+}
+.verify-pill.v-verified, .verify-pill.v-already-verified {
+  background: color-mix(in srgb, var(--vscode-charts-green, #4ec9b0) 20%, transparent);
+  color: var(--vscode-charts-green, #4ec9b0);
+}
+.verify-pill.v-failed {
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f44747) 20%, transparent);
+  color: var(--vscode-errorForeground, #f44747);
+}
+.verify-pill.v-verifying {
+  background: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 20%, transparent);
+  color: var(--vscode-charts-yellow, #cca700);
+}
+.verify-spacer { flex: 1; }
+.vsc-button.small.ghost {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  color: var(--vscode-foreground);
+  opacity: 0.85;
+}
+.vsc-button.small.ghost:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+  opacity: 1;
+}
+.verify-error {
+  flex-basis: 100%;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  color: var(--vscode-errorForeground, #f44747);
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.verify-log {
+  flex-basis: 100%;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  color: var(--vscode-foreground);
+  opacity: 0.85;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
+  border: 1px solid var(--vscode-editorWidget-border, transparent);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 4px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ─── Narrow-width tweaks ───────────────────────────────────────── */
 @media (max-width: 300px) {

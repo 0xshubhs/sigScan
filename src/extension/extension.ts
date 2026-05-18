@@ -212,7 +212,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   // Register the Deploy & Run sidebar (Activity Bar → 0xTools → Deploy & Run)
-  _deployRunProvider = new DeployRunViewProvider(context.extensionUri, getAnvilManager);
+  _deployRunProvider = new DeployRunViewProvider(context.extensionUri, getAnvilManager, context);
   const deployRunDisposable = vscode.window.registerWebviewViewProvider(
     DeployRunViewProvider.viewType,
     _deployRunProvider,
@@ -326,6 +326,78 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('sigscan.deployRun.refresh', () => {
       _deployRunProvider?.pushStatus();
+    }),
+
+    // Stash an Etherscan-family API key in SecretStorage so the Deploy & Run
+    // panel can use it for `forge verify-contract`. We let the user scope the
+    // key to a specific chain family or save it as a global default; per-chain
+    // keys take precedence at verify time.
+    vscode.commands.registerCommand('sigscan.deployRun.setEtherscanApiKey', async () => {
+      const { etherscanSecretKey } = await import('./providers/deploy-run-provider');
+      const scope = await vscode.window.showQuickPick(
+        [
+          {
+            label: 'Default (all chains)',
+            description: 'Used as a fallback when no per-chain key is set',
+            chainId: undefined as number | undefined,
+          },
+          { label: 'Ethereum (1)', chainId: 1 },
+          { label: 'Sepolia (11155111)', chainId: 11155111 },
+          { label: 'Base (8453)', chainId: 8453 },
+          { label: 'Base Sepolia (84532)', chainId: 84532 },
+          { label: 'Arbitrum One (42161)', chainId: 42161 },
+          { label: 'Arbitrum Sepolia (421614)', chainId: 421614 },
+          { label: 'Optimism (10)', chainId: 10 },
+          { label: 'Optimism Sepolia (11155420)', chainId: 11155420 },
+          { label: 'Polygon (137)', chainId: 137 },
+          { label: 'Polygon Amoy (80002)', chainId: 80002 },
+          { label: 'BNB Smart Chain (56)', chainId: 56 },
+          { label: 'BSC Testnet (97)', chainId: 97 },
+        ],
+        { placeHolder: 'Which chain is this API key for?', title: 'Set Etherscan-family API Key' }
+      );
+      if (!scope) {
+        return;
+      }
+      const key = await vscode.window.showInputBox({
+        prompt: `API key for ${scope.label}`,
+        password: true,
+        ignoreFocusOut: true,
+        placeHolder: 'Paste your Etherscan/Basescan/Polygonscan API key',
+        validateInput: (v) => (v.trim().length === 0 ? 'API key is required' : null),
+      });
+      if (!key) {
+        return;
+      }
+      await context.secrets.store(etherscanSecretKey(scope.chainId), key.trim());
+      vscode.window.showInformationMessage(`0xTools: API key saved for ${scope.label}`);
+    }),
+
+    vscode.commands.registerCommand('sigscan.deployRun.clearEtherscanApiKey', async () => {
+      const { etherscanSecretKey } = await import('./providers/deploy-run-provider');
+      const scope = await vscode.window.showQuickPick(
+        [
+          { label: 'Default (all chains)', chainId: undefined as number | undefined },
+          { label: 'Ethereum (1)', chainId: 1 },
+          { label: 'Sepolia (11155111)', chainId: 11155111 },
+          { label: 'Base (8453)', chainId: 8453 },
+          { label: 'Base Sepolia (84532)', chainId: 84532 },
+          { label: 'Arbitrum One (42161)', chainId: 42161 },
+          { label: 'Arbitrum Sepolia (421614)', chainId: 421614 },
+          { label: 'Optimism (10)', chainId: 10 },
+          { label: 'Optimism Sepolia (11155420)', chainId: 11155420 },
+          { label: 'Polygon (137)', chainId: 137 },
+          { label: 'Polygon Amoy (80002)', chainId: 80002 },
+          { label: 'BNB Smart Chain (56)', chainId: 56 },
+          { label: 'BSC Testnet (97)', chainId: 97 },
+        ],
+        { placeHolder: 'Which chain key should we clear?', title: 'Clear Etherscan-family API Key' }
+      );
+      if (!scope) {
+        return;
+      }
+      await context.secrets.delete(etherscanSecretKey(scope.chainId));
+      vscode.window.showInformationMessage(`0xTools: API key cleared for ${scope.label}`);
     }),
 
     // Collision detection

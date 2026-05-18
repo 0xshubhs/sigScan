@@ -112,10 +112,7 @@ export const BUILT_IN_NETWORKS: readonly NetworkConfig[] = [
     nativeSymbol: 'ETH',
     explorerUrl: 'https://arbiscan.io',
     rpcUrl: 'https://arb1.arbitrum.io/rpc',
-    rpcUrls: [
-      'https://arbitrum.llamarpc.com',
-      'https://arbitrum.publicnode.com',
-    ],
+    rpcUrls: ['https://arbitrum.llamarpc.com', 'https://arbitrum.publicnode.com'],
   },
   {
     kind: 'optimism',
@@ -124,10 +121,7 @@ export const BUILT_IN_NETWORKS: readonly NetworkConfig[] = [
     nativeSymbol: 'ETH',
     explorerUrl: 'https://optimistic.etherscan.io',
     rpcUrl: 'https://mainnet.optimism.io',
-    rpcUrls: [
-      'https://optimism.llamarpc.com',
-      'https://optimism.publicnode.com',
-    ],
+    rpcUrls: ['https://optimism.llamarpc.com', 'https://optimism.publicnode.com'],
   },
   {
     kind: 'polygon',
@@ -136,10 +130,7 @@ export const BUILT_IN_NETWORKS: readonly NetworkConfig[] = [
     nativeSymbol: 'POL',
     explorerUrl: 'https://polygonscan.com',
     rpcUrl: 'https://polygon-rpc.com',
-    rpcUrls: [
-      'https://polygon.llamarpc.com',
-      'https://polygon.publicnode.com',
-    ],
+    rpcUrls: ['https://polygon.llamarpc.com', 'https://polygon.publicnode.com'],
   },
   {
     kind: 'bsc',
@@ -148,10 +139,7 @@ export const BUILT_IN_NETWORKS: readonly NetworkConfig[] = [
     nativeSymbol: 'BNB',
     explorerUrl: 'https://bscscan.com',
     rpcUrl: 'https://bsc-dataseed.binance.org',
-    rpcUrls: [
-      'https://bsc.publicnode.com',
-      'https://bsc-rpc.publicnode.com',
-    ],
+    rpcUrls: ['https://bsc.publicnode.com', 'https://bsc-rpc.publicnode.com'],
   },
   // ─── Testnets ─────────────────────────────────────────────────────────
   {
@@ -202,9 +190,7 @@ export const BUILT_IN_NETWORKS: readonly NetworkConfig[] = [
     explorerUrl: 'https://sepolia-optimism.etherscan.io',
     isTestnet: true,
     rpcUrl: 'https://sepolia.optimism.io',
-    rpcUrls: [
-      'https://optimism-sepolia.publicnode.com',
-    ],
+    rpcUrls: ['https://optimism-sepolia.publicnode.com'],
   },
   {
     kind: 'polygon-amoy',
@@ -227,9 +213,7 @@ export const BUILT_IN_NETWORKS: readonly NetworkConfig[] = [
     explorerUrl: 'https://testnet.bscscan.com',
     isTestnet: true,
     rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
-    rpcUrls: [
-      'https://bsc-testnet.publicnode.com',
-    ],
+    rpcUrls: ['https://bsc-testnet.publicnode.com'],
   },
 ];
 
@@ -307,7 +291,7 @@ export interface ContractSummary {
   sourcePath: string;
   projectRoot: string;
   projectType: 'foundry' | 'hardhat' | 'solidity';
-  abi: AbiEntry[];           // empty array if not built yet
+  abi: AbiEntry[]; // empty array if not built yet
   hasBytecode: boolean;
   buildState: ContractBuildState;
   lastError?: string;
@@ -352,14 +336,30 @@ export interface ScriptSummary {
   lastDurationMs?: number;
 }
 
+export type VerifyStatus = 'idle' | 'verifying' | 'verified' | 'already-verified' | 'failed';
+
 export interface DeployedInstance {
-  id: string;          // local UUID
+  id: string; // local UUID
   name: string;
   address: string;
   network: NetworkKind;
   abi: AbiEntry[];
-  deployedAt: number;  // epoch ms
-  fromKey?: string;    // ContractSummary.key if known
+  deployedAt: number; // epoch ms
+  fromKey?: string; // ContractSummary.key if known
+  /** Chain id at deploy time — pinned so persisted entries survive network renames. */
+  chainId?: number;
+  /** Deployment tx hash, when we have one (loadAtAddress entries don't). */
+  txHash?: string;
+  /** Hex-encoded constructor arg bytes (without 0x prefix) — needed by `forge verify-contract`. */
+  ctorArgsEncoded?: string;
+  /** Absolute path to the contract source file. Required for verification. */
+  sourcePath?: string;
+  projectRoot?: string;
+  projectType?: 'foundry' | 'hardhat' | 'solidity';
+  verifyStatus?: VerifyStatus;
+  verifyError?: string;
+  /** Explorer URL to the verified source, when verification succeeded. */
+  verifyUrl?: string;
 }
 
 export interface TxLogEntry {
@@ -384,7 +384,9 @@ export interface TxLogEntry {
   valueWei?: string;
   /** Network identifier the tx ran on — anvil chain id, sepolia, etc. */
   networkLabel?: string;
-  at: number;          // epoch ms
+  /** Chain id at tx time. Set when known so the webview can compose explorer URLs. */
+  chainId?: number;
+  at: number; // epoch ms
 }
 
 export interface DeployRunStatus {
@@ -428,8 +430,8 @@ export type DeployRunRequest =
       // Raw strings from the form: length === N for per-field mode,
       // length === 1 for inline comma-separated mode (parsed via parseFunctionParams host-side).
       ctorArgsRaw: string[];
-      valueWei?: string;             // bigint as string
-      gasLimit?: string;             // bigint as string
+      valueWei?: string; // bigint as string
+      gasLimit?: string; // bigint as string
     }
   | {
       kind: 'callFunction';
@@ -450,6 +452,9 @@ export type DeployRunRequest =
     }
   | { kind: 'loadAtAddress'; contractKey: string; address: string }
   | { kind: 'removeInstance'; instanceId: string }
+  | { kind: 'clearAllInstances' }
+  | { kind: 'openExplorer'; url: string }
+  | { kind: 'verifyInstance'; instanceId: string }
   | { kind: 'clearTxLog' };
 
 // ─── Responses ───────────────────────────────────────────────────────────
@@ -473,7 +478,25 @@ export type DeployRunEvent =
   | { kind: 'buildFinished'; projectRoot: string; ok: boolean; durationMs: number; error?: string }
   | { kind: 'scriptStarted'; scriptKey: string }
   | { kind: 'scriptLog'; scriptKey: string; stream: 'stdout' | 'stderr'; line: string }
-  | { kind: 'scriptFinished'; scriptKey: string; ok: boolean; durationMs: number; error?: string; deployed: string[]; txHashes: string[] };
+  | {
+      kind: 'scriptFinished';
+      scriptKey: string;
+      ok: boolean;
+      durationMs: number;
+      error?: string;
+      deployed: string[];
+      txHashes: string[];
+    }
+  | { kind: 'verifyStarted'; instanceId: string }
+  | { kind: 'verifyLog'; instanceId: string; stream: 'stdout' | 'stderr'; line: string }
+  | {
+      kind: 'verifyFinished';
+      instanceId: string;
+      ok: boolean;
+      status: VerifyStatus;
+      error?: string;
+      explorerUrl?: string;
+    };
 
 // ─── Envelopes ───────────────────────────────────────────────────────────
 
@@ -509,12 +532,16 @@ export function isEvent(e: Envelope): e is EventEnvelope {
 // ─── Unit conversion helpers (used on both sides) ────────────────────────
 
 export function valueToWei(value: string, unit: ValueUnit): bigint {
-  if (!value || value.trim() === '') return 0n;
+  if (!value || value.trim() === '') {
+    return 0n;
+  }
   const trimmed = value.trim();
   const isNegative = trimmed.startsWith('-');
   const unsigned = isNegative ? trimmed.slice(1) : trimmed;
   const parts = unsigned.split('.');
-  if (parts.length > 2) throw new Error(`invalid numeric value: ${value}`);
+  if (parts.length > 2) {
+    throw new Error(`invalid numeric value: ${value}`);
+  }
   const intPart = parts[0];
   const fracPart = parts[1] ?? '';
   if (!/^\d*$/.test(intPart) || !/^\d*$/.test(fracPart)) {
@@ -524,10 +551,48 @@ export function valueToWei(value: string, unit: ValueUnit): bigint {
   const decimals = multipliers[unit];
   // Right-pad/truncate the fractional segment to exactly `decimals` chars
   const truncatedFrac =
-    fracPart.length > decimals
-      ? fracPart.slice(0, decimals)
-      : fracPart.padEnd(decimals, '0');
+    fracPart.length > decimals ? fracPart.slice(0, decimals) : fracPart.padEnd(decimals, '0');
   const combined = intPart + truncatedFrac;
   const cleaned = combined.replace(/^0+/, '') || '0';
   return (isNegative ? -1n : 1n) * BigInt(cleaned);
+}
+
+// ─── Block-explorer URL helpers ──────────────────────────────────────────
+
+export type ExplorerLinkKind = 'tx' | 'address';
+
+/**
+ * Compose a block-explorer URL for a tx hash or address. Returns null when the
+ * network has no `explorerUrl` (anvil, custom chains without one).
+ *
+ * Etherscan-family, blockscout, basescan, etc. all use the same /tx/<hash> and
+ * /address/<addr> path convention, so a single composer works for the chains
+ * we ship in BUILT_IN_NETWORKS.
+ */
+export function buildExplorerUrl(
+  explorerUrl: string | undefined,
+  kind: ExplorerLinkKind,
+  value: string
+): string | null {
+  if (!explorerUrl) {
+    return null;
+  }
+  if (!value) {
+    return null;
+  }
+  const base = explorerUrl.replace(/\/+$/, '');
+  return `${base}/${kind}/${value}`;
+}
+
+/** Look up the explorer URL for a given chain by NetworkKind. */
+export function explorerUrlForKind(kind: NetworkKind): string | undefined {
+  return BUILT_IN_NETWORKS.find((n) => n.kind === kind)?.explorerUrl;
+}
+
+/** Look up the explorer URL for a chain by its numeric chainId. */
+export function explorerUrlForChainId(chainId: number | undefined): string | undefined {
+  if (chainId === undefined) {
+    return undefined;
+  }
+  return BUILT_IN_NETWORKS.find((n) => n.chainId === chainId)?.explorerUrl;
 }

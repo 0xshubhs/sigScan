@@ -29,6 +29,7 @@
     ".vscode-test",
     "coverage",
     "*.config.js",
-    "webpack.config.js"
+    "webpack.config.js",
+    "src/webview/**"
   ]
 }

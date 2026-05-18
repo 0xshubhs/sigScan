@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { TxLogEntry } from '../../../shared/deploy-run-protocol';
 import type { Bus } from '../bus';
+import { explorerUrlFor, openExplorerVia } from '../explorer';
 
 interface Props {
   entries: TxLogEntry[];
@@ -141,6 +142,35 @@ function CopyInline({ value }: { value: string }): JSX.Element {
   );
 }
 
+/**
+ * Block-explorer link button. Renders nothing when the entry's chain has no
+ * explorer URL configured (anvil, custom chains) — that way the markup stays
+ * stable but invisible rather than showing a dead button.
+ */
+function ExplorerLink({
+  url,
+  bus,
+  label,
+}: {
+  url: string | null;
+  bus: Bus;
+  label: string;
+}): JSX.Element | null {
+  if (!url) return null;
+  return (
+    <button
+      className="explorer-link"
+      title={`Open on explorer · ${label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        openExplorerVia(bus, url);
+      }}
+    >
+      ↗
+    </button>
+  );
+}
+
 function EmptyState(): JSX.Element {
   return (
     <div className="tx-empty">
@@ -160,11 +190,13 @@ function EmptyState(): JSX.Element {
 interface EntryProps {
   tx: TxLogEntry;
   defaultOpen: boolean;
+  bus: Bus;
 }
 
-function TxEntry({ tx, defaultOpen }: EntryProps): JSX.Element {
+function TxEntry({ tx, defaultOpen, bus }: EntryProps): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   const hasMeta = tx.gasUsed || tx.blockNumber !== undefined || tx.txHash;
+  const explorerCtx = { chainId: tx.chainId };
 
   return (
     <div className={`tx-entry ${tx.status}`}>
@@ -208,6 +240,11 @@ function TxEntry({ tx, defaultOpen }: EntryProps): JSX.Element {
               <div className="dd dd-address-deploy">
                 <span className="mono">{tx.deployedAddress}</span>
                 <CopyInline value={tx.deployedAddress} />
+                <ExplorerLink
+                  url={explorerUrlFor(explorerCtx, 'address', tx.deployedAddress)}
+                  bus={bus}
+                  label="contract address"
+                />
               </div>
             </>
           )}
@@ -219,6 +256,11 @@ function TxEntry({ tx, defaultOpen }: EntryProps): JSX.Element {
               <div className="dd">
                 <span className="mono">{shorten(tx.toAddress, 8, 6)}</span>
                 <CopyInline value={tx.toAddress} />
+                <ExplorerLink
+                  url={explorerUrlFor(explorerCtx, 'address', tx.toAddress)}
+                  bus={bus}
+                  label="target contract"
+                />
               </div>
             </>
           )}
@@ -230,6 +272,11 @@ function TxEntry({ tx, defaultOpen }: EntryProps): JSX.Element {
               <div className="dd">
                 <span className="mono">{shorten(tx.fromAddress, 8, 6)}</span>
                 <CopyInline value={tx.fromAddress} />
+                <ExplorerLink
+                  url={explorerUrlFor(explorerCtx, 'address', tx.fromAddress)}
+                  bus={bus}
+                  label="sender"
+                />
               </div>
             </>
           )}
@@ -251,6 +298,11 @@ function TxEntry({ tx, defaultOpen }: EntryProps): JSX.Element {
                   <div className="dd">
                     <span className="mono">{shorten(tx.txHash, 8, 6)}</span>
                     <CopyInline value={tx.txHash} />
+                    <ExplorerLink
+                      url={explorerUrlFor(explorerCtx, 'tx', tx.txHash)}
+                      bus={bus}
+                      label="transaction"
+                    />
                   </div>
                 </>
               )}
@@ -348,7 +400,7 @@ export function TxLogPanel({ entries, bus }: Props): JSX.Element {
             // Auto-expand the newest entry so the user sees the full receipt
             // (deployed address, events, etc.) without clicking. Older entries
             // collapse to the one-line header.
-            <TxEntry key={tx.id} tx={tx} defaultOpen={i === 0} />
+            <TxEntry key={tx.id} tx={tx} defaultOpen={i === 0} bus={bus} />
           ))}
         </div>
       )}

@@ -344,6 +344,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "sigscan.deployRun.setEtherscanApiKey",
+        "title": "Set Etherscan API Key",
+        "category": "0xTools",
+        "icon": "$(key)"
+      },
+      {
+        "command": "sigscan.deployRun.clearEtherscanApiKey",
+        "title": "Clear Etherscan API Key",
+        "category": "0xTools",
+        "icon": "$(trash)"
+      },
+      {
         "command": "sigscan.runForgeScript",
         "title": "Run Forge Script",
         "category": "0xTools",
