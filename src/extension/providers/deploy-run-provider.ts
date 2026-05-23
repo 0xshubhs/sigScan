@@ -885,6 +885,38 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     return this.network.rpcUrl;
   }
 
+  /**
+   * Hardhat ships a built-in `localhost` network hard-wired to
+   * http://127.0.0.1:8545. When our active node is on that exact endpoint
+   * (managed Anvil, or a custom localhost:8545 RPC) we return `'localhost'` so a
+   * hardhat script targets it instead of Hardhat's throwaway in-process EVM.
+   * Returns undefined for any other endpoint — there we can't safely guess a
+   * network name from the user's hardhat.config.
+   */
+  private hardhatLocalNetworkName(): string | undefined {
+    try {
+      const url = this.activeRpcUrl().trim();
+      if (/^https?:\/\/(?:127\.0\.0\.1|localhost):8545\/?$/i.test(url)) {
+        return 'localhost';
+      }
+    } catch {
+      /* no active RPC — leave it to hardhat's default */
+    }
+    return undefined;
+  }
+
+  /** Find a discovered contract by name, scoped to a project when given, and
+   *  preferring one that actually carries an ABI (skip interface-only matches). */
+  private findBuiltContractByName(
+    name: string,
+    projectRoot?: string
+  ): DiscoveredContract | undefined {
+    const byName = this.contracts.filter((c) => c.name === name);
+    const scoped = projectRoot ? byName.filter((c) => c.projectRoot === projectRoot) : byName;
+    const pool = scoped.length > 0 ? scoped : byName;
+    return pool.find((c) => c.abi && c.abi.length > 0) ?? pool[0];
+  }
+
   private balanceCacheKey(name: string, chainId: number): string {
     return `${name}::${chainId}`;
   }
@@ -984,11 +1016,23 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
       signer = { kind: 'none' };
     }
 
+    // Hardhat ignores our network selection unless we pass `--network`. Default
+    // it to the built-in `localhost` network when we're pointed at a local node,
+    // so the script deploys to Anvil instead of Hardhat's throwaway in-process EVM.
+    const effectiveHardhatNetwork =
+      script.kind !== 'foundry'
+        ? (hardhatNetwork ?? this.hardhatLocalNetworkName())
+        : hardhatNetwork;
+    // Whether the run actually targeted the active node (so parsed addresses are
+    // real and persistent). Forge always uses --rpc-url; Hardhat only does when
+    // we resolved a --network for it.
+    const ranAgainstActiveNode = script.kind === 'foundry' || effectiveHardhatNetwork !== undefined;
+
     const result = await runScript({
       script,
       rpcUrl,
       networkLabel: this.network.name,
-      hardhatNetwork,
+      hardhatNetwork: effectiveHardhatNetwork,
       signer,
       onLine: (line, stream) => {
         void this.sendEvent({ kind: 'scriptLog', scriptKey, stream, line });
@@ -1020,14 +1064,41 @@ export class DeployRunViewProvider implements vscode.WebviewViewProvider {
     };
     this.appendTx(summaryTx);
 
-    // For each deployed address, also try to register it as a DeployedInstance
-    // so the user can interact with it. We don't know the ABI yet, so this
-    // step is best-effort — find a matching built contract with that address.
-    for (const dc of result.deployedContracts) {
-      // Heuristic: don't auto-add — we can't tell which contract the script
-      // deployed. The user can use "At Address" to load it manually with the
-      // correct ABI. We still surface the address in the tx log for copy/paste.
-      void dc;
+    // Register each parsed deployed address as a DeployedInstance so it shows up
+    // in the panel. Names come from "Name -> 0x..." style output; when the name
+    // matches a built contract we attach its ABI so the instance is callable.
+    // We only do this when the run actually hit the active node (see above) and
+    // succeeded — otherwise the addresses would be ephemeral/in-process.
+    if (ranAgainstActiveNode && result.ok && result.deployedContracts.length > 0) {
+      const chainId = this.resolveCurrentChainId();
+      let added = false;
+      for (const dc of result.deployedContracts) {
+        if (this.instances.some((i) => i.address.toLowerCase() === dc.address.toLowerCase())) {
+          continue; // already tracked (manual deploy, At Address, or a prior run)
+        }
+        const match = dc.name
+          ? this.findBuiltContractByName(dc.name, script.projectRoot)
+          : undefined;
+        const instance: DeployedInstance = {
+          id: makeId(),
+          name: dc.name ?? shortenAddr(dc.address),
+          address: dc.address,
+          network: this.network.kind,
+          abi: match?.abi ?? [],
+          deployedAt: Date.now(),
+          fromKey: match?.key,
+          chainId,
+          txHash: result.txHashes[0],
+          sourcePath: match?.sourcePath,
+          projectRoot: match?.projectRoot ?? script.projectRoot,
+          projectType: match?.projectType ?? (script.kind === 'foundry' ? 'foundry' : 'hardhat'),
+        };
+        this.instances = [...this.instances, instance];
+        added = true;
+      }
+      if (added) {
+        this.persistInstances();
+      }
     }
 
     void this.sendEvent({
