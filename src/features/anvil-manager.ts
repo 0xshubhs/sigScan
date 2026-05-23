@@ -63,6 +63,19 @@ const OUTPUT_BUFFER_LIMIT = 64 * 1024;
 const ADDR_REGEX = /\((\d+)\)\s+(0x[0-9a-fA-F]{40})\s+\(([^)]+)\)/g;
 const KEY_REGEX = /\((\d+)\)\s+(0x[0-9a-fA-F]{64})/g;
 
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Does a PID still exist? Signal 0 performs an existence/permission check
+ *  without actually delivering a signal. */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // AnvilManager
 // ---------------------------------------------------------------------------
@@ -111,6 +124,11 @@ export class AnvilManager {
     this.chainId = this.config.chainId || 31337;
     this.outputBuffer = '';
     this.accounts = [];
+
+    // Make "Start Anvil" idempotent: a previous anvil (ours or one started
+    // outside the extension, e.g. from a terminal) may still hold the port and
+    // anvil can't bind a port that's in use. Free it before we spawn.
+    await this.freePort(this.port);
 
     const args = this.buildArgs();
 
@@ -197,6 +215,88 @@ export class AnvilManager {
         resolve();
       }, 5_000);
     });
+  }
+
+  /**
+   * Terminate whatever is currently LISTENING on `port` so a fresh anvil can
+   * bind it. Targets only the process(es) holding that exact port (most often a
+   * stale anvil), SIGTERM then SIGKILL, and waits for the port to clear.
+   * Best-effort: silently no-ops when it can't enumerate listeners (lsof
+   * missing, or Windows), leaving the spawn to surface any bind error as before.
+   */
+  private async freePort(port: number): Promise<void> {
+    const listeners = await this.listenersOnPort(port);
+    const pids = listeners.map((l) => l.pid).filter((pid) => pid !== process.pid);
+    if (pids.length === 0) {
+      return;
+    }
+    for (const l of listeners) {
+      this.appendOutput(`[0xtools] freeing port ${port} — stopping ${l.command} (pid ${l.pid})\n`);
+    }
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* already gone / not permitted */
+      }
+    }
+    await delay(400);
+    for (const pid of pids) {
+      if (isPidAlive(pid)) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    await this.waitForPortFree(port, 3_000);
+  }
+
+  /** Enumerate processes LISTENING on a TCP port via `lsof`. Returns [] when
+   *  lsof is unavailable or nothing is bound. */
+  private listenersOnPort(port: number): Promise<Array<{ pid: number; command: string }>> {
+    return new Promise((resolve) => {
+      if (process.platform === 'win32') {
+        resolve([]); // not supported here — fall back to the spawn bind error
+        return;
+      }
+      execFile(
+        'lsof',
+        ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-F', 'pc'],
+        { timeout: 3_000 },
+        (err, stdout) => {
+          if (err || !stdout) {
+            resolve([]);
+            return;
+          }
+          // lsof -F pc emits one record per process: a `p<pid>` line followed
+          // by a `c<command>` line.
+          const out: Array<{ pid: number; command: string }> = [];
+          let pid: number | null = null;
+          for (const line of stdout.split('\n')) {
+            if (line.startsWith('p')) {
+              pid = parseInt(line.slice(1), 10);
+            } else if (line.startsWith('c') && pid !== null) {
+              out.push({ pid, command: line.slice(1) });
+              pid = null;
+            }
+          }
+          resolve(out.filter((r) => Number.isInteger(r.pid)));
+        }
+      );
+    });
+  }
+
+  /** Poll until nothing is LISTENING on the port, or the timeout elapses. */
+  private async waitForPortFree(port: number, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if ((await this.listenersOnPort(port)).length === 0) {
+        return;
+      }
+      await delay(150);
+    }
   }
 
   /** Check if Anvil is currently running */
