@@ -410,15 +410,8 @@ export class ProjectScanner {
    */
   private async findSolidityFiles(dirPath: string): Promise<string[]> {
     const pattern = path.join(dirPath, '**/*.sol');
-    return new Promise((resolve, reject) => {
-      glob(pattern, (err, files) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(files);
-        }
-      });
-    });
+    // glob v9+ is promise-based; the legacy callback overload was removed.
+    return glob(pattern);
   }
 
   /**

@@ -13,12 +13,18 @@ webpack.config.js
 jest.config.js
 commitlint.config.js
 .eslintrc*
+eslint.config.js
 .prettierrc*
 .editorconfig
 
-# Dev files
+# Dev files (vsce matches with minimatch — `*` does not cross `/`, so use `**/`)
 *.ts
-*.map
+**/*.ts
+**/*.map
+bun.lock
+future.md
+tsconfig.webview.json
+.husky/**
 .gitignore
 .git/**
 ARCHITECTURE.md
@@ -36,6 +42,10 @@ CONTRIBUTING.md
 **/*.test.*
 **/*.spec.*
 
-# Dev dependencies (vsce includes only production deps from node_modules automatically)
-node_modules/.pnpm/**
-node_modules/.package-lock.json
+# node_modules: packaged with `vsce package --no-dependencies` because the repo uses
+# bun, whose node_modules layout vsce's npm-based dependency walker can't read. Before
+# packaging, node_modules is reinstalled production-only (`bun install --production`),
+# so only runtime deps remain here — chiefly `solc`, a webpack external that
+# SolcManager lazily `require()`s at runtime. Just trim bun's internal dirs.
+node_modules/.bin/**
+node_modules/.cache/**

@@ -2,8 +2,11 @@ import { ProjectScanner } from '../scanner';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Mock fs module
+// Mock fs module. Spread the real module first so that transitive importers
+// (glob v9+ → path-scurry reads `fs.realpathSync.native` at load time) still
+// resolve; only the four methods the scanner uses are stubbed.
 jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
   existsSync: jest.fn(),
   statSync: jest.fn(),
   readdirSync: jest.fn(),

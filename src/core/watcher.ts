@@ -68,7 +68,7 @@ export class FileWatcher extends EventEmitter {
         }
         this.emit('fileRemoved', filePath);
       })
-      .on('error', (error: Error) => {
+      .on('error', (error: unknown) => {
         this.emit('error', error);
       });
 
