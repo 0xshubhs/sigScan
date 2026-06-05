@@ -24,7 +24,11 @@ A professional VS Code extension and CLI tool for automatically scanning and gen
 
 ## Overview
 
-0xTools is a developer tool designed to streamline smart contract development by automatically extracting and organizing function signatures, events, and custom errors from Solidity contracts. It supports both Foundry and Hardhat project structures and provides organized output that can be used for testing, documentation, and contract interaction.
+0xTools is a comprehensive Solidity developer toolkit, shipping as both a VS Code extension and a CLI. At its core it extracts and organizes function selectors, event topics, and custom error selectors from your contracts, and layers on real-time inline gas estimation backed by a three-tier compilation pipeline (a Rust/revm runner → Foundry's `forge` → a solc-wasm fallback) so gas numbers stay accurate as you type. It works with both Foundry and Hardhat project structures.
+
+Beyond signatures and gas, 0xTools provides deeper static analysis — storage-layout and function call-graph inspection, deployment-cost estimation, and a security/quality suite covering reentrancy, unchecked low-level calls, access control, dangerous patterns (`tx.origin`, `selfdestruct`, `delegatecall`), DeFi and MEV risks, NatSpec completeness, and custom-error suggestions — with optional Slither and Mythril integration for heavier audits.
+
+For working against live and local chains, it includes on-chain inspection tools (transaction inspector, address/proxy inspector, event decoder, 4-byte selector lookup, and source verification) and a Remix-style **Deploy & Run** sidebar for deploying and interacting with contracts across multiple networks, complete with Anvil management, keystore accounts, block-explorer links, and source verification. Rounding it out are tight Foundry (`forge`/`cast`/`anvil` scripts and tests) and Hardhat integration, contract flattening, and Foundry test-stub generation.
 
 ## Features
 
@@ -104,7 +108,7 @@ The extension uses solc for accurate gas analysis:
 ### From VSIX File
 
 ```bash
-code --install-extension 0xtools-0.3.0.vsix
+code --install-extension 0xtools-0.0.5.vsix
 ```
 
 ### Command Line Installation
@@ -677,5 +681,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Maintained by**: [0xshubhs](https://github.com/0xshubhs)  
-**Version**: 0.3.0  
-**Last Updated**: November 2025
+**Version**: 0.0.5  
+**Last Updated**: June 2026

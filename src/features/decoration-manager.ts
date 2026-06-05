@@ -105,7 +105,9 @@ interface CachedMatch {
 }
 
 const regexMatchCache = new Map<string, Map<string, CachedMatch>>();
-const MAX_REGEX_CACHE_ENTRIES = 2; // keep current + previous content version
+// Keep several recent content versions so the cache doesn't thrash when the user
+// edits 3+ open files in quick succession (each file is a distinct content hash).
+const MAX_REGEX_CACHE_ENTRIES = 8;
 
 function getContentHash(content: string): string {
   let hash = 5381;

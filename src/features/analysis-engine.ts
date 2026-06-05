@@ -175,6 +175,8 @@ export class AnalysisEngine extends EventEmitter {
     this._trackedSolidityFiles++;
     if (this._trackedSolidityFiles === 1 && !this._evictionInterval) {
       this._evictionInterval = setInterval(() => this.evictStaleCacheEntries(), 60_000);
+      // Don't let this background timer keep the host process alive on shutdown.
+      this._evictionInterval.unref?.();
     }
   }
 

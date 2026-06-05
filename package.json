@@ -571,6 +571,11 @@
           "id": "zeroXTools.deployRun",
           "name": "Deploy & Run",
           "type": "webview"
+        },
+        {
+          "id": "zeroXTools.findings",
+          "name": "Findings",
+          "icon": "$(warning)"
         }
       ]
     },
@@ -589,13 +594,94 @@
           "icon": "$(refresh)"
         }
       ],
+      "editor/context": [
+        {
+          "submenu": "0xtools.editor",
+          "group": "z_commands",
+          "when": "editorLangId == solidity"
+        }
+      ],
+      "0xtools.editor": [
+        {
+          "command": "sigscan.scanProject",
+          "group": "1_scan@1"
+        },
+        {
+          "command": "sigscan.estimateGas",
+          "group": "2_analyze@1"
+        },
+        {
+          "command": "sigscan.checkContractSize",
+          "group": "2_analyze@2"
+        },
+        {
+          "command": "sigscan.showStorageLayout",
+          "group": "2_analyze@3"
+        },
+        {
+          "command": "sigscan.showCallGraph",
+          "group": "2_analyze@4"
+        },
+        {
+          "command": "sigscan.suggestOptimizations",
+          "group": "2_analyze@5"
+        },
+        {
+          "command": "sigscan.generateAllReports",
+          "group": "2_analyze@6"
+        },
+        {
+          "command": "sigscan.runSlither",
+          "group": "3_security@1"
+        },
+        {
+          "command": "sigscan.flattenContract",
+          "group": "4_tools@1"
+        },
+        {
+          "command": "sigscan.generateTests",
+          "group": "4_tools@2"
+        }
+      ],
       "commandPalette": [
         {
           "command": "sigscan.scanProject",
           "when": "sigscan:hasContracts"
         }
       ]
-    }
+    },
+    "submenus": [
+      {
+        "id": "0xtools.editor",
+        "label": "0xTools"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "sigscan.estimateGas",
+        "key": "ctrl+k g",
+        "mac": "cmd+k g",
+        "when": "editorTextFocus && editorLangId == solidity"
+      },
+      {
+        "command": "sigscan.showStorageLayout",
+        "key": "ctrl+k l",
+        "mac": "cmd+k l",
+        "when": "editorTextFocus && editorLangId == solidity"
+      },
+      {
+        "command": "sigscan.deployRun.show",
+        "key": "ctrl+k d",
+        "mac": "cmd+k d",
+        "when": "editorLangId == solidity"
+      },
+      {
+        "command": "sigscan.generateAllReports",
+        "key": "ctrl+k r",
+        "mac": "cmd+k r",
+        "when": "editorTextFocus && editorLangId == solidity"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

@@ -20,6 +20,8 @@ import { GasDecorationManager } from '../features/gas-decorations';
 import { SelectorHoverProvider } from './providers/selector-hover-provider';
 // Deploy & Run sidebar — eagerly loaded so the activity bar item is wired at activation
 import { DeployRunViewProvider } from './providers/deploy-run-provider';
+import { registerCodeActionProvider } from './providers/code-action-provider';
+import { registerFindingsTree } from './providers/findings-tree-provider';
 // Notebook provider — lazy loaded when registering serializer/controller
 type NotebookProviderModule = typeof import('./providers/notebook-provider');
 
@@ -218,6 +220,11 @@ export function activate(context: vscode.ExtensionContext) {
     _deployRunProvider,
     { webviewOptions: { retainContextWhenHidden: true } }
   );
+
+  // Quick-fix lightbulbs for 0xTools diagnostics + the unified Findings tree view.
+  // Both self-register and push their disposables onto context.subscriptions.
+  registerCodeActionProvider(context);
+  registerFindingsTree(context);
 
   // Register commands
   const commands = [
@@ -1770,6 +1777,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Content hash guard: skip re-compilation if content hasn't changed
   const lastCompiledHash = new Map<string, string>();
+  // Cache the resolved Foundry/Hardhat project root per source directory so we don't
+  // walk the tree with sync fs.existsSync on every keystroke-compile, and only reload
+  // remappings when the active project root actually changes.
+  const projectRootCache = new Map<string, string>();
+  let lastRemappingsRoot: string | undefined;
   function simpleHash(str: string): string {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -1820,25 +1832,32 @@ export function activate(context: vscode.ExtensionContext) {
           // Import resolver - tries remappings first, then common paths
           const fileDir = path.dirname(editor.document.uri.fsPath);
 
-          // Find project root (look for foundry.toml or hardhat.config.js)
-          let projectRoot = fileDir;
-          let current = fileDir;
-          while (current !== path.dirname(current)) {
-            if (
-              fs.existsSync(path.join(current, 'foundry.toml')) ||
-              fs.existsSync(path.join(current, 'hardhat.config.js')) ||
-              fs.existsSync(path.join(current, 'hardhat.config.ts'))
-            ) {
-              projectRoot = current;
-              break;
+          // Find project root (look for foundry.toml or hardhat.config.{js,ts}).
+          // Cached per source directory — walking the tree with sync fs on every
+          // compile was a measurable hot path on deeply-nested projects.
+          let projectRoot = projectRootCache.get(fileDir);
+          if (projectRoot === undefined) {
+            projectRoot = fileDir;
+            let current = fileDir;
+            while (current !== path.dirname(current)) {
+              if (
+                fs.existsSync(path.join(current, 'foundry.toml')) ||
+                fs.existsSync(path.join(current, 'hardhat.config.js')) ||
+                fs.existsSync(path.join(current, 'hardhat.config.ts'))
+              ) {
+                projectRoot = current;
+                break;
+              }
+              current = path.dirname(current);
             }
-            current = path.dirname(current);
+            projectRootCache.set(fileDir, projectRoot);
           }
 
-          // Reload remappings if project root changed
+          // (Re)load remappings only when the active project root actually changes.
           const resolver = getRemappingsResolver();
-          if (resolver.getRemappings().length === 0 || projectRoot !== workspaceRoot) {
+          if (resolver.getRemappings().length === 0 || projectRoot !== lastRemappingsRoot) {
             resolver.load(projectRoot);
+            lastRemappingsRoot = projectRoot;
           }
 
           // 0. Try remappings first (handles @openzeppelin/, forge-std/, etc.)
@@ -1977,6 +1996,7 @@ export function activate(context: vscode.ExtensionContext) {
       typeof import('../features/dangerous-patterns').DangerousPatternDetector
     >;
     defiRisks: InstanceType<typeof import('../features/defi-risks').DeFiRiskDetector>;
+    mev: InstanceType<typeof import('../features/mev-analyzer').MEVAnalyzer>;
   } | null = null;
 
   function getSecurityAnalyzers() {
@@ -1989,6 +2009,7 @@ export function activate(context: vscode.ExtensionContext) {
       const { NatspecChecker } = require('../features/natspec-checker');
       const { DangerousPatternDetector } = require('../features/dangerous-patterns');
       const { DeFiRiskDetector } = require('../features/defi-risks');
+      const { MEVAnalyzer } = require('../features/mev-analyzer');
       _securityAnalyzers = {
         reentrancy: new ReentrancyDetector(),
         uncheckedCalls: new UncheckedCallDetector(),
@@ -1998,6 +2019,7 @@ export function activate(context: vscode.ExtensionContext) {
         natspec: new NatspecChecker(),
         dangerousPatterns: new DangerousPatternDetector(),
         defiRisks: new DeFiRiskDetector(),
+        mev: new MEVAnalyzer(),
       };
     }
     return _securityAnalyzers;
@@ -2172,6 +2194,26 @@ export function activate(context: vscode.ExtensionContext) {
         );
         diag.source = '0xTools';
         diag.code = w.riskType;
+        securityDiags.push(diag);
+      }
+    }
+
+    // MEV / front-running risks (sandwich, oracle manipulation, timestamp dependence)
+    const mevRisks = analyzers.mev.analyze(source);
+    for (const r of mevRisks) {
+      const line = Math.max(0, r.line - 1);
+      if (line < editor.document.lineCount) {
+        const diag = new vscode.Diagnostic(
+          editor.document.lineAt(line).range,
+          `${r.functionName}(): ${r.description} — ${r.mitigation}`,
+          r.severity === 'high'
+            ? vscode.DiagnosticSeverity.Warning
+            : r.severity === 'medium'
+              ? vscode.DiagnosticSeverity.Information
+              : vscode.DiagnosticSeverity.Hint
+        );
+        diag.source = '0xTools';
+        diag.code = 'mev';
         securityDiags.push(diag);
       }
     }
