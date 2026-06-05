@@ -3,6 +3,93 @@
  */
 
 import { AccessControlAnalyzer } from '../access-control';
+import { SolidityAstNode } from '../ast/solidity-ast';
+
+// ── Hand-written AST fixtures for the AST-backed path ────────────────────────
+
+function ident(name: string, typeString = ''): SolidityAstNode {
+  return { nodeType: 'Identifier', name, src: '0:0:0', typeDescriptions: { typeString } };
+}
+function member(base: SolidityAstNode, memberName: string): SolidityAstNode {
+  return { nodeType: 'MemberAccess', memberName, expression: base, src: '0:0:0' };
+}
+function write(varName: string, src = '0:0:0'): SolidityAstNode {
+  return {
+    nodeType: 'Assignment',
+    operator: '=',
+    leftHandSide: ident(varName),
+    rightHandSide: { nodeType: 'Literal', src: '0:0:0' },
+    src,
+  };
+}
+function requireSenderCheck(): SolidityAstNode {
+  return {
+    nodeType: 'ExpressionStatement',
+    src: '0:0:0',
+    expression: {
+      nodeType: 'FunctionCall',
+      kind: 'functionCall',
+      expression: ident('require'),
+      arguments: [
+        {
+          nodeType: 'BinaryOperation',
+          operator: '==',
+          leftExpression: member(ident('msg'), 'sender'),
+          rightExpression: ident('owner'),
+          src: '0:0:0',
+        },
+      ],
+      src: '0:0:0',
+    },
+  };
+}
+function modifier(name: string): SolidityAstNode {
+  return {
+    nodeType: 'ModifierInvocation',
+    modifierName: { nodeType: 'IdentifierPath', name },
+  };
+}
+function fnDef(
+  name: string,
+  statements: SolidityAstNode[],
+  opts: {
+    visibility?: string;
+    stateMutability?: string;
+    modifiers?: SolidityAstNode[];
+    kind?: string;
+    src?: string;
+  } = {}
+): SolidityAstNode {
+  return {
+    nodeType: 'FunctionDefinition',
+    name,
+    kind: opts.kind ?? 'function',
+    visibility: opts.visibility ?? 'public',
+    stateMutability: opts.stateMutability ?? 'nonpayable',
+    modifiers: opts.modifiers ?? [],
+    src: opts.src ?? '0:0:0',
+    body: { nodeType: 'Block', statements },
+  };
+}
+function sourceUnit(stateVarNames: string[], fns: SolidityAstNode[]): SolidityAstNode {
+  return {
+    nodeType: 'SourceUnit',
+    nodes: [
+      {
+        nodeType: 'ContractDefinition',
+        name: 'C',
+        nodes: [
+          ...stateVarNames.map((n) => ({
+            nodeType: 'VariableDeclaration',
+            name: n,
+            stateVariable: true,
+          })),
+          ...fns,
+        ],
+      },
+    ],
+  };
+}
 
 describe('AccessControlAnalyzer', () => {
   let analyzer: AccessControlAnalyzer;
@@ -314,6 +401,113 @@ contract Token {
       expect(report).toContain('Critical: 1');
       expect(report).toContain('High: 1');
       expect(report).toContain('Medium: 1');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // AST-backed path (detect(source, ast))
+  // ──────────────────────────────────────────────────────────────────────
+  describe('detect - AST-backed path', () => {
+    const source = 'pragma solidity ^0.8.0;\ncontract C {}\n';
+
+    it('flags a public state-changing function with no access guard', () => {
+      const ast = sourceUnit(['totalSupply'], [fnDef('mint', [write('totalSupply')])]);
+      const warnings = analyzer.detect(source, ast);
+      const w = warnings.find((x) => x.functionName === 'mint');
+      expect(w).toBeDefined();
+      expect(w!.severity).toBe('high'); // 'mint' matches sensitive pattern
+      expect(w!.description).toContain('no access control');
+    });
+
+    it('does NOT flag a function guarded by an onlyOwner modifier', () => {
+      const ast = sourceUnit(
+        ['totalSupply'],
+        [fnDef('mint', [write('totalSupply')], { modifiers: [modifier('onlyOwner')] })]
+      );
+      expect(analyzer.detect(source, ast)).toEqual([]);
+    });
+
+    it('does NOT flag a function with an inline require(msg.sender == ...) check', () => {
+      const ast = sourceUnit(
+        ['totalSupply'],
+        [fnDef('mint', [requireSenderCheck(), write('totalSupply')])]
+      );
+      expect(analyzer.detect(source, ast)).toEqual([]);
+    });
+
+    it('does NOT flag view/pure functions', () => {
+      const ast = sourceUnit(
+        ['totalSupply'],
+        [fnDef('peek', [write('totalSupply')], { stateMutability: 'view' })]
+      );
+      expect(analyzer.detect(source, ast)).toEqual([]);
+    });
+
+    it('does NOT flag internal/private functions', () => {
+      const ast = sourceUnit(
+        ['totalSupply'],
+        [fnDef('_mint', [write('totalSupply')], { visibility: 'internal' })]
+      );
+      expect(analyzer.detect(source, ast)).toEqual([]);
+    });
+
+    it('does NOT flag constructors', () => {
+      const ast = sourceUnit(
+        ['owner'],
+        [fnDef('', [write('owner')], { kind: 'constructor' })]
+      );
+      expect(analyzer.detect(source, ast)).toEqual([]);
+    });
+
+    it('does NOT flag public functions that do not change state', () => {
+      const ast = sourceUnit(['owner'], [fnDef('noop', [])]);
+      expect(analyzer.detect(source, ast)).toEqual([]);
+    });
+
+    it('flags a public function moving value via .transfer with no guard', () => {
+      const transferCall: SolidityAstNode = {
+        nodeType: 'ExpressionStatement',
+        src: '0:0:0',
+        expression: {
+          nodeType: 'FunctionCall',
+          kind: 'functionCall',
+          expression: member(ident('recipient', 'address'), 'transfer'),
+          arguments: [],
+          src: '0:0:0',
+        },
+      };
+      const ast = sourceUnit([], [fnDef('payout', [transferCall])]);
+      const warnings = analyzer.detect(source, ast);
+      expect(warnings.find((x) => x.functionName === 'payout')).toBeDefined();
+    });
+
+    it('marks initialize() as critical when unguarded', () => {
+      const ast = sourceUnit(['owner'], [fnDef('initialize', [write('owner')])]);
+      const w = analyzer.detect(source, ast).find((x) => x.functionName === 'initialize');
+      expect(w).toBeDefined();
+      expect(w!.severity).toBe('critical');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Regression: single-arg detect(source) must be unchanged
+  // ──────────────────────────────────────────────────────────────────────
+  describe('regression - single-arg detect unchanged', () => {
+    const source = `
+pragma solidity ^0.8.0;
+contract Token {
+    function mint(address to, uint256 amount) public {
+        // anyone can mint
+    }
+}
+`;
+    it('produces identical output regardless of ast=undefined being passed explicitly', () => {
+      const a = analyzer.detect(source);
+      const b = analyzer.detect(source, undefined);
+      expect(b).toEqual(a);
+      const mint = a.find((w) => w.functionName === 'mint');
+      expect(mint).toBeDefined();
+      expect(mint!.severity).toBe('high');
     });
   });
 });

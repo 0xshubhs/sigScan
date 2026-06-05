@@ -5,6 +5,17 @@
  * which is the root cause of reentrancy vulnerabilities.
  */
 
+import {
+  SolidityAstNode,
+  getContracts,
+  getFunctions,
+  getStateVariableNames,
+  getExternalCalls,
+  getStateWrites,
+  getModifierNames,
+  srcToLine,
+} from './ast/solidity-ast';
+
 export interface ReentrancyWarning {
   line: number;
   functionName: string;
@@ -164,10 +175,103 @@ export class ReentrancyDetector {
     /safeDecreaseAllowance\s*\(/,
   ];
 
+  // Reentrancy-guard modifier names (AST path). Matches OZ + common variants.
+  private guardModifierPatterns = [
+    /nonreentrant/i,
+    /noreentrant/i,
+    /reentrancyguard/i,
+    /mutex/i,
+    /^locked$/i,
+    /nonreentrantview/i,
+  ];
+
   /**
-   * Analyze source code for reentrancy vulnerabilities
+   * Analyze source code for reentrancy vulnerabilities.
+   *
+   * @param source Full Solidity source.
+   * @param ast Optional pre-computed Solidity AST. When provided, an
+   *   AST-backed Checks-Effects-Interactions check is used (high precision,
+   *   far fewer false positives). When omitted, the original regex heuristics
+   *   run unchanged so existing single-arg callers behave identically.
    */
-  detect(source: string): ReentrancyWarning[] {
+  detect(source: string, ast?: SolidityAstNode): ReentrancyWarning[] {
+    if (ast) {
+      return this.detectWithAst(source, ast);
+    }
+    return this.detectWithRegex(source);
+  }
+
+  /**
+   * AST-backed CEI check: for each function, if an external call at line L is
+   * followed by a state write at line > L and the function lacks a reentrancy
+   * guard modifier, emit a warning.
+   */
+  private detectWithAst(source: string, ast: SolidityAstNode): ReentrancyWarning[] {
+    const warnings: ReentrancyWarning[] = [];
+
+    for (const contract of getContracts(ast)) {
+      const stateVars = getStateVariableNames(contract);
+
+      for (const fn of getFunctions(contract)) {
+        // Skip view/pure functions — they cannot perform damaging writes.
+        const mutability = typeof fn.stateMutability === 'string' ? fn.stateMutability : '';
+        if (mutability === 'view' || mutability === 'pure') {
+          continue;
+        }
+
+        // Skip functions guarded by a reentrancy modifier.
+        const modifiers = getModifierNames(fn);
+        const hasGuard = modifiers.some((m) =>
+          this.guardModifierPatterns.some((p) => p.test(m))
+        );
+        if (hasGuard) {
+          continue;
+        }
+
+        const externalCalls = getExternalCalls(fn);
+        if (externalCalls.length === 0) {
+          continue;
+        }
+        const stateWrites = getStateWrites(fn, stateVars);
+        if (stateWrites.length === 0) {
+          continue;
+        }
+
+        const fnName = typeof fn.name === 'string' && fn.name.length > 0 ? fn.name : '<fallback>';
+
+        // First external call line, and the first state write strictly after it.
+        const callLines = externalCalls
+          .map((c) => srcToLine(c.src as string | undefined, source))
+          .sort((a, b) => a - b);
+        const writeLines = stateWrites
+          .map((w) => srcToLine(w.src as string | undefined, source))
+          .sort((a, b) => a - b);
+
+        const callLine = callLines[0];
+        const stateChangeLine = writeLines.find((l) => l > callLine);
+        if (stateChangeLine === undefined) {
+          continue; // All state writes happen before the external call → CEI safe.
+        }
+
+        warnings.push({
+          line: callLine,
+          functionName: fnName,
+          severity: 'high',
+          description:
+            'External call before state change — potential reentrancy. Apply Checks-Effects-Interactions (move state changes before the external call) or add a nonReentrant guard.',
+          callLine,
+          stateChangeLine,
+        });
+      }
+    }
+
+    return warnings;
+  }
+
+  /**
+   * Original regex/brace-depth heuristic path (unchanged behavior).
+   */
+  private detectWithRegex(source: string): ReentrancyWarning[] {
     const warnings: ReentrancyWarning[] = [];
     const functions = extractFunctions(source);
 

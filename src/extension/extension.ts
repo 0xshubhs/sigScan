@@ -22,6 +22,9 @@ import { SelectorHoverProvider } from './providers/selector-hover-provider';
 import { DeployRunViewProvider } from './providers/deploy-run-provider';
 import { registerCodeActionProvider } from './providers/code-action-provider';
 import { registerFindingsTree } from './providers/findings-tree-provider';
+import { registerCommandPalette } from './command-palette';
+import { getAst } from '../features/ast/solidity-ast';
+import { parseSuppressions, isSuppressed } from '../features/suppressions';
 // Notebook provider — lazy loaded when registering serializer/controller
 type NotebookProviderModule = typeof import('./providers/notebook-provider');
 
@@ -225,6 +228,8 @@ export function activate(context: vscode.ExtensionContext) {
   // Both self-register and push their disposables onto context.subscriptions.
   registerCodeActionProvider(context);
   registerFindingsTree(context);
+  // Grouped "0xTools: Show All Commands" quick-pick over every registered command.
+  registerCommandPalette(context);
 
   // Register commands
   const commands = [
@@ -2033,11 +2038,11 @@ export function activate(context: vscode.ExtensionContext) {
       clearTimeout(securityAnalysisTimer);
     }
     securityAnalysisTimer = setTimeout(() => {
-      runSecurityAnalysisImmediate(editor);
+      void runSecurityAnalysisImmediate(editor);
     }, 2000); // 2-second debounce
   }
 
-  function runSecurityAnalysisImmediate(editor: vscode.TextEditor) {
+  async function runSecurityAnalysisImmediate(editor: vscode.TextEditor) {
     if (editor.document.languageId !== 'solidity') {
       return;
     }
@@ -2054,8 +2059,13 @@ export function activate(context: vscode.ExtensionContext) {
     const analyzers = getSecurityAnalyzers();
     const securityDiags: vscode.Diagnostic[] = [];
 
+    // AST-backed precision pass for the two highest-false-positive analyzers
+    // (reentrancy, access-control). Undefined when the file has unresolved
+    // imports or fails to compile → those analyzers fall back to their regex path.
+    const ast = await getAst(source);
+
     // Reentrancy detection
-    const reentrancyWarnings = analyzers.reentrancy.detect(source);
+    const reentrancyWarnings = analyzers.reentrancy.detect(source, ast);
     for (const w of reentrancyWarnings) {
       const line = Math.max(0, w.line - 1);
       if (line < editor.document.lineCount) {
@@ -2105,7 +2115,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // Access control
-    const accessWarnings = analyzers.accessControl.detect(source);
+    const accessWarnings = analyzers.accessControl.detect(source, ast);
     for (const w of accessWarnings) {
       const line = Math.max(0, w.line - 1);
       if (line < editor.document.lineCount) {
@@ -2218,15 +2228,25 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
+    // Honor inline `// 0xtools-disable[-next-line|-line] <rule>` comments so users
+    // can mute false positives without disabling the whole analyzer.
+    const suppressions = parseSuppressions(source);
+    const visibleDiags =
+      suppressions.length === 0
+        ? securityDiags
+        : securityDiags.filter(
+            (d) => !isSuppressed(String(d.code ?? ''), d.range.start.line, suppressions)
+          );
+
     // Merge with existing diagnostics (keep EIP-170 size diagnostics if present)
     const existingDiags = diagnosticCollection.get(editor.document.uri);
     const eip170Diags = existingDiags
       ? [...existingDiags].filter((d) => d.code === 'eip170-size')
       : [];
-    diagnosticCollection.set(editor.document.uri, [...eip170Diags, ...securityDiags]);
+    diagnosticCollection.set(editor.document.uri, [...eip170Diags, ...visibleDiags]);
 
-    if (securityDiags.length > 0) {
-      logger.info(`Found ${securityDiags.length} security/quality diagnostics`);
+    if (visibleDiags.length > 0) {
+      logger.info(`Found ${visibleDiags.length} security/quality diagnostics`);
     }
   }
 

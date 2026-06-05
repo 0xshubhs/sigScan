@@ -54,6 +54,11 @@
         "category": "0xTools"
       },
       {
+        "command": "sigscan.showAllCommands",
+        "title": "Show All Commands",
+        "category": "0xTools"
+      },
+      {
         "command": "sigscan.startWatching",
         "title": "Start Watching for Changes",
         "category": "0xTools"
@@ -579,6 +584,54 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "zeroXTools.findings",
+        "contents": "No findings yet.\nOpen a Solidity file and save it to run security & quality analysis (reentrancy, access control, MEV, and more).\n[Browse all 0xTools commands](command:sigscan.showAllCommands)\n[Scan project for signatures](command:sigscan.scanProject)\n[Open the Get Started walkthrough](command:workbench.action.openWalkthrough?%220xshubhs.0xtools%23zeroXTools.gettingStarted%22)"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "zeroXTools.gettingStarted",
+        "title": "Get Started with 0xTools",
+        "description": "Selectors, real-time gas, security analysis, and a full deploy-and-run loop — all inside VS Code.",
+        "steps": [
+          {
+            "id": "welcome",
+            "title": "Welcome to 0xTools",
+            "description": "The complete Solidity toolkit. Open a .sol file to see selectors, gas, and findings light up.\n[Browse all commands](command:sigscan.showAllCommands)",
+            "media": { "markdown": "media/walkthrough/welcome.md" }
+          },
+          {
+            "id": "scan",
+            "title": "Scan for signatures",
+            "description": "Extract every function selector, event topic, and error selector in your project.\n[Scan project](command:sigscan.scanProject)",
+            "media": { "markdown": "media/walkthrough/scan.md" },
+            "completionEvents": ["onCommand:sigscan.scanProject"]
+          },
+          {
+            "id": "gas",
+            "title": "See real-time gas",
+            "description": "Inline gas annotations appear as you type. Estimate the active contract on demand with Cmd/Ctrl+K G.\n[Estimate gas](command:sigscan.estimateGas)",
+            "media": { "markdown": "media/walkthrough/gas.md" },
+            "completionEvents": ["onCommand:sigscan.estimateGas"]
+          },
+          {
+            "id": "security",
+            "title": "Find vulnerabilities",
+            "description": "Reentrancy, access control, MEV, unchecked calls and more — surfaced in the Findings view with quick-fixes.\n[Open the Findings view](command:zeroXTools.findings.focus)",
+            "media": { "markdown": "media/walkthrough/security.md" }
+          },
+          {
+            "id": "deploy",
+            "title": "Deploy & interact",
+            "description": "Compile, deploy, call functions, and verify — without leaving the editor. Open the panel with Cmd/Ctrl+K D.\n[Open Deploy & Run](command:sigscan.deployRun.show)",
+            "media": { "markdown": "media/walkthrough/deploy.md" },
+            "completionEvents": ["onCommand:sigscan.deployRun.show"]
+          }
+        ]
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -680,6 +733,11 @@
         "key": "ctrl+k r",
         "mac": "cmd+k r",
         "when": "editorTextFocus && editorLangId == solidity"
+      },
+      {
+        "command": "sigscan.showAllCommands",
+        "key": "ctrl+k 0",
+        "mac": "cmd+k 0"
       }
     ]
   },

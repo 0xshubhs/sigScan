@@ -5,6 +5,18 @@
  * access control modifiers (onlyOwner, onlyRole, msg.sender checks).
  */
 
+import {
+  SolidityAstNode,
+  getContracts,
+  getFunctions,
+  getStateVariableNames,
+  getStateWrites,
+  getExternalCalls,
+  getModifierNames,
+  walkAst,
+  srcToLine,
+} from './ast/solidity-ast';
+
 export interface AccessControlWarning {
   line: number;
   functionName: string;
@@ -84,7 +96,209 @@ export class AccessControlAnalyzer {
     },
   ];
 
-  detect(source: string): AccessControlWarning[] {
+  // Access-guard modifier name matchers (AST path).
+  private accessModifierPatterns = [
+    /^only[A-Z]\w*/, // onlyOwner, onlyAdmin, onlyRole, onlyMinter, ...
+    /^when(Not)?Paused$/,
+    /^auth$/i,
+    /^requireAuth$/i,
+    /^restricted$/i,
+    /^initializer$/, // covers initialize() guarded by initializer
+    /^reinitializer$/,
+  ];
+
+  /**
+   * Analyze source for missing access control.
+   *
+   * @param source Full Solidity source.
+   * @param ast Optional pre-computed Solidity AST. When provided, an AST-backed
+   *   check flags public/external non-view/non-pure functions that perform a
+   *   state write or value transfer but have NO access guard. When omitted, the
+   *   original regex heuristics run unchanged (existing single-arg callers
+   *   behave identically).
+   */
+  detect(source: string, ast?: SolidityAstNode): AccessControlWarning[] {
+    if (ast) {
+      return this.detectWithAst(source, ast);
+    }
+    return this.detectWithRegex(source);
+  }
+
+  /**
+   * AST-backed access-control check. Flags public/external, non-view/non-pure
+   * functions that mutate state or move value yet have no access guard
+   * (no onlyX/auth-style modifier AND no `require(msg.sender == ...)` in body),
+   * excluding constructors.
+   */
+  private detectWithAst(source: string, ast: SolidityAstNode): AccessControlWarning[] {
+    const warnings: AccessControlWarning[] = [];
+
+    for (const contract of getContracts(ast)) {
+      const stateVars = getStateVariableNames(contract);
+
+      for (const fn of getFunctions(contract)) {
+        // Skip constructors and non-function defs (fallback/receive have empty name).
+        if (fn.kind === 'constructor') {
+          continue;
+        }
+        const fnName = typeof fn.name === 'string' ? fn.name : '';
+        if (fnName.length === 0) {
+          continue; // fallback/receive — not a named entry point.
+        }
+
+        // Only public/external entry points.
+        const visibility = typeof fn.visibility === 'string' ? fn.visibility : '';
+        if (visibility !== 'public' && visibility !== 'external') {
+          continue;
+        }
+
+        // Skip view/pure — they can't change state or move value.
+        const mutability = typeof fn.stateMutability === 'string' ? fn.stateMutability : '';
+        if (mutability === 'view' || mutability === 'pure') {
+          continue;
+        }
+
+        // Does it actually mutate state or move value?
+        const stateWrites = getStateWrites(fn, stateVars);
+        const valueTransfers = getExternalCalls(fn).filter((c) =>
+          this.isValueTransfer(c)
+        );
+        if (stateWrites.length === 0 && valueTransfers.length === 0) {
+          continue;
+        }
+
+        // Guard via modifier?
+        const modifiers = getModifierNames(fn);
+        const hasModifierGuard = modifiers.some((m) =>
+          this.accessModifierPatterns.some((p) => p.test(m))
+        );
+        if (hasModifierGuard) {
+          continue;
+        }
+
+        // Guard via inline require(msg.sender == ...) / if (msg.sender != ...) revert?
+        if (this.hasInlineSenderCheck(fn)) {
+          continue;
+        }
+
+        const line = srcToLine(fn.src as string | undefined, source);
+        const severity = this.severityForName(fnName);
+        warnings.push({
+          line,
+          functionName: fnName,
+          severity,
+          description: `State-changing \`${fnName}()\` is ${visibility} with no access control (no onlyX/auth modifier and no msg.sender check). Anyone can call this function.`,
+        });
+      }
+    }
+
+    return warnings;
+  }
+
+  /** Heuristic severity bump for obviously sensitive operations. */
+  private severityForName(name: string): AccessControlWarning['severity'] {
+    if (/^(initialize|init)$/i.test(name)) {
+      return 'critical';
+    }
+    for (const { pattern, severity } of this.sensitiveFunctionPatterns) {
+      if (pattern.test(name)) {
+        return severity;
+      }
+    }
+    return 'medium';
+  }
+
+  /** True if a FunctionCall moves value (`.transfer`/`.send`, or `.call{value:}`). */
+  private isValueTransfer(call: SolidityAstNode): boolean {
+    // `addr.call{value: x}(...)` wraps the MemberAccess in a FunctionCallOptions
+    // node that carries the `value` option in its `names` array.
+    let valueOptions = false;
+    let callee = call.expression as SolidityAstNode | undefined;
+    if (callee && callee.nodeType === 'FunctionCallOptions') {
+      const optNames = callee.names as string[] | undefined;
+      if (Array.isArray(optNames) && optNames.includes('value')) {
+        valueOptions = true;
+      }
+      callee = callee.expression as SolidityAstNode | undefined;
+    }
+    if (!callee || callee.nodeType !== 'MemberAccess') {
+      return false;
+    }
+    const member = typeof callee.memberName === 'string' ? callee.memberName : '';
+    if (member === 'transfer' || member === 'send') {
+      return true;
+    }
+    if (member === 'call' && valueOptions) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Detect an inline authorization guard inside the function body:
+   * `require(msg.sender == ...)`, `require(msg.sender != ...)`,
+   * `if (msg.sender != ...) revert/...`, or any comparison/identity check that
+   * references msg.sender or _msgSender(). Conservative: any msg.sender usage
+   * inside a require/assert/if is treated as a guard.
+   */
+  private hasInlineSenderCheck(fn: SolidityAstNode): boolean {
+    let found = false;
+    walkAst(fn.body as SolidityAstNode | undefined, (n) => {
+      if (found) {
+        return;
+      }
+      // require(...) / assert(...) calls referencing msg.sender or _msgSender().
+      if (n.nodeType === 'FunctionCall') {
+        const callee = n.expression as SolidityAstNode | undefined;
+        const calleeName =
+          callee && callee.nodeType === 'Identifier' && typeof callee.name === 'string'
+            ? callee.name
+            : '';
+        if (
+          (calleeName === 'require' || calleeName === 'assert') &&
+          this.referencesSender(n)
+        ) {
+          found = true;
+        }
+      }
+      // if (msg.sender != x) revert ...  — an IfStatement whose condition uses sender.
+      if (n.nodeType === 'IfStatement') {
+        const cond = n.condition as SolidityAstNode | undefined;
+        if (cond && this.referencesSender(cond)) {
+          found = true;
+        }
+      }
+    });
+    return found;
+  }
+
+  /** True if any descendant references msg.sender or _msgSender(). */
+  private referencesSender(node: SolidityAstNode): boolean {
+    let found = false;
+    walkAst(node, (n) => {
+      if (found) {
+        return;
+      }
+      // msg.sender → MemberAccess(memberName='sender', expression=Identifier 'msg')
+      if (n.nodeType === 'MemberAccess' && n.memberName === 'sender') {
+        const base = n.expression as SolidityAstNode | undefined;
+        if (base && base.nodeType === 'Identifier' && base.name === 'msg') {
+          found = true;
+          return;
+        }
+      }
+      // _msgSender() call
+      if (n.nodeType === 'Identifier' && n.name === '_msgSender') {
+        found = true;
+      }
+    });
+    return found;
+  }
+
+  /**
+   * Original regex/brace-depth heuristic path (unchanged behavior).
+   */
+  private detectWithRegex(source: string): AccessControlWarning[] {
     const warnings: AccessControlWarning[] = [];
     const lines = source.split('\n');
 

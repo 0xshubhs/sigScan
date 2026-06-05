@@ -63,6 +63,38 @@ function formatCode(code: vscode.Diagnostic['code']): string {
   return String(code.value);
 }
 
+/** Sort rank for a severity — lower sorts first (Error before Hint). */
+function severityRank(severity: vscode.DiagnosticSeverity | undefined): number {
+  return severity ?? 4;
+}
+
+/** Human label for a severity, used in the per-file breakdown tooltip. */
+function severityLabel(severity: vscode.DiagnosticSeverity | undefined): string {
+  switch (severity) {
+    case vscode.DiagnosticSeverity.Error:
+      return 'errors';
+    case vscode.DiagnosticSeverity.Warning:
+      return 'warnings';
+    case vscode.DiagnosticSeverity.Information:
+      return 'info';
+    default:
+      return 'hints';
+  }
+}
+
+/** Builds a "2 warnings, 1 info" style breakdown for a file's findings. */
+function severityBreakdown(diagnostics: vscode.Diagnostic[]): string {
+  const counts = new Map<string, number>();
+  for (const d of diagnostics) {
+    const key = severityLabel(d.severity);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return ['errors', 'warnings', 'info', 'hints']
+    .filter((k) => counts.has(k))
+    .map((k) => `${counts.get(k)} ${k}`)
+    .join(', ');
+}
+
 /** Maps a diagnostic severity to a ThemeIcon name. */
 function iconForSeverity(severity: vscode.DiagnosticSeverity): string {
   switch (severity) {
@@ -109,7 +141,10 @@ class FindingsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       );
       item.resourceUri = element.uri;
       item.description = vscode.workspace.asRelativePath(element.uri);
-      item.tooltip = `${element.uri.fsPath} — ${count} finding${count === 1 ? '' : 's'}`;
+      const breakdown = severityBreakdown(element.diagnostics);
+      item.tooltip = `${element.uri.fsPath} — ${count} finding${count === 1 ? '' : 's'}${
+        breakdown ? ` (${breakdown})` : ''
+      }`;
       item.iconPath = new vscode.ThemeIcon('file-code');
       item.contextValue = 'findingsFile';
       return item;
@@ -153,12 +188,18 @@ class FindingsTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       if (findings.length === 0) {
         continue;
       }
-      findings.sort((a, b) => a.range.start.compareTo(b.range.start));
+      // Most severe first, then by position so a file's worst issues lead.
+      findings.sort((a, b) => {
+        const bySeverity = severityRank(a.severity) - severityRank(b.severity);
+        return bySeverity !== 0 ? bySeverity : a.range.start.compareTo(b.range.start);
+      });
       files.push({ kind: 'file', uri, diagnostics: findings });
     }
 
+    // Return nothing when clean so the view's `viewsWelcome` onboarding (scan /
+    // browse commands / open walkthrough) renders instead of a dead placeholder.
     if (files.length === 0) {
-      return [{ kind: 'empty' }];
+      return [];
     }
 
     files.sort((a, b) => this.basename(a.uri).localeCompare(this.basename(b.uri)));

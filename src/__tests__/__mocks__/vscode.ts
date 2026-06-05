@@ -14,6 +14,11 @@ export enum EndOfLine {
   CRLF = 2,
 }
 
+export enum QuickPickItemKind {
+  Separator = -1,
+  Default = 0,
+}
+
 export class Range {
   constructor(
     public start: Position,
@@ -114,6 +119,8 @@ export const window = {
   showInformationMessage: jest.fn(),
   showErrorMessage: jest.fn(),
   showWarningMessage: jest.fn(),
+  showQuickPick: jest.fn(),
+  createQuickPick: jest.fn(),
 };
 
 export const workspace = {
@@ -135,4 +142,9 @@ export const languages = {
     has: jest.fn(),
   })),
   registerCodeActionsProvider: jest.fn(() => ({ dispose: jest.fn() })),
+};
+
+export const commands = {
+  registerCommand: jest.fn(() => ({ dispose: jest.fn() })),
+  executeCommand: jest.fn(),
 };

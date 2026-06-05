@@ -6,6 +6,7 @@ import { ProjectScanner } from '../core/scanner';
 import { SignatureExporter } from '../core/exporter';
 import { FileWatcher } from '../core/watcher';
 import { ExportOptions } from '../types';
+import { registerAuditCommand } from './audit-command';
 
 const program = new Command();
 
@@ -268,5 +269,7 @@ program
       process.exit(1);
     }
   });
+
+registerAuditCommand(program);
 
 program.parse();
