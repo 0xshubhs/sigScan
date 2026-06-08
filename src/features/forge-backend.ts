@@ -10,29 +10,10 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import * as os from 'os';
 import { execFile } from 'child_process';
 import { keccak256 } from 'js-sha3';
 import { GasInfo, CompilationOutput } from './SolcManager';
-
-// ---------------------------------------------------------------------------
-// PATH augmentation — VS Code extension host may not inherit shell PATH
-// ---------------------------------------------------------------------------
-
-function getAugmentedEnv(): NodeJS.ProcessEnv {
-  const home = os.homedir();
-  const extraPaths = [
-    path.join(home, '.foundry', 'bin'),
-    path.join(home, '.cargo', 'bin'),
-    '/usr/local/bin',
-    '/opt/homebrew/bin',
-  ].filter((p) => fs.existsSync(p));
-
-  return {
-    ...process.env,
-    PATH: [...extraPaths, process.env.PATH || ''].join(path.delimiter),
-  };
-}
+import { getAugmentedEnv } from './foundry-env';
 
 // ---------------------------------------------------------------------------
 // Session-level cache for forge availability

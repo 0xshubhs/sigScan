@@ -10,6 +10,7 @@
 
 import { ChildProcess, execFile, spawn } from 'child_process';
 import * as http from 'http';
+import { getAugmentedEnv } from './foundry-env';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,20 +76,24 @@ export class AnvilManager {
   private chainId = 31337;
   private _available: boolean | null = null;
 
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
   constructor() {}
 
   // ─── Availability ─────────────────────────────────────────────────────
 
-  /** Check if anvil is installed (cached after first check) */
+  /**
+   * Check if anvil is installed. A positive result is cached for the process
+   * lifetime; negatives are NOT cached because the extension host may not have
+   * inherited the user's shell PATH yet (the augmented env below addresses the
+   * common case where anvil lives in ~/.foundry/bin).
+   */
   async isAvailable(): Promise<boolean> {
-    if (this._available !== null) {
-      return this._available;
+    if (this._available === true) {
+      return true;
     }
     return new Promise((resolve) => {
-      execFile('anvil', ['--version'], { timeout: 5_000 }, (err) => {
-        this._available = !err;
-        resolve(this._available);
+      execFile('anvil', ['--version'], { timeout: 5_000, env: getAugmentedEnv() }, (err) => {
+        this._available = !err ? true : null;
+        resolve(!err);
       });
     });
   }
@@ -112,6 +117,7 @@ export class AnvilManager {
     return new Promise((resolve, reject) => {
       const proc = spawn('anvil', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: getAugmentedEnv(),
       });
 
       this.process = proc;
