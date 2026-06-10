@@ -67,13 +67,17 @@ export class MEVAnalyzer {
     const funcRegex =
       /function\s+(\w+)\s*\(([^)]*)\)\s+((?:(?:public|external|internal|private|pure|view|payable|virtual|override|\w+)\s*)*)\s*(?:returns\s*\([^)]*\))?\s*\{/g;
 
+    // Precompute newline offsets ONCE so each offsetToLine lookup is O(log n)
+    // instead of re-scanning from the start of the source per function.
+    const newlineOffsets = this.computeNewlineOffsets(source);
+
     let match: RegExpExecArray | null;
 
     while ((match = funcRegex.exec(source)) !== null) {
       const name = match[1];
       const modifierString = match[3] || '';
       const startOffset = match.index;
-      const line = this.offsetToLine(source, startOffset);
+      const line = this.offsetToLine(newlineOffsets, startOffset);
 
       // Extract visibility
       let visibility = 'internal'; // default
@@ -116,16 +120,40 @@ export class MEVAnalyzer {
   }
 
   /**
-   * Convert a character offset to a 1-based line number.
+   * Collect the offsets of all newline characters in the source, in ascending
+   * order. Used to map character offsets to line numbers via binary search.
    */
-  private offsetToLine(source: string, offset: number): number {
-    let line = 1;
-    for (let i = 0; i < offset && i < source.length; i++) {
+  private computeNewlineOffsets(source: string): number[] {
+    const offsets: number[] = [];
+    for (let i = 0; i < source.length; i++) {
       if (source[i] === '\n') {
-        line++;
+        offsets.push(i);
       }
     }
-    return line;
+    return offsets;
+  }
+
+  /**
+   * Convert a character offset to a 1-based line number using a precomputed
+   * sorted array of newline offsets. The line number equals 1 plus the count
+   * of newline characters strictly before `offset`, matching the previous
+   * linear-scan semantics exactly.
+   */
+  private offsetToLine(newlineOffsets: number[], offset: number): number {
+    // Count newlines with index < offset via binary search for the first
+    // newline offset that is >= offset; that count is the number of newlines
+    // strictly before `offset`.
+    let lo = 0;
+    let hi = newlineOffsets.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (newlineOffsets[mid] < offset) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo + 1;
   }
 
   /**

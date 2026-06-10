@@ -27,6 +27,17 @@ import { isForgeAvailable, findFoundryRoot, compileWithForge } from './forge-bac
 import { isRunnerAvailable, compileWithRunner } from './runner-backend';
 
 /**
+ * Debug-only warning. These backend-selection diagnostics fire on every compile
+ * (i.e. every debounced keystroke), so gate them behind SIGSCAN_DEBUG to keep the
+ * console quiet in normal use. Set SIGSCAN_DEBUG=1 to enable.
+ */
+function debugWarn(msg: string, ...args: unknown[]): void {
+  if (process.env.SIGSCAN_DEBUG) {
+    console.warn(msg, ...args);
+  }
+}
+
+/**
  * Compilation event types
  */
 export interface CompilationEvents {
@@ -288,8 +299,19 @@ export class CompilationService extends EventEmitter {
     contentHash: string,
     importCallback?: (path: string) => { contents: string } | { error: string }
   ): Promise<CompilationResult> {
-    const pragma = parsePragmaFromSource(source);
     const fileName = this.getFileName(uri);
+    // Pragma is only needed by the solc-js branch (runner/forge ignore it), so
+    // it's parsed lazily there rather than on every compile. `cachedPragma`
+    // memoizes the (possibly null) result so it's parsed at most once.
+    let pragmaParsed = false;
+    let cachedPragma: string | null = null;
+    const getPragma = (): string | null => {
+      if (!pragmaParsed) {
+        cachedPragma = parsePragmaFromSource(source);
+        pragmaParsed = true;
+      }
+      return cachedPragma;
+    };
 
     try {
       let output: CompilationOutput | null = null;
@@ -304,7 +326,6 @@ export class CompilationService extends EventEmitter {
       // Check user preference for runner backend
       let preferRunner = true;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const vscode = require('vscode');
         preferRunner = vscode.workspace.getConfiguration('sigscan').get('preferRunner', true);
       } catch {
@@ -312,26 +333,31 @@ export class CompilationService extends EventEmitter {
       }
 
       // --- Priority 1: Runner backend (EVM-executed gas, fastest) ---
-      if (preferRunner && filePath && (await isRunnerAvailable())) {
+      // Capture availability once — reused in both the condition and the log
+      // below so we don't re-spawn the (5s-timeout) availability probe.
+      const runnerOk = preferRunner && !!filePath ? await isRunnerAvailable() : false;
+      if (preferRunner && filePath && runnerOk) {
         this.emit('compilation:start', { uri, version: 'runner' });
         try {
           const runnerOutput = await compileWithRunner(filePath, source);
           if (hasRealGas(runnerOutput)) {
             output = runnerOutput;
           } else {
-            console.warn('[0xtools] Runner returned no real gas data:', runnerOutput?.errors);
+            debugWarn('[0xtools] Runner returned no real gas data:', runnerOutput?.errors);
           }
         } catch (e) {
-          console.warn('[0xtools] Runner backend failed:', e instanceof Error ? e.message : e);
+          debugWarn('[0xtools] Runner backend failed:', e instanceof Error ? e.message : e);
         }
       } else {
-        console.warn(
-          `[0xtools] Runner skipped: preferRunner=${preferRunner}, filePath=${!!filePath}, available=${await isRunnerAvailable()}`
+        debugWarn(
+          `[0xtools] Runner skipped: preferRunner=${preferRunner}, filePath=${!!filePath}, available=${runnerOk}`
         );
       }
 
       // --- Priority 2: Forge backend (Foundry projects) ---
-      if (!hasRealGas(output) && foundryRoot && (await isForgeAvailable())) {
+      // Capture availability once — reused in both the condition and the log.
+      const forgeOk = !hasRealGas(output) && foundryRoot ? await isForgeAvailable() : false;
+      if (!hasRealGas(output) && foundryRoot && forgeOk) {
         this.emit('compilation:start', { uri, version: 'forge' });
         try {
           const forgeOutput = await compileWithForge(filePath!, foundryRoot);
@@ -341,17 +367,15 @@ export class CompilationService extends EventEmitter {
             // Forge compiled successfully with selectors but no gas estimates
             // (common for test contracts). Accept this over solc-js which can't resolve imports.
             output = forgeOutput;
-            console.warn('[0xtools] Forge compiled OK but no gas estimates (test contract?)');
+            debugWarn('[0xtools] Forge compiled OK but no gas estimates (test contract?)');
           } else {
-            console.warn('[0xtools] Forge returned no real gas data:', forgeOutput?.errors);
+            debugWarn('[0xtools] Forge returned no real gas data:', forgeOutput?.errors);
           }
         } catch (e) {
-          console.warn('[0xtools] Forge backend failed:', e instanceof Error ? e.message : e);
+          debugWarn('[0xtools] Forge backend failed:', e instanceof Error ? e.message : e);
         }
       } else if (!hasRealGas(output)) {
-        console.warn(
-          `[0xtools] Forge skipped: foundryRoot=${foundryRoot}, available=${await isForgeAvailable()}`
-        );
+        debugWarn(`[0xtools] Forge skipped: foundryRoot=${foundryRoot}, available=${forgeOk}`);
       }
 
       // --- Priority 3: Solc-js (WASM, universal fallback) ---
@@ -359,6 +383,8 @@ export class CompilationService extends EventEmitter {
       // Solc-js can't resolve forge imports and its regex fallback is worse than forge's ABI.
       const forgeHasSelectors = output && output.success && output.gasInfo.length > 0;
       if (!hasRealGas(output) && !forgeHasSelectors) {
+        // Pragma is only needed here (parsed lazily — runner/forge above don't use it).
+        const pragma = getPragma();
         this.emit('compilation:start', { uri, version: pragma || 'bundled' });
 
         if (pragma) {
@@ -377,7 +403,7 @@ export class CompilationService extends EventEmitter {
 
         output = await compileWithGasAnalysis(source, fileName, this.settings, importCallback);
         if (!hasRealGas(output)) {
-          console.warn('[0xtools] Solc-js returned no real gas data:', output?.errors);
+          debugWarn('[0xtools] Solc-js returned no real gas data:', output?.errors);
         }
       }
 
@@ -403,8 +429,10 @@ export class CompilationService extends EventEmitter {
         cached: false,
       };
 
-      // Cache the result
-      this.cacheResult(contentHash, result, pragma);
+      // Cache the result. Pass whatever pragma was parsed during this compile
+      // (null if the runner/forge backend handled it and never needed the pragma).
+      // The cached `pragma` field is informational only and is not read anywhere.
+      this.cacheResult(contentHash, result, cachedPragma);
       this.uriToHashCache.set(uri, contentHash);
 
       // Emit events - even on error, we may have fallback gasInfo
@@ -532,25 +560,28 @@ export class CompilationService extends EventEmitter {
    */
   private evictOldest(): void {
     const now = Date.now();
-    const entries = Array.from(this.compilationCache.entries());
+    const removedHashes = new Set<string>();
 
     // First pass: remove expired entries
-    const removedHashes = new Set<string>();
-    for (const [hash, entry] of entries) {
+    for (const [hash, entry] of this.compilationCache) {
       if (now - entry.timestamp > this.cacheExpiryMs) {
         this.compilationCache.delete(hash);
         removedHashes.add(hash);
       }
     }
 
-    // If still over limit, remove oldest 20%
+    // If still over limit, remove oldest 20%. A Map preserves insertion order,
+    // and entries are only ever appended (set on insert, never re-set), so the
+    // first keys are the oldest — delete from the front instead of sorting.
     if (this.compilationCache.size >= this.maxCacheSize) {
-      const remaining = Array.from(this.compilationCache.entries());
-      remaining.sort((a, b) => a[1].timestamp - b[1].timestamp);
-      const toRemove = Math.ceil(remaining.length * 0.2);
+      const toRemove = Math.ceil(this.compilationCache.size * 0.2);
       for (let i = 0; i < toRemove; i++) {
-        this.compilationCache.delete(remaining[i][0]);
-        removedHashes.add(remaining[i][0]);
+        const oldest = this.compilationCache.keys().next();
+        if (oldest.done) {
+          break;
+        }
+        this.compilationCache.delete(oldest.value);
+        removedHashes.add(oldest.value);
       }
     }
 

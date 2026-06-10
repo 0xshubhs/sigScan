@@ -94,7 +94,6 @@ export class AnalysisEngine extends EventEmitter {
   private idleTimers: Map<string, NodeJS.Timeout>;
   private activeSolcCompilations: Map<string, boolean>;
   private analysisInProgress = false;
-  private extendedAnalysisInProgress = false;
   private _evictionInterval: NodeJS.Timeout | undefined;
   private _trackedSolidityFiles = 0;
   private static readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -412,8 +411,13 @@ export class AnalysisEngine extends EventEmitter {
       this.activeSolcCompilations.set(uri, false);
     }
 
+    // Capture the document version at schedule time; if the document changes
+    // before the timer fires, its version bumps and we skip the stale run.
+    // This avoids re-hashing the entire document text in the timer callback.
+    const scheduledVersion = document.version;
+
     const timer = setTimeout(async () => {
-      if (this.hashContent(document.getText()) === contentHash) {
+      if (document.version === scheduledVersion) {
         await this.runSolcAnalysis(document, contentHash);
       }
     }, idleMs);
@@ -729,12 +733,22 @@ export class AnalysisEngine extends EventEmitter {
     const content = document.getText();
     const contractName = this.extractContractName(content);
     const analyzer = await this.getStorageAnalyzer();
+    // Resource gating: when constrained, return the analyzer's canonical empty
+    // result (same shape as a no-state-variable contract) so callers are unaffected.
+    if (!checkResourcesAvailable(this.isAnalysisInProgress())) {
+      return analyzer.analyzeContract('', contractName);
+    }
     return analyzer.analyzeContract(content, contractName);
   }
 
   public async analyzeCallGraph(document: vscode.TextDocument): Promise<CallGraph> {
     const content = document.getText();
     const analyzer = await this.getCallGraphAnalyzer();
+    // Resource gating: when constrained, return the analyzer's canonical empty
+    // result (same shape as an empty contract) so callers are unaffected.
+    if (!checkResourcesAvailable(this.isAnalysisInProgress())) {
+      return analyzer.analyzeContract('');
+    }
     return analyzer.analyzeContract(content);
   }
 
@@ -742,6 +756,11 @@ export class AnalysisEngine extends EventEmitter {
     const content = document.getText();
     const contractName = this.extractContractName(content);
     const analyzer = await this.getDeploymentAnalyzer();
+    // Resource gating: when constrained, return the analyzer's canonical empty
+    // result (same shape as an empty contract) so callers are unaffected.
+    if (!checkResourcesAvailable(this.isAnalysisInProgress())) {
+      return analyzer.estimateContract('', contractName);
+    }
     return analyzer.estimateContract(content, contractName);
   }
 
@@ -816,50 +835,6 @@ export class AnalysisEngine extends EventEmitter {
       regression: await this.getRegressionTracker(),
       profiler: await this.getRuntimeProfiler(),
     };
-  }
-
-  // ─── Extended analysis background runner ───────────────────────────────────
-
-  private async runExtendedAnalysisIfAvailable(document: vscode.TextDocument): Promise<void> {
-    if (this.extendedAnalysisInProgress || !checkResourcesAvailable(this.isAnalysisInProgress())) {
-      return;
-    }
-
-    this.extendedAnalysisInProgress = true;
-
-    try {
-      const content = document.getText();
-      const contractName = this.extractContractName(content);
-
-      if (!contractName) {
-        return;
-      }
-
-      try {
-        if (checkResourcesAvailable(this.isAnalysisInProgress())) {
-          const sa = await this.getStorageAnalyzer();
-          sa.analyzeContract(content, contractName);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        if (checkResourcesAvailable(this.isAnalysisInProgress())) {
-          const cg = await this.getCallGraphAnalyzer();
-          cg.analyzeContract(content);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        if (checkResourcesAvailable(this.isAnalysisInProgress())) {
-          const da = await this.getDeploymentAnalyzer();
-          da.estimateContract(content, contractName);
-        }
-      } catch (error) {
-        console.error('Extended analysis feature failed:', error);
-      }
-    } finally {
-      this.extendedAnalysisInProgress = false;
-    }
   }
 
   // ─── Decoration delegation (backward compat — instance methods) ─────────────
@@ -954,11 +929,16 @@ export class AnalysisEngine extends EventEmitter {
   /** Evict oldest 20% of cache entries if the cache is full. */
   private evictCacheIfFull(): void {
     if (this.unifiedCache.size >= AnalysisEngine.MAX_CACHE_SIZE) {
-      const oldest = [...this.unifiedCache.entries()].sort(
-        (a, b) => a[1].timestamp - b[1].timestamp
-      );
-      for (let i = 0; i < Math.ceil(oldest.length * 0.2); i++) {
-        this.unifiedCache.delete(oldest[i][0]);
+      // Map preserves insertion order, so the iterator yields oldest-first.
+      // Front-delete the oldest 20% without materializing or sorting all entries.
+      const toEvict = Math.ceil(this.unifiedCache.size * 0.2);
+      let evicted = 0;
+      for (const key of this.unifiedCache.keys()) {
+        if (evicted >= toEvict) {
+          break;
+        }
+        this.unifiedCache.delete(key);
+        evicted++;
       }
     }
   }

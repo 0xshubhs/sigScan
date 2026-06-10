@@ -49,7 +49,7 @@ export class GasOptimizer {
     const suggestions: GasOptimizationSuggestion[] = [];
     const lines = source.split('\n');
 
-    suggestions.push(...this.detectCalldataOpportunities(lines));
+    suggestions.push(...this.detectCalldataOpportunities(source));
     suggestions.push(...this.detectImmutableCandidates(source, lines));
     suggestions.push(...this.detectConstantCandidates(source, lines));
     suggestions.push(...this.detectRequireStringErrors(lines));
@@ -72,11 +72,10 @@ export class GasOptimizer {
    * `calldata` avoids this copy and saves ~60 gas per parameter plus memory
    * expansion costs.
    */
-  private detectCalldataOpportunities(lines: string[]): GasOptimizationSuggestion[] {
+  private detectCalldataOpportunities(source: string): GasOptimizationSuggestion[] {
     const suggestions: GasOptimizationSuggestion[] = [];
 
     // Match function declarations that span potentially multiple lines
-    const source = lines.join('\n');
     RE_EXTERNAL_FUNC.lastIndex = 0;
 
     let match;
@@ -382,12 +381,22 @@ export class GasOptimizer {
       const funcStartLine = cleanSource.substring(0, funcMatch.index).split('\n').length;
       const funcEndLine = funcStartLine + funcBody.split('\n').length - 1;
 
+      // Tokenize the body ONCE into an identifier-frequency map. A `\b\w+\b`
+      // token count matches the previous per-variable `\bvarName\b` regex count
+      // exactly, but avoids re-scanning the body for every state variable.
+      const identifierCounts = new Map<string, number>();
+      const tokenRegex = /\b\w+\b/g;
+      let tokenMatch;
+      while ((tokenMatch = tokenRegex.exec(funcBody)) !== null) {
+        const token = tokenMatch[0];
+        identifierCounts.set(token, (identifierCounts.get(token) || 0) + 1);
+      }
+
       // Count how many times each state variable appears in the function body
       for (const varName of stateVarNames) {
-        const varReadRegex = new RegExp(`\\b${this.escapeRegex(varName)}\\b`, 'g');
-        const readMatches = funcBody.match(varReadRegex);
+        const readCount = identifierCounts.get(varName) || 0;
 
-        if (readMatches && readMatches.length >= 3) {
+        if (readCount >= 3) {
           // Check it's not already cached (look for local assignment like `uint256 _varName = varName`)
           const cachePattern = new RegExp(
             `\\w+\\s+\\w*${this.escapeRegex(varName)}\\w*\\s*=\\s*${this.escapeRegex(varName)}\\b`
@@ -400,10 +409,10 @@ export class GasOptimizer {
               endLine: funcEndLine,
               rule: 'cache-storage-variable',
               message:
-                `State variable \`${varName}\` is read ${readMatches.length} times in \`${funcName}()\`. ` +
+                `State variable \`${varName}\` is read ${readCount} times in \`${funcName}()\`. ` +
                 'Cache it in a local variable to save ~100 gas per additional warm SLOAD.',
               severity: 'info',
-              savings: `~${(readMatches.length - 1) * 100} gas (warm SLOADs)`,
+              savings: `~${(readCount - 1) * 100} gas (warm SLOADs)`,
             });
           }
         }

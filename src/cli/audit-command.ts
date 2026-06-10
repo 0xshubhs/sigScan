@@ -55,6 +55,25 @@ const IGNORE_GLOBS = [
   '**/.git/**',
 ];
 
+/**
+ * Shared, stateless analyzer instances.
+ *
+ * Each detector holds only readonly pattern config set at construction and its
+ * `detect`/`analyze` methods are pure functions of the `source` string (no
+ * per-file mutable instance state), so a single instance can be reused across
+ * every file — matching the extension's singleton pattern and avoiding
+ * re-allocating 9 objects (and their regex pattern arrays) per `.sol` file.
+ */
+const reentrancyDetector = new ReentrancyDetector();
+const uncheckedCallDetector = new UncheckedCallDetector();
+const eventEmissionChecker = new EventEmissionChecker();
+const accessControlAnalyzer = new AccessControlAnalyzer();
+const customErrorDetector = new CustomErrorDetector();
+const natspecChecker = new NatspecChecker();
+const dangerousPatternDetector = new DangerousPatternDetector();
+const defiRiskDetector = new DeFiRiskDetector();
+const mevAnalyzer = new MEVAnalyzer();
+
 /** Ordered low -> high so we can compare with simple index math. */
 const SEVERITY_ORDER: Severity[] = ['low', 'medium', 'high', 'critical'];
 
@@ -103,47 +122,47 @@ export function analyzeSource(file: string, source: string): AuditFinding[] {
   };
 
   // Reentrancy
-  for (const w of new ReentrancyDetector().detect(source)) {
+  for (const w of reentrancyDetector.detect(source)) {
     push(w.line, 'reentrancy', w.severity, `${w.functionName}: ${w.description}`);
   }
 
   // Unchecked low-level calls
-  for (const w of new UncheckedCallDetector().detect(source)) {
+  for (const w of uncheckedCallDetector.detect(source)) {
     push(w.line, 'unchecked-call', 'medium', `${w.functionName}: ${w.description}`);
   }
 
   // Missing events on state-changing functions
-  for (const w of new EventEmissionChecker().detect(source)) {
+  for (const w of eventEmissionChecker.detect(source)) {
     push(w.line, 'missing-event', 'low', `${w.functionName}: ${w.description}`);
   }
 
   // Access control
-  for (const w of new AccessControlAnalyzer().detect(source)) {
+  for (const w of accessControlAnalyzer.detect(source)) {
     push(w.line, 'access-control', w.severity, `${w.functionName}: ${w.description}`);
   }
 
   // Custom error suggestions
-  for (const w of new CustomErrorDetector().detect(source)) {
+  for (const w of customErrorDetector.detect(source)) {
     push(w.line, 'custom-error', 'low', `${w.functionName}: ${w.description}`);
   }
 
   // NatSpec completeness
-  for (const w of new NatspecChecker().detect(source)) {
+  for (const w of natspecChecker.detect(source)) {
     push(w.line, 'natspec', 'low', `${w.functionName}: ${w.description}`);
   }
 
   // Dangerous patterns — code is the patternType (e.g. tx-origin)
-  for (const w of new DangerousPatternDetector().detect(source)) {
+  for (const w of dangerousPatternDetector.detect(source)) {
     push(w.line, w.patternType, w.severity, `${w.functionName}: ${w.description}`);
   }
 
   // DeFi risks — code is the riskType
-  for (const w of new DeFiRiskDetector().detect(source)) {
+  for (const w of defiRiskDetector.detect(source)) {
     push(w.line, w.riskType, w.severity, `${w.functionName}: ${w.description}`);
   }
 
   // MEV / front-running
-  for (const w of new MEVAnalyzer().analyze(source)) {
+  for (const w of mevAnalyzer.analyze(source)) {
     push(w.line, 'mev', w.severity, `${w.functionName}: ${w.description} (${w.mitigation})`);
   }
 
@@ -204,7 +223,8 @@ export async function runAudit(
   if (opts.baseline) {
     const baseline = loadBaseline(root);
     findings = findings.filter(
-      (f) => !isBaselined({ file: f.file, code: f.code, message: f.message, line: f.line }, baseline)
+      (f) =>
+        !isBaselined({ file: f.file, code: f.code, message: f.message, line: f.line }, baseline)
     );
   }
 

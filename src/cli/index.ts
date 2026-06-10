@@ -2,11 +2,32 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { ProjectScanner } from '../core/scanner';
+import { ProjectScanner, SubProject } from '../core/scanner';
 import { SignatureExporter } from '../core/exporter';
 import { FileWatcher } from '../core/watcher';
 import { ExportOptions } from '../types';
 import { registerAuditCommand } from './audit-command';
+
+/** Find the subproject that owns a file: the one whose root is the longest matching prefix. */
+function findOwningSubProject(subProjects: SubProject[], filePath: string): SubProject | undefined {
+  let best: SubProject | undefined;
+  let bestLen = -1;
+  for (const sp of subProjects) {
+    if (!sp.scanResult) {
+      continue;
+    }
+    const rel = path.relative(sp.path, filePath);
+    // Inside this subproject only if rel doesn't escape it.
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      continue;
+    }
+    if (sp.path.length > bestLen) {
+      best = sp;
+      bestLen = sp.path.length;
+    }
+  }
+  return best;
+}
 
 const program = new Command();
 
@@ -120,7 +141,7 @@ program
 
       // Initial scan with recursive subproject detection
       console.log(`Initial scan of project: ${options.path}`);
-      let { subProjects } = await scanner.scanAllSubProjects(options.path);
+      const { subProjects } = await scanner.scanAllSubProjects(options.path);
 
       console.log(`Found ${subProjects.length} project(s):`);
       subProjects.forEach((sp) => {
@@ -160,32 +181,52 @@ program
         }
       }
 
+      // Export only the affected subproject — mirrors the extension's
+      // setupWatcherEvents incremental pattern (manager.ts), avoiding a full
+      // scanAllSubProjects on every single file event.
+      const exportSubProject = async (sp: SubProject): Promise<void> => {
+        if (!sp.scanResult || sp.scanResult.totalContracts === 0) {
+          return;
+        }
+        const outputDir = path.join(sp.path, options.output);
+        const exportOptions: ExportOptions = {
+          formats: options.formats.split(',').map((f: string) => f.trim()),
+          outputDir,
+          includeInternal: options.includeInternal,
+          includePrivate: options.includePrivate,
+          includeEvents: options.includeEvents,
+          includeErrors: options.includeErrors,
+          separateByCategory: true,
+          updateExisting: true,
+          deduplicateSignatures: true,
+        };
+        await exporter.exportSignatures(sp.scanResult, exportOptions);
+      };
+
+      // Re-scan and export ONLY the affected subproject instead of the whole
+      // repo. A full per-subproject scanProject (rather than an in-place patch
+      // of projectInfo.contracts) is used deliberately: scanProject performs
+      // cross-file lib-inheritance pruning of the `libs` category that an
+      // incremental contract-map patch can't reproduce, so this keeps output
+      // identical to a cold scan while avoiding scanAllSubProjects' recursive
+      // re-walk of every sibling subproject on every file event.
+      const rescanAndExport = async (filePath: string): Promise<void> => {
+        const sp = findOwningSubProject(subProjects, filePath);
+        if (!sp) {
+          // File belongs to no known subproject (shouldn't happen) — ignore.
+          return;
+        }
+        sp.scanResult = await scanner.scanProject(sp.path);
+        await exportSubProject(sp);
+        console.log(`Signatures updated: ${sp.path}`);
+      };
+
       const handleFileChange = async (filePath: string, contractInfo: unknown) => {
         console.log(`File changed: ${filePath}`);
-        if (contractInfo) {
-          // Re-scan and export
-          const updated = await scanner.scanAllSubProjects(options.path);
-          subProjects = updated.subProjects;
-
-          for (const sp of subProjects) {
-            if (sp.scanResult && sp.scanResult.totalContracts > 0) {
-              const outputDir = path.join(sp.path, options.output);
-              const exportOptions: ExportOptions = {
-                formats: options.formats.split(',').map((f: string) => f.trim()),
-                outputDir,
-                includeInternal: options.includeInternal,
-                includePrivate: options.includePrivate,
-                includeEvents: options.includeEvents,
-                includeErrors: options.includeErrors,
-                separateByCategory: true,
-                updateExisting: true,
-                deduplicateSignatures: true,
-              };
-              await exporter.exportSignatures(sp.scanResult, exportOptions);
-            }
-          }
-          console.log('Signatures updated');
+        if (!contractInfo) {
+          return;
         }
+        await rescanAndExport(filePath);
       };
 
       watcher.on('fileChanged', handleFileChange);
@@ -193,28 +234,7 @@ program
 
       watcher.on('fileRemoved', async (filePath) => {
         console.log(`File removed: ${filePath}`);
-        // Re-scan and export
-        const updated = await scanner.scanAllSubProjects(options.path);
-        subProjects = updated.subProjects;
-
-        for (const sp of subProjects) {
-          if (sp.scanResult && sp.scanResult.totalContracts > 0) {
-            const outputDir = path.join(sp.path, options.output);
-            const exportOptions: ExportOptions = {
-              formats: options.formats.split(',').map((f: string) => f.trim()),
-              outputDir,
-              includeInternal: options.includeInternal,
-              includePrivate: options.includePrivate,
-              includeEvents: options.includeEvents,
-              includeErrors: options.includeErrors,
-              separateByCategory: true,
-              updateExisting: true,
-              deduplicateSignatures: true,
-            };
-            await exporter.exportSignatures(sp.scanResult, exportOptions);
-          }
-        }
-        console.log('Signatures updated');
+        await rescanAndExport(filePath);
       });
 
       watcher.on('error', (error) => {

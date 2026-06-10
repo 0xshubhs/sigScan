@@ -36,7 +36,6 @@ function scheduleSolcRelease() {
 function getSolc() {
   if (!_solc) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       _solc = require('solc');
     } catch {
       // solc not installed — will be handled by callers
@@ -49,7 +48,6 @@ function getSolc() {
 // Try native solc binary on PATH
 function tryNativeSolcVersion(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { execSync } = require('child_process');
     const output = execSync('solc --version', { encoding: 'utf-8', timeout: 5000 });
     const match = output.match(/Version:\s*(\d+\.\d+\.\d+)/);
@@ -61,7 +59,6 @@ function tryNativeSolcVersion(): string | null {
 
 function compileWithNativeSolc(inputJson: string): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { execFileSync } = require('child_process');
     return execFileSync('solc', ['--standard-json'], {
       input: inputJson,
@@ -447,12 +444,12 @@ export class SolcManager {
     availableVersionsPromise = new Promise((resolve) => {
       try {
         // solc-js has a method to get version list
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+
         const https = require('https');
         const url = 'https://binaries.soliditylang.org/bin/list.json';
 
         const req = https
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
           .get(url, (res: { on: (event: string, callback: (data?: string) => void) => void }) => {
             let data = '';
             res.on('data', (chunk?: string) => {
@@ -494,9 +491,11 @@ export class SolcManager {
   }
 
   /**
-   * Hardcoded version list (fallback when network unavailable)
+   * Hardcoded version list (fallback when network unavailable).
+   * Exposed so pragma resolution can try this offline list before hitting the
+   * network in {@link getAvailableVersions}.
    */
-  private static getHardcodedVersions(): string[] {
+  static getHardcodedVersions(): string[] {
     return [
       '0.8.28',
       '0.8.27',
@@ -613,12 +612,36 @@ export async function getCompilerForPragma(source: string): Promise<{
   }
 
   try {
-    const availableVersions = await SolcManager.getAvailableVersions();
-    const targetVersion = resolveSolcVersion(pragma, availableVersions);
-
-    // Check if bundled satisfies
     const bundledVersion = SolcManager.getBundledVersion();
     const bundledSemver = bundledVersion.match(/(\d+\.\d+\.\d+)/)?.[1] || '0.8.28';
+
+    // Resolve the target version WITHOUT a network fetch when possible.
+    // The bundled compiler and the hardcoded version list cover the common case;
+    // only fall through to the remote list (an HTTPS GET with a 10s timeout) when
+    // neither offline source satisfies the pragma. We include the bundled version
+    // in the offline candidate set so resolveSolcVersion still picks the highest
+    // compatible version (preserving "use the newest matching compiler").
+    const cleanPragma = pragma
+      .replace(/pragma\s+solidity/i, '')
+      .replace(';', '')
+      .trim();
+    let targetVersion: string | null = null;
+
+    const offlineCandidates = [bundledSemver, ...SolcManager.getHardcodedVersions()];
+    const offlineSatisfies = offlineCandidates.some((v) => {
+      try {
+        return semver.satisfies(v, cleanPragma);
+      } catch {
+        return false;
+      }
+    });
+    if (offlineSatisfies) {
+      targetVersion = resolveSolcVersion(pragma, offlineCandidates);
+    } else {
+      // No bundled/hardcoded version matches — fall back to the remote list.
+      const availableVersions = await SolcManager.getAvailableVersions();
+      targetVersion = resolveSolcVersion(pragma, availableVersions);
+    }
 
     if (targetVersion === bundledSemver) {
       return {

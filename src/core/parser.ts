@@ -13,6 +13,7 @@ import {
   normalizeFunctionSignature,
   getContractNameFromPath,
 } from '../utils/helpers';
+import { signatureCache } from './cache';
 
 // Pre-compiled regexes — hoisted to module level to avoid per-call allocation
 const CONTRACT_NAME_RE = /(contract|library|interface)\s+(\w+)/;
@@ -23,6 +24,11 @@ const MODIFIER_RE = /modifier\s+(\w+)\s*\((.*?)\)\s*[{]/gs;
 const EVENT_RE = /event\s+(\w+)\s*\((.*?)\)\s*;/gs;
 const ERROR_RE = /error\s+(\w+)\s*\((.*?)\)\s*;/gs;
 const NATSPEC_TAG_RE = /@(\w+(?::\w+)?)\s+([^\n@]*(?:\n(?!\s*@)[^\n@]*)*)/g;
+
+// Max characters to scan backward for a NatSpec block. NatSpec is always
+// immediately adjacent to its declaration, so a bounded window is sufficient
+// and avoids re-scanning the whole file prefix for every declaration.
+const NATSPEC_SCAN_WINDOW = 2000;
 
 export class SolidityParser {
   /**
@@ -45,9 +51,28 @@ export class SolidityParser {
     try {
       const contractName = this.extractContractName(content) || getContractNameFromPath(filePath);
 
+      // Content-hash cache: skip re-running all regex extraction when this exact
+      // file content has been parsed before. The cache hashes `content`, so stale
+      // content never returns a hit. Selectors are still always available because
+      // extraction (the fallback) runs on every miss.
+      const cached = signatureCache.get(filePath, content);
+      if (cached) {
+        return {
+          name: contractName,
+          filePath,
+          functions: cached.signatures.functions as FunctionSignature[],
+          events: cached.signatures.events as EventSignature[],
+          errors: cached.signatures.errors as ErrorSignature[],
+          lastModified: new Date(),
+          category: 'contracts', // Default category, will be updated by scanner
+        };
+      }
+
       const functions = this.extractFunctions(content, contractName, filePath);
       const events = this.extractEvents(content, contractName, filePath);
       const errors = this.extractErrors(content, contractName, filePath);
+
+      signatureCache.set(filePath, content, { functions, events, errors });
 
       return {
         name: contractName,
@@ -300,8 +325,11 @@ export class SolidityParser {
    * Supports both /** ... * / block comments and /// line comments.
    */
   private extractNatspec(content: string, declarationIndex: number): NatspecInfo | undefined {
-    // Look at content before the declaration
-    const before = content.substring(0, declarationIndex).trimEnd();
+    // NatSpec must be immediately adjacent to the declaration, so only scan a
+    // bounded window backward instead of copying the entire file prefix (which
+    // made this O(N × fileLength) across all declarations).
+    const windowStart = Math.max(0, declarationIndex - NATSPEC_SCAN_WINDOW);
+    const before = content.substring(windowStart, declarationIndex).trimEnd();
 
     let commentBody: string | null = null;
 

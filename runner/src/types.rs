@@ -19,7 +19,7 @@ pub struct FunctionReport {
     /// Which calldata strategy produced this result.
     /// Omitted from JSON when None for backward compatibility.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub strategy: Option<String>,
+    pub strategy: Option<&'static str>,
 }
 
 /// Whether the function call succeeded or reverted.

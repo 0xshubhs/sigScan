@@ -133,20 +133,35 @@ export interface FuzzReport {
 
 let runnerAvailableCache: boolean | null = null;
 let runnerPathCache: string | null = null;
+/** Timestamp of the last negative probe — gates re-probing until TTL expires. */
+let runnerNegativeProbeAt = 0;
+/** How long to trust a negative result before re-probing (binary may appear later). */
+const RUNNER_NEGATIVE_TTL_MS = 60_000;
 
 /**
  * Check if `sigscan-runner` is available.
- * Result is cached for the lifetime of the process.
+ * Positive results are cached for the lifetime of the process. Negative results
+ * are cached for a short TTL so we don't re-spawn the binary (a 5s-timeout child
+ * process) on every debounced compile, while still allowing the binary to be
+ * picked up after it's installed (re-probe once the TTL expires).
  */
 export async function isRunnerAvailable(): Promise<boolean> {
-  // Don't cache negative results — binary may appear after extension loads
   if (runnerAvailableCache === true) {
     return true;
+  }
+
+  // Trust a recent negative result — skip re-probing until the TTL expires.
+  if (
+    runnerAvailableCache === false &&
+    Date.now() - runnerNegativeProbeAt < RUNNER_NEGATIVE_TTL_MS
+  ) {
+    return false;
   }
 
   const runnerPath = discoverRunnerPath();
   if (!runnerPath) {
     runnerAvailableCache = false;
+    runnerNegativeProbeAt = Date.now();
     return false;
   }
 
@@ -154,6 +169,7 @@ export async function isRunnerAvailable(): Promise<boolean> {
     execFile(runnerPath, ['--help'], { timeout: 5000, env: getAugmentedEnv() }, (err) => {
       if (err) {
         runnerAvailableCache = false;
+        runnerNegativeProbeAt = Date.now();
         resolve(false);
         return;
       }
@@ -170,6 +186,7 @@ export async function isRunnerAvailable(): Promise<boolean> {
 export function resetRunnerCache(): void {
   runnerAvailableCache = null;
   runnerPathCache = null;
+  runnerNegativeProbeAt = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +208,7 @@ function discoverRunnerPath(): string | null {
   // 1. User-configured path + 2. Extension bundled binary
   try {
     // Try to load vscode — may not be available in CLI/test context
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const vscode = require('vscode');
     const configPath: string = vscode.workspace
       .getConfiguration('sigscan')
@@ -315,6 +332,23 @@ export async function compileWithRunner(
     const lineOffsets = buildLineOffsets(source);
     const sourceMeta = extractFunctionMetadata(source, lineOffsets);
 
+    // Build O(1) lookup indices once (preserves matching precedence below):
+    // selector → meta, and name → first-seen meta (matches the .find() that
+    // returned the first signature starting with `name(`).
+    type FnMeta =
+      ReturnType<typeof extractFunctionMetadata> extends Map<string, infer V> ? V : never;
+    const bySelector = new Map<string, FnMeta>();
+    const byName = new Map<string, FnMeta>();
+    for (const [sig, m] of sourceMeta) {
+      if (!bySelector.has(m.selector)) {
+        bySelector.set(m.selector, m);
+      }
+      const name = sig.substring(0, sig.indexOf('('));
+      if (!byName.has(name)) {
+        byName.set(name, m);
+      }
+    }
+
     // Merge runner gas data with source metadata
     const gasInfo: GasInfo[] = [];
 
@@ -322,9 +356,7 @@ export async function compileWithRunner(
       for (const func of report.functions) {
         // Try exact signature match first, then fall back to name-based lookup
         const meta =
-          sourceMeta.get(func.signature) ||
-          [...sourceMeta.values()].find((m) => m.selector === func.selector) ||
-          [...sourceMeta.entries()].find(([sig]) => sig.startsWith(func.name + '('))?.[1];
+          sourceMeta.get(func.signature) || bySelector.get(func.selector) || byName.get(func.name);
 
         const warnings: string[] = [];
         let gas: number | 'infinite' = func.gas;

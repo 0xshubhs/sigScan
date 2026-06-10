@@ -1,2 +1,5 @@
 #!/bin/bash
-VERSION=$(node -p "require('./package.json').version") && bun run compile && vsce package --no-dependencies && code --install-extension "sigscan-${VERSION}.vsix" --force
+# Build a complete .vsix (with solc bundled) and install it into VS Code.
+# See scripts/package-vsix.js for why a custom packaging step is needed.
+set -e
+node "$(dirname "$0")/scripts/package-vsix.js" --install

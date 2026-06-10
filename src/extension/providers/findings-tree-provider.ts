@@ -226,9 +226,58 @@ export function registerFindingsTree(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
   });
 
-  const diagnosticsSub = vscode.languages.onDidChangeDiagnostics(() => {
-    provider.refresh();
+  // Debounce refreshes: a single user edit can fan out into many diagnostic
+  // change events, and each refresh re-scans + re-sorts ALL workspace
+  // diagnostics in rootNodes(). Coalesce them into one refresh.
+  const REFRESH_DEBOUNCE_MS = 250;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRefresh = (): void => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+    }
+    refreshTimer = setTimeout(() => {
+      refreshTimer = undefined;
+      provider.refresh();
+    }, REFRESH_DEBOUNCE_MS);
+  };
+
+  // Track which Uris currently contribute findings so we still refresh when the
+  // last 0xTools diagnostic is *cleared* from a file (the new diagnostic list no
+  // longer matches FINDINGS_SOURCE, but the tree must drop that file group).
+  const urisWithFindings = new Set<string>();
+
+  const diagnosticsSub = vscode.languages.onDidChangeDiagnostics((e) => {
+    // Skip refreshes triggered purely by other diagnostic sources (compiler
+    // errors, linters, etc.). Only refresh if an affected Uri now has — or
+    // previously had — a diagnostic from this view's source.
+    let affectsFindings = false;
+    for (const uri of e.uris) {
+      const key = uri.toString();
+      const hasFindings = vscode.languages
+        .getDiagnostics(uri)
+        .some((d) => d.source === FINDINGS_SOURCE);
+      if (hasFindings) {
+        if (!urisWithFindings.has(key)) {
+          urisWithFindings.add(key);
+        }
+        affectsFindings = true;
+      } else if (urisWithFindings.delete(key)) {
+        // Last finding for this file was cleared — the tree must update.
+        affectsFindings = true;
+      }
+    }
+    if (!affectsFindings) {
+      return;
+    }
+    scheduleRefresh();
   });
 
-  context.subscriptions.push(treeView, diagnosticsSub, provider);
+  const refreshDisposable = new vscode.Disposable(() => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = undefined;
+    }
+  });
+
+  context.subscriptions.push(treeView, diagnosticsSub, refreshDisposable, provider);
 }

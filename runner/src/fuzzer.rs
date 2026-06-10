@@ -50,13 +50,13 @@ pub fn fuzz_contracts(contracts: &[CompiledContract], rounds: u32) -> Vec<FuzzRe
 
 fn fuzz_single_contract(contract: &CompiledContract, rounds: u32) -> Result<FuzzReport> {
     let caller_addr = caller();
-    let (base_db, addr) = deploy_best(contract, caller_addr)?;
+    let (mut base_db, addr) = deploy_best(contract, caller_addr)?;
 
     let mut results = Vec::new();
 
     for func_list in contract.abi.functions.values() {
         for func in func_list {
-            let result = fuzz_function(&base_db, addr, func, caller_addr, rounds);
+            let result = fuzz_function(&mut base_db, addr, func, caller_addr, rounds);
             results.push(result);
         }
     }
@@ -85,7 +85,7 @@ fn deploy_best(
             };
         let mut data = contract.bytecode.clone();
         data.extend_from_slice(&ctor_args);
-        match deploy(setup_db(), &data) {
+        match deploy(setup_db(), data) {
             Ok(result) => return Ok(result),
             Err(e) => {
                 last_err = Some(e);
@@ -96,13 +96,13 @@ fn deploy_best(
     Err(last_err.unwrap_or_else(|| eyre::eyre!("deployment failed")))
 }
 
-fn deploy(db: CacheDB<EmptyDB>, data: &[u8]) -> Result<(CacheDB<EmptyDB>, Address)> {
+fn deploy(db: CacheDB<EmptyDB>, data: Vec<u8>) -> Result<(CacheDB<EmptyDB>, Address)> {
     let mut evm = revm::Context::mainnet().with_db(db).build_mainnet();
     let tx = TxEnv {
         caller: caller(),
         gas_limit: GAS_LIMIT,
         kind: TxKind::Create,
-        data: Bytes::copy_from_slice(data),
+        data: Bytes::from(data),
         ..Default::default()
     };
     let result = evm
@@ -123,7 +123,7 @@ fn deploy(db: CacheDB<EmptyDB>, data: &[u8]) -> Result<(CacheDB<EmptyDB>, Addres
 
 /// Fuzz a single function with random inputs across multiple rounds.
 fn fuzz_function(
-    base_db: &CacheDB<EmptyDB>,
+    base_db: &mut CacheDB<EmptyDB>,
     addr: Address,
     func: &Function,
     caller_addr: Address,
@@ -138,6 +138,11 @@ fn fuzz_function(
     let mut total_gas: u64 = 0;
     let mut rng = rand::rng();
 
+    // Build the EVM once and reuse it across all rounds. `transact` is
+    // non-committing and finalizes (clears the journal) each round, so committed
+    // state never changes — no per-round DB clone or EVM rebuild is needed.
+    let mut evm = revm::Context::mainnet().with_db(&mut *base_db).build_mainnet();
+
     for _ in 0..rounds {
         // Generate random calldata
         let calldata = match generate_random_calldata(func, caller_addr, &mut rng) {
@@ -145,9 +150,7 @@ fn fuzz_function(
             Err(_) => continue,
         };
 
-        // Clone the DB so each fuzz round starts from the same state
-        let mut db = base_db.clone();
-        let result = call_function(&mut db, addr, &calldata);
+        let result = call_function(&mut evm, addr, calldata);
 
         match result {
             Ok((gas, status)) => {
@@ -191,18 +194,22 @@ fn fuzz_function(
     }
 }
 
-/// Execute a function call against a cloned DB.
-fn call_function(
-    db: &mut CacheDB<EmptyDB>,
+/// Execute a function call against an already-built EVM, returning gas + status.
+/// Generic over the EVM so a single instance can be reused across fuzz rounds.
+fn call_function<E>(
+    evm: &mut E,
     addr: Address,
-    calldata: &[u8],
-) -> Result<(u64, ExecutionStatus)> {
-    let mut evm = revm::Context::mainnet().with_db(&mut *db).build_mainnet();
+    calldata: Vec<u8>,
+) -> Result<(u64, ExecutionStatus)>
+where
+    E: ExecuteEvm<Tx = TxEnv, ExecutionResult = ExecutionResult>,
+    E::Error: std::fmt::Debug,
+{
     let tx = TxEnv {
         caller: caller(),
         gas_limit: GAS_LIMIT,
         kind: TxKind::Call(addr),
-        data: Bytes::copy_from_slice(calldata),
+        data: Bytes::from(calldata),
         nonce: 1,
         ..Default::default()
     };

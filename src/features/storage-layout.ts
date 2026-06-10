@@ -44,6 +44,11 @@ const RE_SINGLE_QUOTED = /'[^']*'/g;
 const RE_STATE_VAR =
   /(?:public|private|internal)?\s+(address|uint\d*|int\d*|bool|bytes\d*|string|mapping\([^)]+\)|\w+)\s+(?:public|private|internal)?\s*(\w+)\s*(?:=|;)/g;
 const RE_STORAGE_GAP = /uint256\[\d+\]\s+private\s+__gap/i;
+// Generic declaration matcher used to build a name -> declaration-end-offset map
+// in a single pass (group 2 is the variable name). Mirrors the per-variable
+// pattern used for decorations so positions are identical to the first match.
+const RE_DECL_GENERIC =
+  /\b(?:address|uint\d*|int\d*|bool|bytes\d*|string|mapping\([^)]+\)|\w+)\s+(?:public|private|internal)?\s*(\w+)\s*[;=]/g;
 
 export class StorageLayoutAnalyzer {
   private readonly SLOT_SIZE = 32; // 32 bytes per slot
@@ -426,15 +431,28 @@ export class StorageLayoutAnalyzer {
     const decorations: vscode.DecorationOptions[] = [];
     const content = document.getText();
 
-    layout.variables.forEach((slot) => {
-      // Find variable declaration
-      const pattern = new RegExp(
-        `\\b(address|uint\\d*|int\\d*|bool|bytes\\d*|string|mapping\\([^)]+\\)|\\w+)\\s+(?:public|private|internal)?\\s*${slot.variable}\\s*[;=]`
-      );
-      const match = pattern.exec(content);
+    // Build a name -> declaration-end-offset map in a single pass over the
+    // document, keeping the FIRST occurrence per name to match the previous
+    // per-variable `RegExp.exec` first-match semantics. This avoids compiling
+    // and scanning a fresh regex over the whole document for every variable.
+    const declOffsets = new Map<string, number>();
+    RE_DECL_GENERIC.lastIndex = 0;
+    let declMatch;
+    while ((declMatch = RE_DECL_GENERIC.exec(content)) !== null) {
+      const name = declMatch[1];
+      if (!declOffsets.has(name)) {
+        // Position of the terminating `;`/`=` (last char of the match), matching
+        // `match.index + match[0].length - 1` from the original per-var regex.
+        declOffsets.set(name, declMatch.index + declMatch[0].length - 1);
+      }
+    }
 
-      if (match) {
-        const position = document.positionAt(match.index + match[0].length - 1);
+    layout.variables.forEach((slot) => {
+      // Find variable declaration via the precomputed offset map.
+      const declEndOffset = declOffsets.get(slot.variable);
+
+      if (declEndOffset !== undefined) {
+        const position = document.positionAt(declEndOffset);
         const wastedInfo =
           slot.wastedBytes && slot.wastedBytes > 0 ? `, ${slot.wastedBytes}B wasted` : '';
         const packedInfo = slot.packed ? ' (packed)' : '';

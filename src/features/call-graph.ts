@@ -42,6 +42,10 @@ const RE_FUNC_DECL =
   /function\s+(\w+)\s*\(([^)]*)\)\s*(public|external|internal|private)?\s*([\w\s,]*?)\s*(?:returns\s*\([^)]*\))?\s*{/g;
 const RE_INTERNAL_CALL = /\b(\w+)\s*\(/g;
 const RE_EXTERNAL_CALL = /(\w+)\.(\w+)\s*\(/g;
+const RE_DELEGATECALL_TARGET = /(\w+)\.delegatecall\b/g;
+// Generic function-declaration matcher (group 1 is the name) used to build a
+// name -> declaration-end-offset map in one pass for decorations.
+const RE_FUNC_DECL_GENERIC = /function\s+(\w+)\s*\([^)]*\)/g;
 
 export class CallGraphAnalyzer {
   /**
@@ -186,12 +190,22 @@ export class CallGraphAnalyzer {
         }
       }
 
+      // Precompute the set of delegatecall targets in ONE pass over the body,
+      // so the per-call loop can look them up instead of substring-scanning the
+      // whole body for each external call.
+      const delegatecallTargets = new Set<string>();
+      RE_DELEGATECALL_TARGET.lastIndex = 0;
+      let delegateMatch;
+      while ((delegateMatch = RE_DELEGATECALL_TARGET.exec(func.body)) !== null) {
+        delegatecallTargets.add(delegateMatch[1]);
+      }
+
       // Find external calls
       RE_EXTERNAL_CALL.lastIndex = 0;
       let extMatch;
       while ((extMatch = RE_EXTERNAL_CALL.exec(func.body)) !== null) {
         const [, target, method] = extMatch;
-        const isDelegate = func.body.includes(`${target}.delegatecall`);
+        const isDelegate = delegatecallTargets.has(target);
 
         caller.externalCalls.push({
           target,
@@ -472,13 +486,27 @@ export class CallGraphAnalyzer {
     const decorations: vscode.DecorationOptions[] = [];
     const content = document.getText();
 
-    callGraph.functions.forEach((node, name) => {
-      // Find function declaration
-      const pattern = new RegExp(`function\\s+${name}\\s*\\([^)]*\\)`);
-      const match = pattern.exec(content);
+    // Build a name -> declaration-end-offset map in a single pass over the
+    // document, keeping the FIRST occurrence per name to match the previous
+    // per-function `RegExp.exec` first-match semantics. This avoids compiling
+    // and scanning a fresh regex over the whole document for every function.
+    const declEndOffsets = new Map<string, number>();
+    RE_FUNC_DECL_GENERIC.lastIndex = 0;
+    let declMatch;
+    while ((declMatch = RE_FUNC_DECL_GENERIC.exec(content)) !== null) {
+      const declName = declMatch[1];
+      if (!declEndOffsets.has(declName)) {
+        // End of the declaration's `)` — matches `match.index + match[0].length`.
+        declEndOffsets.set(declName, declMatch.index + declMatch[0].length);
+      }
+    }
 
-      if (match) {
-        const position = document.positionAt(match.index + match[0].length);
+    callGraph.functions.forEach((node, name) => {
+      // Find function declaration via the precomputed offset map.
+      const declEndOffset = declEndOffsets.get(name);
+
+      if (declEndOffset !== undefined) {
+        const position = document.positionAt(declEndOffset);
 
         const gasIcon =
           node.gasImpact === 'high' ? '🔴' : node.gasImpact === 'medium' ? '🟡' : '🟢';

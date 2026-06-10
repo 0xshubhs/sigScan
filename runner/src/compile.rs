@@ -86,7 +86,6 @@ fn forge_build(foundry_root: &Path) -> Result<()> {
     let output = Command::new("forge")
         .args([
             "build",
-            "--force",
             "--extra-output",
             "abi",
             "evm.bytecode.object",
@@ -149,7 +148,7 @@ fn read_artifacts(out_dir: &Path, sol_path: &Path) -> Result<Vec<CompiledContrac
             .to_string();
 
         let raw: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&path)?).wrap_err_with(|| {
+            serde_json::from_slice(&fs::read(&path)?).wrap_err_with(|| {
                 format!("failed to parse artifact {}", path.display())
             })?;
 

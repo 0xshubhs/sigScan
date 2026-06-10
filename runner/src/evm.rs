@@ -57,7 +57,7 @@ fn deploy_best(
             };
         let mut data = contract.bytecode.clone();
         data.extend_from_slice(&ctor_args);
-        match deploy(setup_db(), &data) {
+        match deploy(setup_db(), data) {
             Ok(result) => return Ok(result),
             Err(e) => { last_err = Some(e); continue; }
         }
@@ -72,17 +72,40 @@ fn try_function(
     func: &alloy_json_abi::Function,
     caller_addr: Address,
 ) -> Result<FunctionReport> {
+    // Build the EVM once and reuse it across all strategies. `transact` finalizes
+    // (clears the journal) after each call, so successive calls start clean.
+    let mut evm = revm::Context::mainnet().with_db(&mut *db).build_mainnet();
+    let selector = format!("0x{}", hex::encode(func.selector().as_slice()));
+    let signature = func.signature();
+
     let mut best: Option<(FunctionReport, u8)> = None;
+    let mut tried: Vec<Vec<u8>> = Vec::with_capacity(STRATEGIES.len());
     for strategy in &STRATEGIES {
         let cd = match encode_calldata_with_strategy(func, *strategy, caller_addr) {
             Ok(cd) => cd,
             Err(_) => continue,
         };
-        let mut report = match call(db, addr, func, &cd) {
+        // Skip strategies whose calldata is byte-identical to one already executed
+        // (e.g. zero-arg functions, or single-arg where strategies coincide).
+        if tried.iter().any(|t| t == &cd) {
+            continue;
+        }
+        let (gas, status) = match call(&mut evm, addr, cd.clone()) {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(_) => {
+                tried.push(cd);
+                continue;
+            }
         };
-        report.strategy = Some(strategy_label(*strategy));
+        tried.push(cd);
+        let report = FunctionReport {
+            name: func.name.clone(),
+            selector: selector.clone(),
+            signature: signature.clone(),
+            gas,
+            status,
+            strategy: Some(strategy_label(*strategy)),
+        };
         let rank = status_rank(&report.status);
         if rank == 2 { return Ok(report); }
         if best.as_ref().map_or(true, |(_, r)| rank > *r) {
@@ -101,12 +124,12 @@ fn status_rank(s: &ExecutionStatus) -> u8 {
     }
 }
 
-fn strategy_label(s: CallStrategy) -> String {
+fn strategy_label(s: CallStrategy) -> &'static str {
     match s {
-        CallStrategy::SmartDefaults => "smart_defaults".into(),
-        CallStrategy::IncrementingArgs => "incrementing_args".into(),
-        CallStrategy::CallerAddress => "caller_address".into(),
-        CallStrategy::ZeroDefaults => "zero_defaults".into(),
+        CallStrategy::SmartDefaults => "smart_defaults",
+        CallStrategy::IncrementingArgs => "incrementing_args",
+        CallStrategy::CallerAddress => "caller_address",
+        CallStrategy::ZeroDefaults => "zero_defaults",
     }
 }
 
@@ -117,13 +140,13 @@ fn setup_db() -> CacheDB<EmptyDB> {
     db
 }
 
-fn deploy(db: CacheDB<EmptyDB>, data: &[u8]) -> Result<(CacheDB<EmptyDB>, Address)> {
+fn deploy(db: CacheDB<EmptyDB>, data: Vec<u8>) -> Result<(CacheDB<EmptyDB>, Address)> {
     let mut evm = revm::Context::mainnet().with_db(db).build_mainnet();
     let tx = TxEnv {
         caller: caller(),
         gas_limit: GAS_LIMIT,
         kind: TxKind::Create,
-        data: Bytes::copy_from_slice(data),
+        data: Bytes::from(data),
         ..Default::default()
     };
     let result = evm.transact_commit(tx).map_err(|e| eyre::eyre!("deploy error: {e:?}"))?;
@@ -138,18 +161,18 @@ fn deploy(db: CacheDB<EmptyDB>, data: &[u8]) -> Result<(CacheDB<EmptyDB>, Addres
     }
 }
 
-fn call(
-    db: &mut CacheDB<EmptyDB>,
-    addr: Address,
-    func: &alloy_json_abi::Function,
-    calldata: &[u8],
-) -> Result<FunctionReport> {
-    let mut evm = revm::Context::mainnet().with_db(&mut *db).build_mainnet();
+/// Execute one call against an already-built EVM, returning gas + status.
+/// Generic over the EVM so a single instance can be reused across strategies.
+fn call<E>(evm: &mut E, addr: Address, calldata: Vec<u8>) -> Result<(u64, ExecutionStatus)>
+where
+    E: ExecuteEvm<Tx = TxEnv, ExecutionResult = ExecutionResult>,
+    E::Error: std::fmt::Debug,
+{
     let tx = TxEnv {
         caller: caller(),
         gas_limit: GAS_LIMIT,
         kind: TxKind::Call(addr),
-        data: Bytes::copy_from_slice(calldata),
+        data: Bytes::from(calldata),
         nonce: 1,
         ..Default::default()
     };
@@ -159,12 +182,5 @@ fn call(
         ExecutionResult::Revert { gas_used, .. } => (*gas_used, ExecutionStatus::Revert),
         ExecutionResult::Halt { gas_used, .. } => (*gas_used, ExecutionStatus::Halt),
     };
-    Ok(FunctionReport {
-        name: func.name.clone(),
-        selector: format!("0x{}", hex::encode(func.selector().as_slice())),
-        signature: func.signature(),
-        gas,
-        status,
-        strategy: None,
-    })
+    Ok((gas, status))
 }

@@ -21,21 +21,33 @@ import { getAugmentedEnv } from './foundry-env';
 
 let forgeAvailableCache: boolean | null = null;
 let forgeVersionCache: string | null = null;
+/** Timestamp of the last negative probe — gates re-probing until TTL expires. */
+let forgeNegativeProbeAt = 0;
+/** How long to trust a negative result before re-probing (forge may appear later). */
+const FORGE_NEGATIVE_TTL_MS = 60_000;
 
 /**
  * Check if `forge` is on PATH and usable.
- * Result is cached for the lifetime of the process.
+ * Positive results are cached for the lifetime of the process. Negative results
+ * are cached for a short TTL so we don't re-spawn `forge --version` (a 5s-timeout
+ * child process) on every debounced compile, while still allowing forge to be
+ * picked up after it appears on PATH (re-probe once the TTL expires).
  */
 export async function isForgeAvailable(): Promise<boolean> {
-  // Don't cache negative results — PATH may become available after extension loads
   if (forgeAvailableCache === true) {
     return true;
+  }
+
+  // Trust a recent negative result — skip re-probing until the TTL expires.
+  if (forgeAvailableCache === false && Date.now() - forgeNegativeProbeAt < FORGE_NEGATIVE_TTL_MS) {
+    return false;
   }
 
   return new Promise((resolve) => {
     execFile('forge', ['--version'], { timeout: 5000, env: getAugmentedEnv() }, (err, stdout) => {
       if (err) {
         forgeAvailableCache = false;
+        forgeNegativeProbeAt = Date.now();
         resolve(false);
         return;
       }
@@ -61,6 +73,7 @@ export function getForgeVersion(): string {
 export function resetForgeCache(): void {
   forgeAvailableCache = null;
   forgeVersionCache = null;
+  forgeNegativeProbeAt = 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -137,7 +137,7 @@ fn cmd_gas(sol_file: &PathBuf) -> eyre::Result<()> {
         });
     }
 
-    let json = serde_json::to_string_pretty(&reports)?;
+    let json = serde_json::to_string(&reports)?;
     println!("{json}");
     Ok(())
 }
@@ -147,7 +147,7 @@ fn cmd_storage_layout(sol_file: &PathBuf) -> eyre::Result<()> {
     validate_sol_file(sol_file)?;
     let contracts = compile::compile(sol_file)?;
     let reports = storage_layout::analyze_storage(&contracts);
-    let json = serde_json::to_string_pretty(&reports)?;
+    let json = serde_json::to_string(&reports)?;
     println!("{json}");
     Ok(())
 }
@@ -157,7 +157,7 @@ fn cmd_cfg(sol_file: &PathBuf) -> eyre::Result<()> {
     validate_sol_file(sol_file)?;
     let contracts = compile::compile(sol_file)?;
     let reports = cfg::build_cfg(&contracts);
-    let json = serde_json::to_string_pretty(&reports)?;
+    let json = serde_json::to_string(&reports)?;
     println!("{json}");
     Ok(())
 }
@@ -167,7 +167,7 @@ fn cmd_call_graph(sol_file: &PathBuf) -> eyre::Result<()> {
     validate_sol_file(sol_file)?;
     let contracts = compile::compile(sol_file)?;
     let reports = call_graph::build_call_graph(&contracts);
-    let json = serde_json::to_string_pretty(&reports)?;
+    let json = serde_json::to_string(&reports)?;
     println!("{json}");
     Ok(())
 }
@@ -175,7 +175,7 @@ fn cmd_call_graph(sol_file: &PathBuf) -> eyre::Result<()> {
 /// ABI data decoding.
 fn cmd_abi_decode(data: &str, types: Option<&str>) -> eyre::Result<()> {
     let result = abi_decode::decode(data, types)?;
-    let json = serde_json::to_string_pretty(&result)?;
+    let json = serde_json::to_string(&result)?;
     println!("{json}");
     Ok(())
 }
@@ -189,11 +189,11 @@ fn cmd_sig_db(selector: &str) -> eyre::Result<()> {
 
     if is_selector {
         let result = signature_db::lookup(selector);
-        let json = serde_json::to_string_pretty(&result)?;
+        let json = serde_json::to_string(&result)?;
         println!("{json}");
     } else {
         let results = signature_db::reverse_lookup(selector);
-        let json = serde_json::to_string_pretty(&results)?;
+        let json = serde_json::to_string(&results)?;
         println!("{json}");
     }
     Ok(())
@@ -204,7 +204,7 @@ fn cmd_fuzz(sol_file: &PathBuf, rounds: u32) -> eyre::Result<()> {
     validate_sol_file(sol_file)?;
     let contracts = compile::compile(sol_file)?;
     let reports = fuzzer::fuzz_contracts(&contracts, rounds);
-    let json = serde_json::to_string_pretty(&reports)?;
+    let json = serde_json::to_string(&reports)?;
     println!("{json}");
     Ok(())
 }

@@ -20,7 +20,7 @@ tempfile = "3.24.0"
 toml = { version = "0.9.11", default-features = false, features = ["parse", "serde"] }
 
 [profile.release]
-opt-level = "z"          # optimize for size
+opt-level = 3            # optimize for speed (compute-bound EVM interpreter)
 lto = true               # link-time optimization
 codegen-units = 1        # single codegen unit for best optimization
 panic = "abort"          # no unwinding overhead

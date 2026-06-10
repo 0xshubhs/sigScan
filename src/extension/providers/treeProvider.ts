@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SigScanManager } from '../manager';
+import { ContractInfo, ScanResult } from '../../types';
 
 export class SignatureTreeProvider
   implements vscode.TreeDataProvider<SignatureTreeItem>, vscode.Disposable
@@ -9,14 +10,47 @@ export class SignatureTreeProvider
   readonly onDidChangeTreeData: vscode.Event<SignatureTreeItem | undefined | null | void> =
     this._onDidChangeTreeData.event;
 
+  /**
+   * Cached name -> ContractInfo index for the current scan result, built lazily
+   * so expanding a contract node is O(1) instead of an O(n) linear scan. The
+   * `for...of` build order matches the previous `Array#find` semantics: the
+   * FIRST contract with a given name wins when duplicates exist.
+   */
+  private contractsByName: Map<string, ContractInfo> | null = null;
+  private indexedScanResult: ScanResult | null = null;
+
   constructor(private manager: SigScanManager) {}
 
   refresh(): void {
+    // Invalidate the cached name index; the next lookup rebuilds it.
+    this.contractsByName = null;
+    this.indexedScanResult = null;
     this._onDidChangeTreeData.fire();
   }
 
   dispose(): void {
     this._onDidChangeTreeData.dispose();
+  }
+
+  /**
+   * Return (building if necessary) the name -> ContractInfo index for the given
+   * scan result. Rebuilt if the scan result identity changed since last call so
+   * the cache can't go stale even without an explicit refresh().
+   */
+  private getContractsByName(scanResult: ScanResult): Map<string, ContractInfo> {
+    if (this.contractsByName && this.indexedScanResult === scanResult) {
+      return this.contractsByName;
+    }
+    const index = new Map<string, ContractInfo>();
+    scanResult.projectInfo.contracts.forEach((contract) => {
+      // First-seen wins, matching the prior Array#find behavior on duplicates.
+      if (!index.has(contract.name)) {
+        index.set(contract.name, contract);
+      }
+    });
+    this.contractsByName = index;
+    this.indexedScanResult = scanResult;
+    return index;
   }
 
   getTreeItem(element: SignatureTreeItem): vscode.TreeItem {
@@ -48,10 +82,8 @@ export class SignatureTreeProvider
     }
 
     if (element.type === 'contract') {
-      // Return function categories for a contract
-      const contract = Array.from(scanResult.projectInfo.contracts.values()).find(
-        (c) => c.name === element.label
-      );
+      // Return function categories for a contract (O(1) name lookup).
+      const contract = this.getContractsByName(scanResult).get(element.label);
 
       if (!contract) {
         return Promise.resolve([]);

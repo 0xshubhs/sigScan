@@ -751,6 +751,8 @@
     "test:coverage": "jest --coverage",
     "cli": "node dist/cli/index.js",
     "build": "webpack --mode production",
+    "package": "node scripts/package-vsix.js",
+    "package:install": "node scripts/package-vsix.js --install",
     "dev": "webpack --mode development",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",

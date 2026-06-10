@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { keccak256 } from 'js-sha3';
 
 /**
@@ -107,6 +108,5 @@ export function parseParameters(paramString: string): { name: string; type: stri
  * Clean contract name from file path
  */
 export function getContractNameFromPath(filePath: string): string {
-  const fileName = filePath.split('/').pop() || '';
-  return fileName.replace('.sol', '');
+  return path.basename(filePath, '.sol');
 }

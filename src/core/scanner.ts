@@ -6,6 +6,8 @@ import { SolidityParser } from './parser';
 
 // Pre-compiled regex for import extraction — hoisted to avoid per-call allocation
 const IMPORT_RE = /import\s+[^"]*"([^"]+)"/g;
+// Pre-compiled regex for inheritance lists — captures the names after `is`
+const INHERITANCE_RE = /\b(?:contract|interface)\s+\w+\s+is\s+([^{]+)\{/g;
 
 export interface SubProject {
   path: string;
@@ -147,11 +149,12 @@ export class ProjectScanner {
           combinedContracts.set(filePath, contract);
         }
 
-        // Merge by category
+        // Merge by category — push in place (the Map already holds the array
+        // reference) instead of rebuilding the whole array per subproject.
         for (const category of ['contracts', 'libs', 'tests'] as ContractCategory[]) {
           const existing = combinedByCategory.get(category) || [];
           const newContracts = subProject.scanResult.contractsByCategory.get(category) || [];
-          combinedByCategory.set(category, [...existing, ...newContracts]);
+          existing.push(...newContracts);
         }
 
         // Merge unique signatures
@@ -237,13 +240,13 @@ export class ProjectScanner {
     // Detect inherited contracts from libs (single pass over cached content)
     this.detectInheritedContracts(contractFileContents, projectInfo);
 
-    // Filter lib contracts to only include inherited ones
+    // Filter lib contracts to only include inherited ones.
+    // Pre-compute the set of imported/inherited names once (single pass over the
+    // contract file contents) so membership is an O(1) lookup per lib contract.
+    const importedNames = this.collectImportedNames(contractFileContents);
     const libContracts = contractsByCategory.get('libs') || [];
     const filteredLibContracts = libContracts.filter((contract) => {
-      return (
-        projectInfo.inheritedContracts.has(contract.name) ||
-        this.isContractImported(contract.name, contractFileContents)
-      );
+      return projectInfo.inheritedContracts.has(contract.name) || importedNames.has(contract.name);
     });
     contractsByCategory.set('libs', filteredLibContracts);
 
@@ -411,7 +414,17 @@ export class ProjectScanner {
   private async findSolidityFiles(dirPath: string): Promise<string[]> {
     const pattern = path.join(dirPath, '**/*.sol');
     // glob v9+ is promise-based; the legacy callback overload was removed.
-    return glob(pattern);
+    // glob v13 does NOT skip node_modules by default — ignore dependency and
+    // build artifact directories explicitly to avoid scanning thousands of files.
+    return glob(pattern, {
+      ignore: [
+        '**/node_modules/**',
+        '**/out/**',
+        '**/cache/**',
+        '**/artifacts/**',
+        '**/lib/forge-std/**',
+      ],
+    });
   }
 
   /**
@@ -479,26 +492,37 @@ export class ProjectScanner {
   }
 
   /**
-   * Check if a contract is imported by any main contracts.
-   * Uses pre-read file contents to avoid redundant disk reads.
+   * Collect, in a single pass over the main-contract file contents, the set of
+   * all contract names that are referenced via an import statement or appear in
+   * an inheritance (`is`) list. Membership in the returned Set is O(1), avoiding
+   * a per-lib-contract scan of every main-contract file.
    */
-  private isContractImported(
-    contractName: string,
-    contractFileContents: Map<string, string>
-  ): boolean {
-    // Build inheritance regex once per call (not per file iteration)
-    const inheritancePattern = new RegExp(`contract\\s+\\w+\\s+is\\s+.*${contractName}`, 'i');
+  private collectImportedNames(contractFileContents: Map<string, string>): Set<string> {
+    const names = new Set<string>();
 
     for (const [, content] of contractFileContents) {
-      // Check if this contract imports the given contract name
-      if (content.includes(`import`) && content.includes(contractName)) {
-        return true;
+      // Imported contract names — basename of each import path.
+      for (const importPath of this.extractImports(content)) {
+        const name = this.extractContractNameFromImport(importPath);
+        if (name) {
+          names.add(name);
+        }
       }
-      // Also check inheritance patterns
-      if (inheritancePattern.test(content)) {
-        return true;
+
+      // Inherited contract names — split each `is` list on commas.
+      INHERITANCE_RE.lastIndex = 0;
+      let inheritanceMatch;
+      while ((inheritanceMatch = INHERITANCE_RE.exec(content)) !== null) {
+        for (const base of inheritanceMatch[1].split(',')) {
+          // Strip any constructor-style arguments, e.g. `Ownable(msg.sender)`.
+          const baseName = base.trim().split(/[\s(]/)[0];
+          if (baseName) {
+            names.add(baseName);
+          }
+        }
       }
     }
-    return false;
+
+    return names;
   }
 }

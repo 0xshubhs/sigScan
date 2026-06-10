@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1708,9 +1707,18 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   ];
 
-  // Register selector hover provider
+  // Register selector hover provider.
+  // 4-byte selectors realistically appear in Solidity sources and in JS/TS
+  // scripts/tests (Foundry/Hardhat), so scope to those languages rather than
+  // firing on hover in every file type. The Solidity-scoped combined hover
+  // provider below handles richer Solidity hovers; this one covers the JS/TS
+  // case and falls through harmlessly for Solidity.
   const selectorHover = vscode.languages.registerHoverProvider(
-    { scheme: 'file', pattern: '**/*' },
+    [
+      { scheme: 'file', language: 'solidity' },
+      { scheme: 'file', language: 'javascript' },
+      { scheme: 'file', language: 'typescript' },
+    ],
     selectorHoverProvider
   );
 
@@ -1744,8 +1752,10 @@ export function activate(context: vscode.ExtensionContext) {
           return item;
         });
       },
-    },
-    ...'abcdefghijklmnopqrstuvwxyz'.split('')
+    }
+    // No explicit trigger characters: VS Code already invokes completion while
+    // typing identifiers. Registering every a–z letter forced the provider to
+    // run on literally every keystroke.
   );
 
   // Register notebook serializer (lazy-loaded)
@@ -2580,11 +2590,9 @@ export function deactivate() {
     gasDecorationManager.dispose();
   }
   if (_anvilManager && _anvilManager.isRunning()) {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
     _anvilManager.stop().catch(() => {});
   }
   if (_forkSimulator && _forkSimulator.isRunning()) {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
     _forkSimulator.stopFork().catch(() => {});
   }
   compilationService.dispose();

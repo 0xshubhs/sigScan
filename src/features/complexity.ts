@@ -184,15 +184,16 @@ export class ComplexityAnalyzer {
   } {
     const functionMetrics = new Map<string, ComplexityMetrics>();
 
-    functions.forEach((func) => {
-      const funcPattern = new RegExp(
-        `function\\s+${func.name}\\s*\\([^)]*\\)[^{]*{([^}]*(?:{[^}]*}[^}]*)*)}`,
-        's'
-      );
-      const match = contractCode.match(funcPattern);
+    // Build a name -> body map in a single brace-aware pass over the source,
+    // rather than running a fresh regex over the entire contract per function.
+    // The body excludes the outer braces, matching the previous regex capture
+    // group so the computed metrics are identical for well-formed input.
+    const bodies = this.extractFunctionBodies(contractCode);
 
-      if (match && match[1]) {
-        const metrics = this.analyzeFunction(match[1], func.name);
+    functions.forEach((func) => {
+      const body = bodies.get(func.name);
+      if (body !== undefined) {
+        const metrics = this.analyzeFunction(body, func.name);
         functionMetrics.set(func.name, metrics);
       }
     });
@@ -230,6 +231,59 @@ export class ComplexityAnalyzer {
         issues: [],
       },
     };
+  }
+
+  /**
+   * Extract every function's body (content between its outer braces, excluding
+   * the braces themselves) in a single brace-aware pass over the source.
+   *
+   * This replaces a per-function regex that re-scanned the entire contract and
+   * only tolerated one level of nesting. To preserve parity with the previous
+   * `.match()` behaviour, only the first occurrence of each function name is
+   * recorded.
+   */
+  private extractFunctionBodies(contractCode: string): Map<string, string> {
+    const bodies = new Map<string, string>();
+    // Locate each "function <name>(...) ... {" header; brace-match from the "{".
+    const headerRegex = /function\s+(\w+)\s*\([^)]*\)[^{};]*\{/g;
+
+    let match: RegExpExecArray | null;
+    while ((match = headerRegex.exec(contractCode)) !== null) {
+      const name = match[1];
+      // The opening brace is the last character of the matched header.
+      const openBraceIndex = match.index + match[0].length - 1;
+
+      // Brace-match to find the matching closing brace.
+      let depth = 0;
+      let closeIndex = -1;
+      for (let i = openBraceIndex; i < contractCode.length; i++) {
+        const ch = contractCode[i];
+        if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            closeIndex = i;
+            break;
+          }
+        }
+      }
+
+      if (closeIndex === -1) {
+        // Unbalanced braces — stop scanning to avoid runaway behaviour.
+        break;
+      }
+
+      // Body content excludes the outer braces (matches the old capture group).
+      if (!bodies.has(name)) {
+        bodies.set(name, contractCode.substring(openBraceIndex + 1, closeIndex));
+      }
+
+      // Continue scanning after this function's closing brace.
+      headerRegex.lastIndex = closeIndex + 1;
+    }
+
+    return bodies;
   }
 
   /**

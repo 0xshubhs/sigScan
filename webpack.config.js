@@ -62,20 +62,11 @@ module.exports = (_env, argv) => {
       minimize: isProduction,
       sideEffects: true,
       moduleIds: 'deterministic',
-      splitChunks: isProduction
-        ? {
-            chunks: 'all',
-            minSize: 30000,
-            cacheGroups: {
-              vendors: {
-                test: /[\\/]node_modules[\\/]/,
-                name: 'vendors',
-                chunks: 'all',
-                priority: -10,
-              },
-            },
-          }
-        : false,
+      // No splitChunks for this node/commonjs2 target. Code-splitting is a web
+      // optimization; for disk-loaded Node bundles a shared "vendors" chunk only
+      // adds require() overhead and lets CLI vendor code leak into the extension
+      // load path (and vice-versa). Let each entry bundle independently.
+      splitChunks: false,
     },
     devtool: isProduction ? 'source-map' : 'eval-source-map',
     ignoreWarnings: [
