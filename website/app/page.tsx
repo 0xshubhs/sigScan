@@ -190,9 +190,9 @@ function Hero() {
 /* ---------- stats ---------- */
 
 const STATS = [
-  ["70+", "COMMANDS"],
+  ["101", "COMMANDS"],
+  ["25+", "SECURITY MODULES"],
   ["3-TIER", "GAS ENGINE"],
-  ["4-BYTE", "LOCAL LOOKUP"],
   ["640 KB", "WHOLE VSIX"],
 ];
 
@@ -218,39 +218,39 @@ function Stats() {
 const FEATURES: [string, string, string, string][] = [
   [
     "01",
-    "INLINE GAS",
-    "Gas annotations as you type",
-    "Real estimates rendered next to every function. Three-tier backend: native Rust runner → Forge → solc-js fallback, so it works on any machine.",
+    "GAS ENGINE",
+    "Real gas, not guesses",
+    "Inline annotations from a three-tier backend (Rust runner → Forge → solc-js), plus optimizer suggestions, snapshots, branch comparison, deployment cost and a runtime profiler.",
   ],
   [
     "02",
-    "SELECTOR DECODING",
-    "Hover any 4-byte selector",
-    "Function selectors, event topics and error selectors decoded on hover, backed by a local 4-byte cache. Unknown bytes become named signatures.",
+    "DECODING",
+    "Every selector, named",
+    "Function selectors, event topics, error selectors and raw calldata decoded on hover — local 4-byte cache, collision detection, and a searchable signature database.",
   ],
   [
     "03",
-    "SECURITY AUDIT",
-    "AST-backed detections",
-    "Catch reentrancy, unchecked calls and friends while you develop — with inline suppressions and a CLI audit mode for CI.",
+    "SECURITY SUITE",
+    "25+ analysis modules",
+    "Reentrancy, unchecked calls, access control, MEV risks, DeFi patterns, ERC-20/721/1155/4626 compliance, storage layout, call graphs — with quick fixes and a CLI audit mode.",
   ],
   [
     "04",
     "DEPLOY & RUN",
     "One-click local chain",
-    "Start Anvil, deploy contracts, run Foundry scripts and manage keystores from a dashboard — no terminal juggling.",
+    "Start Anvil, deploy from a dashboard, run forge scripts with keystores, get test CodeLens pass/fail inline — plus a contract playground and interactive notebooks.",
   ],
   [
     "05",
     "EVM TOOLBOX",
-    "A swiss-knife in the palette",
-    "Calldata decoder, ABI encoder, unit converter, keccak hashing, address checksums — every conversion you keep opening a browser tab for.",
+    "13 tools in the palette",
+    "ABI & calldata encode/decode, event log and raw-tx decoding, unit converter, keccak, storage slots, CREATE2 addresses, epoch times, checksums — no browser tabs.",
   ],
   [
     "06",
-    "FOUNDRY + HARDHAT",
-    "Auto-detects your toolchain",
-    "Test CodeLens with inline pass/fail, build diagnostics mapped to your source, and pragma-aware solc versions downloaded on demand.",
+    "INTEGRATIONS",
+    "Your whole toolchain",
+    "Foundry and Hardhat auto-detected; Slither, Mythril, Tenderly simulation, Cast, fork simulator and Etherscan verification wired into panels.",
   ],
 ];
 
@@ -290,6 +290,144 @@ function Features() {
   );
 }
 
+/* ---------- arsenal: everything inside ---------- */
+
+const ARSENAL: [string, string[]][] = [
+  [
+    "GAS",
+    [
+      "inline gas annotations",
+      "gas optimizer",
+      "gas snapshots",
+      "compare with branch",
+      "deployment cost",
+      "runtime profiler",
+      "live gas prices",
+      "contract size",
+      "complexity analysis",
+    ],
+  ],
+  [
+    "DECODE & SELECTORS",
+    [
+      "selector hover decode",
+      "4-byte lookup",
+      "collision detection",
+      "event topic decode",
+      "error selector decode",
+      "calldata decoder",
+      "raw tx decoder",
+      "event log decoder",
+      "signature database",
+      "ABI export",
+    ],
+  ],
+  [
+    "SECURITY",
+    [
+      "reentrancy",
+      "unchecked calls",
+      "access control",
+      "missing events",
+      "natspec check",
+      "ERC-20/721/1155/4626 compliance",
+      "dangerous patterns",
+      "DeFi risk patterns",
+      "MEV analysis",
+      "invariant detection",
+      "upgrade compatibility",
+      "storage layout",
+      "call graph",
+      "custom error suggestions",
+      "Slither",
+      "Mythril",
+    ],
+  ],
+  [
+    "DEPLOY & RUN",
+    [
+      "one-click Anvil",
+      "deploy dashboard",
+      "Foundry keystores",
+      "forge script runner",
+      "test CodeLens",
+      "build diagnostics",
+      "contract playground",
+      "interactive notebooks",
+      "fork simulator",
+      "Tenderly simulation",
+      "Etherscan verify",
+      "Cast",
+      "Hardhat support",
+    ],
+  ],
+  [
+    "EVM TOOLBOX",
+    [
+      "ABI encode/decode",
+      "calldata encode/decode",
+      "unit converter",
+      "keccak-256",
+      "storage slot calc",
+      "CREATE2 address",
+      "epoch converter",
+      "ETH constants",
+      "address inspector",
+    ],
+  ],
+  [
+    "EDITOR",
+    [
+      "Solidity snippets",
+      "quick fixes",
+      "contract flattener",
+      "chain explorer",
+      "remappings",
+      "multi-version solc (download on demand)",
+      "real-time file watcher",
+    ],
+  ],
+];
+
+function Arsenal() {
+  return (
+    <section className="border-b-2 border-edge bg-dark dark:bg-panel">
+      <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+        <Reveal>
+          <div className="mb-3 font-mono text-xs tracking-[0.2em] text-muted">
+            02 / EVERYTHING INSIDE
+          </div>
+          <h2 className="mb-12 max-w-2xl text-4xl font-bold tracking-tight text-paper sm:text-5xl">
+            101 commands.{" "}
+            <span className="bg-accent px-2 text-ink shadow-brut-sm">One 640 KB VSIX.</span>
+          </h2>
+        </Reveal>
+        <div className="grid gap-5 md:grid-cols-2">
+          {ARSENAL.map(([group, items], i) => (
+            <Reveal key={group} delay={(i % 2) * 0.08} y={18}>
+              <div className="border-2 border-paper/20 bg-dark p-5 dark:bg-[#101318]">
+                <div className="mb-4 inline-block border-2 border-accent bg-accent/10 px-2 py-0.5 font-mono text-[11px] font-semibold tracking-widest text-accent">
+                  {group}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {items.map((it) => (
+                    <span
+                      key={it}
+                      className="border border-paper/25 px-2 py-1 font-mono text-[11px] text-paper/80 transition-colors hover:border-accent hover:text-accent"
+                    >
+                      {it}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ---------- install ---------- */
 
 function Install() {
@@ -298,7 +436,7 @@ function Install() {
       <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
         <Reveal>
           <div className="mb-3 font-mono text-xs tracking-[0.2em] text-ink/60">
-            02 / INSTALL
+            03 / INSTALL
           </div>
           <h2 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
             Three steps. No marketplace.
@@ -401,6 +539,7 @@ export default function Home() {
       <Hero />
       <Stats />
       <Features />
+      <Arsenal />
       <Install />
       <Footer />
     </main>
