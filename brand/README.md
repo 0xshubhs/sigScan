@@ -46,6 +46,18 @@ Alt accents from the system: `#2BD4A8`, `#3DA9FC` (blue), `#F5A524` (amber).
 | `0xtools-app-tile.svg`                | dark tile + inverse mark → `icon.png`    |
 | `0xtools-explore-{a,b,c}-*.svg`       | the three explored directions            |
 
+## Raster exports (`png/`)
+
+The SVGs are the masters (scale to any size). `png/` carries pre-rendered
+exports for places that demand fixed rasters — GitHub avatars, marketplace
+tiles, socials:
+
+- `0xtools-tile-{16,32,48,64,128,256,512}.png` — dark app tile (avatar/store use)
+- `0xtools-mark-{16,32,48,64,128,256,512}.png` — bare strip on transparent
+- `0xtools-lockup-1024.png` — horizontal lockup for banners/og images
+
+Regenerate with `inkscape brand/svg/<file>.svg -w <size> -h <size> -o <out>.png`.
+
 ## Rules
 
 - Clear space = ¼ of icon height on every side.
