@@ -30,7 +30,10 @@ const repoRoot = path.resolve(__dirname, '..');
 const pkg = require(path.join(repoRoot, 'package.json'));
 
 const vsixName = `${pkg.name}-${pkg.version}.vsix`;
-const vsixPath = path.join(repoRoot, vsixName);
+// Build artifact lives in dist/ (gitignored, cleaned each build) — the repo
+// root stays free of vsix files; the only durable copy is the one published
+// to website/public/downloads/.
+const vsixPath = path.join(repoRoot, 'dist', vsixName);
 const vsceBin = path.join(repoRoot, 'node_modules', '.bin', 'vsce');
 
 function run(cmd, args, opts = {}) {
@@ -94,7 +97,7 @@ function main() {
   for (const field of DEV_ONLY_FIELDS) delete sanitized[field];
   try {
     fs.writeFileSync(manifestPath, JSON.stringify(sanitized, null, 2) + '\n');
-    run(vsceBin, ['package', '--no-dependencies', '-o', vsixName], { cwd: repoRoot });
+    run(vsceBin, ['package', '--no-dependencies', '-o', vsixPath], { cwd: repoRoot });
   } finally {
     fs.writeFileSync(manifestPath, originalManifest);
   }

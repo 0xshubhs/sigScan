@@ -4,7 +4,7 @@
   "description": "The ultimate Solidity development toolkit — gas analysis, security audits, on-chain inspection, Foundry/Hardhat integration, and more",
   "version": "0.0.6",
   "publisher": "0xshubhs",
-  "icon": "icon.png",
+  "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.120.0",
     "node": ">=18.0.0"
