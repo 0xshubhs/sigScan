@@ -1,53 +1,38 @@
 #!/usr/bin/env node
 /**
- * Build a COMPLETE .vsix for this extension.
+ * Build the .vsix for this extension.
  *
- * Why this script exists
- * ----------------------
- * `vsce` cannot bundle our production deps on its own here:
- *   - `vsce package --no-dependencies` excludes node_modules entirely.
- *   - `vsce package` (without the flag) walks the npm dependency tree, which
- *     fails on this repo's pnpm symlinked node_modules layout.
- * The only runtime dependency that must ship inside the vsix is `solc`
- * (~9 MB of WASM). It is a webpack `external` (see webpack.config.js) that
- * SolcManager lazily `require()`s at runtime. Every other production dep
- * (chokidar, commander, ethers, glob, js-sha3, semver) is bundled INTO
- * dist/extension/extension.js by webpack, so it does not need node_modules.
+ * Every production dependency (chokidar, commander, ethers, glob, js-sha3,
+ * semver, solc/wrapper, @openchainxyz/abi-guesser) is bundled INTO
+ * dist/extension/extension.js by webpack, so the vsix ships NO node_modules.
  *
- * Strategy: let vsce build the bundle + manifest with `--no-dependencies`,
- * then inject a clean, flat install of the runtime externals under
- * `extension/node_modules/` inside the vsix zip.
+ * The full `solc` npm package (with its ~9 MB bundled soljson WASM) stays a
+ * webpack external and is deliberately NOT shipped: SolcManager downloads the
+ * exact compiler a project needs from binaries.soliditylang.org on first use
+ * (keccak-verified, cached in globalStorage), and `require('solc')` failing
+ * inside the packaged extension simply disables the offline-bundled fallback.
+ *
+ * After a successful build the vsix is also published to the landing site
+ * (website/public/downloads/, with VERSION/VSIX_SIZE synced in app/page.tsx)
+ * and installed into VS Code.
  *
  * Usage:
- *   node scripts/package-vsix.js            # build <name>-<version>.vsix
- *   node scripts/package-vsix.js --install  # also `code --install-extension`
+ *   node scripts/package-vsix.js               # build + publish to website + install
+ *   node scripts/package-vsix.js --no-install  # skip `code --install-extension`
  */
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
 const pkg = require(path.join(repoRoot, 'package.json'));
 
-// Webpack `external` deps that are real npm packages required at runtime.
-// `ws` is external too, but it is only reached via ethers' WebSocketProvider,
-// which we never construct (HTTP-only RPC), so it is intentionally omitted.
-// `vscode` is provided by the host; `sqlite3`/`fsevents` are optional natives.
-const EXTERNAL_RUNTIME_DEPS = ['solc'];
-
 const vsixName = `${pkg.name}-${pkg.version}.vsix`;
 const vsixPath = path.join(repoRoot, vsixName);
 const vsceBin = path.join(repoRoot, 'node_modules', '.bin', 'vsce');
 
-const tmpDirs = [];
-function mkTmp(prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-}
 function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, { stdio: 'inherit', ...opts });
 }
@@ -55,11 +40,32 @@ function log(msg) {
   process.stdout.write(`\n▸ ${msg}\n`);
 }
 
-function main() {
-  const doInstall = process.argv.includes('--install');
+// Copy the fresh vsix into the landing site's downloads folder, drop stale
+// versions, and keep the VERSION/VSIX_SIZE constants in app/page.tsx in sync
+// so the site's buttons always point at the file that actually exists.
+function publishToWebsite() {
+  const downloadsDir = path.join(repoRoot, 'website', 'public', 'downloads');
+  fs.mkdirSync(downloadsDir, { recursive: true });
+  for (const f of fs.readdirSync(downloadsDir)) {
+    if (f.endsWith('.vsix') && f !== vsixName) fs.rmSync(path.join(downloadsDir, f));
+  }
+  fs.copyFileSync(vsixPath, path.join(downloadsDir, vsixName));
 
-  // 1. Clean dist so the package never carries stale webpack chunks
-  //    (e.g. orphaned splitChunks output from a previous config).
+  const pagePath = path.join(repoRoot, 'website', 'app', 'page.tsx');
+  const sizeKB = `${Math.round(fs.statSync(vsixPath).size / 1024)} KB`;
+  let page = fs.readFileSync(pagePath, 'utf8');
+  page = page
+    .replace(/const VERSION = "[^"]*";/, `const VERSION = "${pkg.version}";`)
+    .replace(/const VSIX_SIZE = "[^"]*";/, `const VSIX_SIZE = "${sizeKB}";`)
+    .replace(/\["\d+ KB", "WHOLE VSIX"\]/, `["${sizeKB}", "WHOLE VSIX"]`);
+  fs.writeFileSync(pagePath, page);
+  log(`Published to website/public/downloads/${vsixName} (page.tsx → v${pkg.version}, ${sizeKB})`);
+}
+
+function main() {
+  const doInstall = !process.argv.includes('--no-install');
+
+  // 1. Clean dist so the package never carries stale webpack chunks.
   log('Cleaning dist/');
   fs.rmSync(path.join(repoRoot, 'dist'), { recursive: true, force: true });
 
@@ -67,54 +73,37 @@ function main() {
   //    (fresh webpack build). `--no-dependencies` => no node_modules included.
   log(`Packaging ${vsixName} (vsce --no-dependencies)`);
   if (!fs.existsSync(vsceBin)) {
-    throw new Error(`vsce not found at ${vsceBin} — run \`pnpm install\` first.`);
+    throw new Error(`vsce not found at ${vsceBin} — run \`npm install\` first.`);
   }
   fs.rmSync(vsixPath, { force: true });
   run(vsceBin, ['package', '--no-dependencies', '-o', vsixName], { cwd: repoRoot });
 
-  // 3. Flat, isolated install of the runtime externals (real dirs, no symlinks).
-  const depDir = mkTmp('0xtools-vsix-deps-');
-  const deps = {};
-  for (const name of EXTERNAL_RUNTIME_DEPS) {
-    const range = pkg.dependencies && pkg.dependencies[name];
-    if (!range) throw new Error(`${name} is not in package.json dependencies`);
-    deps[name] = range;
-  }
-  fs.writeFileSync(
-    path.join(depDir, 'package.json'),
-    JSON.stringify({ name: 'vsix-runtime-deps', version: '0.0.0', private: true, dependencies: deps }, null, 2)
-  );
-  log(`Installing runtime externals flat: ${EXTERNAL_RUNTIME_DEPS.join(', ')}`);
-  // --ignore-scripts is safe: modern solc ships soljson.js inside the package.
-  run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: depDir });
-
-  // 4. Stage under `extension/` (the vsix's content prefix) and inject into the zip.
-  const stageDir = mkTmp('0xtools-vsix-stage-');
-  const stageNm = path.join(stageDir, 'extension', 'node_modules');
-  fs.cpSync(path.join(depDir, 'node_modules'), stageNm, { recursive: true, dereference: true });
-  for (const junk of ['.bin', '.cache', '.package-lock.json']) {
-    fs.rmSync(path.join(stageNm, junk), { recursive: true, force: true });
-  }
-  log('Injecting node_modules into vsix');
-  run('zip', ['-r', '-q', vsixPath, 'extension/node_modules'], { cwd: stageDir });
-
-  // 5. Sanity check: solc must be resolvable inside the vsix.
+  // 3. Sanity checks: the bundle must be present; the 9 MB soljson must NOT be.
   const listing = execFileSync('unzip', ['-l', vsixPath], { encoding: 'utf8' });
-  if (!/extension\/node_modules\/solc\/soljson\.js/.test(listing)) {
-    throw new Error('solc/soljson.js missing from vsix after injection');
+  if (!/extension\/dist\/extension\/extension\.js/.test(listing)) {
+    throw new Error('dist/extension/extension.js missing from vsix');
+  }
+  if (/soljson/.test(listing)) {
+    throw new Error('A soljson compiler leaked into the vsix — it must stay download-on-demand');
+  }
+  if (/node_modules/.test(listing)) {
+    throw new Error('node_modules leaked into the vsix — all runtime deps must be webpack-bundled');
   }
   const sizeMB = (fs.statSync(vsixPath).size / 1024 / 1024).toFixed(1);
-  log(`Built ${vsixName} (${sizeMB} MB) with solc bundled ✓`);
+  log(`Built ${vsixName} (${sizeMB} MB, solc downloads on demand) ✓`);
 
-  // 6. Optionally install into VS Code.
+  // 4. Publish to the landing site.
+  publishToWebsite();
+
+  // 5. Install into VS Code (skip with --no-install).
   if (doInstall) {
     log('Installing into VS Code');
-    run('code', ['--install-extension', vsixPath, '--force']);
+    try {
+      run('code', ['--install-extension', vsixPath, '--force']);
+    } catch (err) {
+      log(`VS Code install failed (${err.message}) — vsix is still built and published`);
+    }
   }
 }
 
-try {
-  main();
-} finally {
-  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
-}
+main();

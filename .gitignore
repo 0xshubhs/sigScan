@@ -10,6 +10,7 @@ coverage/
 
 # Extension build artifacts
 *.vsix
+!website/public/downloads/*.vsix
 temp/
 
 # Example project signatures (generated for testing)

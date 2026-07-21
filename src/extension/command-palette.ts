@@ -35,6 +35,7 @@ export interface CommandGroup {
  */
 const CATEGORY_ORDER: readonly string[] = [
   'Signatures',
+  'EVM Toolbox',
   'Gas',
   'Security',
   'On-chain',
@@ -61,13 +62,56 @@ const COMMANDS: readonly CommandEntry[] = [
   { command: 'sigscan.copySelector', title: 'Copy Function Selector', category: 'Signatures' },
   { command: 'sigscan.generateABI', title: 'Generate ABI from Signatures', category: 'Signatures' },
   { command: 'sigscan.searchDatabase', title: 'Search Signature Database', category: 'Signatures' },
-  { command: 'sigscan.detectCollisions', title: 'Detect Selector Collisions', category: 'Signatures' },
+  {
+    command: 'sigscan.detectCollisions',
+    title: 'Detect Selector Collisions',
+    category: 'Signatures',
+  },
+
+  // ── EVM Toolbox ───────────────────────────────────────────────────────────
+  { command: 'sigscan.evmToolbox', title: 'EVM Toolbox', category: 'EVM Toolbox' },
+  { command: 'sigscan.decodeCalldata', title: 'Decode Calldata', category: 'EVM Toolbox' },
+  { command: 'sigscan.encodeCalldata', title: 'Encode Calldata', category: 'EVM Toolbox' },
+  { command: 'sigscan.abiDecode', title: 'ABI Decode', category: 'EVM Toolbox' },
+  { command: 'sigscan.abiEncode', title: 'ABI Encode', category: 'EVM Toolbox' },
+  { command: 'sigscan.decodeEventLog', title: 'Decode Event Log', category: 'EVM Toolbox' },
+  { command: 'sigscan.decodeRawTx', title: 'Decode Raw Transaction', category: 'EVM Toolbox' },
+  {
+    command: 'sigscan.convertUnits',
+    title: 'Convert Units (wei / gwei / ether / hex)',
+    category: 'EVM Toolbox',
+  },
+  {
+    command: 'sigscan.keccakHash',
+    title: 'Keccak-256 / Selector / Checksum',
+    category: 'EVM Toolbox',
+  },
+  {
+    command: 'sigscan.computeContractAddress',
+    title: 'Determine Contract Address (CREATE / CREATE2)',
+    category: 'EVM Toolbox',
+  },
+  { command: 'sigscan.storageSlotCalc', title: 'Storage Slot Calculator', category: 'EVM Toolbox' },
+  { command: 'sigscan.ethConstants', title: 'Ethereum Constants', category: 'EVM Toolbox' },
+  { command: 'sigscan.epochConvert', title: 'Epoch Converter', category: 'EVM Toolbox' },
 
   // ── Gas ───────────────────────────────────────────────────────────────────
   { command: 'sigscan.estimateGas', title: 'Estimate Gas Costs', category: 'Gas' },
-  { command: 'sigscan.showGasAnnotations', title: 'Show Gas Annotations (Refresh)', category: 'Gas' },
-  { command: 'sigscan.toggleRealtimeAnalysis', title: 'Toggle Real-time Gas Analysis', category: 'Gas' },
-  { command: 'sigscan.showDeploymentCost', title: 'Show Deployment Cost Estimate', category: 'Gas' },
+  {
+    command: 'sigscan.showGasAnnotations',
+    title: 'Show Gas Annotations (Refresh)',
+    category: 'Gas',
+  },
+  {
+    command: 'sigscan.toggleRealtimeAnalysis',
+    title: 'Toggle Real-time Gas Analysis',
+    category: 'Gas',
+  },
+  {
+    command: 'sigscan.showDeploymentCost',
+    title: 'Show Deployment Cost Estimate',
+    category: 'Gas',
+  },
   { command: 'sigscan.compareWithBranch', title: 'Compare Gas with Branch', category: 'Gas' },
   { command: 'sigscan.suggestOptimizations', title: 'Suggest Gas Optimizations', category: 'Gas' },
   { command: 'sigscan.createGasSnapshot', title: 'Create Gas Snapshot', category: 'Gas' },
@@ -75,18 +119,42 @@ const COMMANDS: readonly CommandEntry[] = [
 
   // ── Security ──────────────────────────────────────────────────────────────
   { command: 'sigscan.analyzeMEV', title: 'Analyze MEV Risks', category: 'Security' },
-  { command: 'sigscan.detectReentrancy', title: 'Detect Reentrancy Vulnerabilities', category: 'Security' },
-  { command: 'sigscan.detectUncheckedCalls', title: 'Detect Unchecked Low-Level Calls', category: 'Security' },
+  {
+    command: 'sigscan.detectReentrancy',
+    title: 'Detect Reentrancy Vulnerabilities',
+    category: 'Security',
+  },
+  {
+    command: 'sigscan.detectUncheckedCalls',
+    title: 'Detect Unchecked Low-Level Calls',
+    category: 'Security',
+  },
   { command: 'sigscan.checkAccessControl', title: 'Check Access Control', category: 'Security' },
-  { command: 'sigscan.detectDangerousPatterns', title: 'Detect Dangerous Patterns (tx.origin, selfdestruct, delegatecall)', category: 'Security' },
-  { command: 'sigscan.detectDeFiRisks', title: 'Detect DeFi Risks (Oracle, Precision, Approval, Zero-Address, Vault)', category: 'Security' },
+  {
+    command: 'sigscan.detectDangerousPatterns',
+    title: 'Detect Dangerous Patterns (tx.origin, selfdestruct, delegatecall)',
+    category: 'Security',
+  },
+  {
+    command: 'sigscan.detectDeFiRisks',
+    title: 'Detect DeFi Risks (Oracle, Precision, Approval, Zero-Address, Vault)',
+    category: 'Security',
+  },
   { command: 'sigscan.runSlither', title: 'Run Slither Analysis', category: 'Security' },
   { command: 'sigscan.runMythril', title: 'Run Mythril Analysis', category: 'Security' },
 
   // ── On-chain ──────────────────────────────────────────────────────────────
   { command: 'sigscan.lookup4byte', title: 'Lookup 4-Byte Selector', category: 'On-chain' },
-  { command: 'sigscan.inspectTransaction', title: 'Inspect Transaction by Hash', category: 'On-chain' },
-  { command: 'sigscan.exploreAddress', title: 'Inspect Address (Balance, Code, Proxy)', category: 'On-chain' },
+  {
+    command: 'sigscan.inspectTransaction',
+    title: 'Inspect Transaction by Hash',
+    category: 'On-chain',
+  },
+  {
+    command: 'sigscan.exploreAddress',
+    title: 'Inspect Address (Balance, Code, Proxy)',
+    category: 'On-chain',
+  },
   { command: 'sigscan.viewEvents', title: 'View Contract Events', category: 'On-chain' },
   { command: 'sigscan.readContractState', title: 'Read Contract State', category: 'On-chain' },
   { command: 'sigscan.getTokenBalance', title: 'Get ERC20 Token Balance', category: 'On-chain' },
@@ -94,13 +162,29 @@ const COMMANDS: readonly CommandEntry[] = [
 
   // ── Deploy & Run ──────────────────────────────────────────────────────────
   { command: 'sigscan.deployRun.show', title: 'Show Deploy & Run Panel', category: 'Deploy & Run' },
-  { command: 'sigscan.deployRun.refresh', title: 'Refresh Deploy & Run Panel', category: 'Deploy & Run' },
-  { command: 'sigscan.deployRun.setEtherscanApiKey', title: 'Set Etherscan API Key', category: 'Deploy & Run' },
-  { command: 'sigscan.deployRun.clearEtherscanApiKey', title: 'Clear Etherscan API Key', category: 'Deploy & Run' },
+  {
+    command: 'sigscan.deployRun.refresh',
+    title: 'Refresh Deploy & Run Panel',
+    category: 'Deploy & Run',
+  },
+  {
+    command: 'sigscan.deployRun.setEtherscanApiKey',
+    title: 'Set Etherscan API Key',
+    category: 'Deploy & Run',
+  },
+  {
+    command: 'sigscan.deployRun.clearEtherscanApiKey',
+    title: 'Clear Etherscan API Key',
+    category: 'Deploy & Run',
+  },
 
   // ── Foundry/Hardhat ───────────────────────────────────────────────────────
   { command: 'sigscan.forgeRunTest', title: 'Run Forge Test', category: 'Foundry/Hardhat' },
-  { command: 'sigscan.forgeRunAllTests', title: 'Run All Forge Tests', category: 'Foundry/Hardhat' },
+  {
+    command: 'sigscan.forgeRunAllTests',
+    title: 'Run All Forge Tests',
+    category: 'Foundry/Hardhat',
+  },
   { command: 'sigscan.castCommand', title: 'Run Cast Command', category: 'Foundry/Hardhat' },
   { command: 'sigscan.startAnvil', title: 'Start Local Anvil Node', category: 'Foundry/Hardhat' },
   { command: 'sigscan.stopAnvil', title: 'Stop Anvil Node', category: 'Foundry/Hardhat' },
@@ -113,11 +197,27 @@ const COMMANDS: readonly CommandEntry[] = [
   { command: 'sigscan.checkContractSize', title: 'Check Contract Size', category: 'Other' },
   { command: 'sigscan.analyzeComplexity', title: 'Analyze Code Complexity', category: 'Other' },
   { command: 'sigscan.verifyEtherscan', title: 'Verify Against Etherscan', category: 'Other' },
-  { command: 'sigscan.generateAllReports', title: 'Generate All Analysis Reports', category: 'Other' },
-  { command: 'sigscan.showStorageLayout', title: 'Show Storage Layout Analysis', category: 'Other' },
+  {
+    command: 'sigscan.generateAllReports',
+    title: 'Generate All Analysis Reports',
+    category: 'Other',
+  },
+  {
+    command: 'sigscan.showStorageLayout',
+    title: 'Show Storage Layout Analysis',
+    category: 'Other',
+  },
   { command: 'sigscan.showCallGraph', title: 'Show Function Call Graph', category: 'Other' },
-  { command: 'sigscan.showProfilerReport', title: 'Show Runtime Profiler Report', category: 'Other' },
-  { command: 'sigscan.checkInterfaces', title: 'Check Interface Compliance (ERC20/721/1155)', category: 'Other' },
+  {
+    command: 'sigscan.showProfilerReport',
+    title: 'Show Runtime Profiler Report',
+    category: 'Other',
+  },
+  {
+    command: 'sigscan.checkInterfaces',
+    title: 'Check Interface Compliance (ERC20/721/1155)',
+    category: 'Other',
+  },
   { command: 'sigscan.showCoverage', title: 'Show Test Coverage', category: 'Other' },
   { command: 'sigscan.analyzeUpgrade', title: 'Analyze Upgrade Compatibility', category: 'Other' },
   { command: 'sigscan.detectInvariants', title: 'Detect Contract Invariants', category: 'Other' },
@@ -125,7 +225,11 @@ const COMMANDS: readonly CommandEntry[] = [
   { command: 'sigscan.openPlayground', title: 'Open Contract Playground', category: 'Other' },
   { command: 'sigscan.openDashboard', title: 'Open Project Dashboard', category: 'Other' },
   { command: 'sigscan.checkEvents', title: 'Check Missing Event Emissions', category: 'Other' },
-  { command: 'sigscan.suggestCustomErrors', title: 'Suggest Custom Errors (Gas Savings)', category: 'Other' },
+  {
+    command: 'sigscan.suggestCustomErrors',
+    title: 'Suggest Custom Errors (Gas Savings)',
+    category: 'Other',
+  },
   { command: 'sigscan.checkNatspec', title: 'Check NatSpec Completeness', category: 'Other' },
   { command: 'sigscan.flattenContract', title: 'Flatten Contract', category: 'Other' },
   { command: 'sigscan.insertSnippet', title: 'Insert Solidity Snippet', category: 'Other' },
@@ -177,9 +281,9 @@ export function buildCommandGroups(commands: CommandEntry[]): CommandGroup[] {
 
   const groups: CommandGroup[] = [];
   for (const category of sortedCategories) {
-    const items = (byCategory.get(category) ?? []).slice().sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
-    );
+    const items = (byCategory.get(category) ?? [])
+      .slice()
+      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
     if (items.length > 0) {
       groups.push({ category, items });
     }

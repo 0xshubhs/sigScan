@@ -14,6 +14,9 @@ import * as https from 'https';
 /** Base URL for the 4byte.directory API. */
 const FOUR_BYTE_API_BASE = 'https://www.4byte.directory/api/v1/signatures/';
 
+/** Base URL for the 4byte.directory event-signature API. */
+const FOUR_BYTE_EVENT_API_BASE = 'https://www.4byte.directory/api/v1/event-signatures/';
+
 /** HTTP request timeout in milliseconds (5s — simple API lookups). */
 const REQUEST_TIMEOUT_MS = 5_000;
 
@@ -155,6 +158,57 @@ export class FourByteLookup {
     }
 
     return finalResults;
+  }
+
+  /**
+   * Look up an event topic0 hash in the 4byte.directory event database.
+   *
+   * Mirrors {@link lookup} but against the `event-signatures` endpoint, keyed
+   * in the shared cache under an `event:` prefix. Note the returned text
+   * signatures carry no `indexed` information — callers must infer it.
+   *
+   * @param topicHash - The 32-byte topic0 hash (e.g., "0xddf252ad…")
+   * @returns Array of matching event text signatures, or empty array on error
+   */
+  public async lookupEvent(topicHash: string): Promise<string[]> {
+    const normalized = topicHash.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
+      return [];
+    }
+    const cacheKey = `event:${normalized}`;
+
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.signatures;
+    }
+
+    const existing = this.inflight.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = (async (): Promise<string[]> => {
+      try {
+        const url = `${FOUR_BYTE_EVENT_API_BASE}?hex_signature=${normalized}`;
+        const response = await this.httpGet(url);
+        if (!response) {
+          return [];
+        }
+        const signatures = this.extractSignatures(JSON.parse(response));
+        if (this.cache.size >= CACHE_MAX_SIZE) {
+          this.cache.delete(this.cache.keys().next().value!);
+        }
+        this.cache.set(cacheKey, { signatures, expiresAt: Date.now() + CACHE_TTL_MS });
+        return signatures;
+      } catch (error) {
+        console.error(`4byte event lookup failed for ${normalized}:`, error);
+        return [];
+      }
+    })().finally(() => {
+      this.inflight.delete(cacheKey);
+    });
+    this.inflight.set(cacheKey, promise);
+    return promise;
   }
 
   /**

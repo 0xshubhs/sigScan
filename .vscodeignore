@@ -42,10 +42,21 @@ CONTRIBUTING.md
 **/*.test.*
 **/*.spec.*
 
-# node_modules: packaged with `vsce package --no-dependencies` because the repo uses
-# bun, whose node_modules layout vsce's npm-based dependency walker can't read. Before
-# packaging, node_modules is reinstalled production-only (`bun install --production`),
-# so only runtime deps remain here — chiefly `solc`, a webpack external that
-# SolcManager lazily `require()`s at runtime. Just trim bun's internal dirs.
-node_modules/.bin/**
-node_modules/.cache/**
+# node_modules never ships: `vsce package --no-dependencies` excludes it, and all
+# runtime deps are webpack-bundled into dist/. The `solc` package (9 MB soljson)
+# is intentionally absent — SolcManager downloads compilers on demand instead.
+node_modules/**
+
+# Platform-specific runner binary (postinstall artifact) — never ship it in the
+# universal vsix; the extension falls back to forge/solc when it is absent.
+bin/**
+
+# Docs and inventories that don't belong in the install
+# (media/walkthrough/ stays — it backs the contributed Get Started walkthrough)
+FEATURES-INVENTORY.md
+
+# Landing-page website and brand master files live in the repo but never ship
+# inside the extension
+website/**
+brand/**
+*.vsix

@@ -28,7 +28,9 @@ A professional VS Code extension and CLI tool for automatically scanning and gen
 
 Beyond signatures and gas, 0xTools provides deeper static analysis — storage-layout and function call-graph inspection, deployment-cost estimation, and a security/quality suite covering reentrancy, unchecked low-level calls, access control, dangerous patterns (`tx.origin`, `selfdestruct`, `delegatecall`), DeFi and MEV risks, NatSpec completeness, and custom-error suggestions — with optional Slither and Mythril integration for heavier audits.
 
-For working against live and local chains, it includes on-chain inspection tools (transaction inspector, address/proxy inspector, event decoder, 4-byte selector lookup, and source verification) and a Remix-style **Deploy & Run** sidebar for deploying and interacting with contracts across multiple networks, complete with Anvil management, keystore accounts, block-explorer links, and source verification. Rounding it out are tight Foundry (`forge`/`cast`/`anvil` scripts and tests) and Hardhat integration, contract flattening, and Foundry test-stub generation.
+For working against live and local chains, it includes on-chain inspection tools (transaction inspector, address/proxy inspector, event decoder, 4-byte selector lookup, and source verification) and a Remix-style **Deploy & Run** sidebar for deploying and interacting with contracts across multiple networks, complete with Anvil management, keystore accounts, block-explorer links, and source verification. The **EVM Toolbox** puts eth.sh-style utilities one keystroke away — ABI-less calldata decoding, calldata/ABI encoding, event-log and raw-tx decoding, unit conversion, keccak/selector hashing, CREATE/CREATE2 address math, storage-slot calculation, curated constants, and epoch conversion. Rounding it out are tight Foundry (`forge`/`cast`/`anvil` scripts and tests) and Hardhat integration, contract flattening, and Foundry test-stub generation.
+
+The extension installs in under a megabyte: all runtime dependencies are bundled, and Solidity compilers download on demand (keccak-verified from `binaries.soliditylang.org`, cached across sessions) instead of shipping inside the package.
 
 ## Features
 
@@ -54,6 +56,24 @@ For working against live and local chains, it includes on-chain inspection tools
 - **Contract Size Check**: Verify contracts stay within 24KB deployment limit
 - **Complexity Analysis**: Calculate cyclomatic and cognitive complexity metrics
 - **Performance Caching**: SHA-256 based cache with intelligent invalidation
+
+### EVM Toolbox
+
+An eth.sh-style utility belt, inside the editor. Open the hub with **`0xTools: EVM Toolbox`** or run any tool directly from the command palette:
+
+- **Decode Calldata** — paste any calldata (or revert data) and get a readable call. Signatures resolve from your workspace scan first, then [4byte.directory](https://www.4byte.directory), and finally pure type-guessing (the same `abi-guesser` engine eth.sh uses) — so it works even with zero ABI. Nested `bytes` that are themselves calls (multicall, Safe/timelock payloads) unfold recursively. Also available from the editor right-click menu on a selected hex string.
+- **Encode Calldata** — pick a function from your workspace (or type any signature), fill in the args (`1.5 ether` works for uints), copy the calldata.
+- **ABI Encode / Decode** — `abi.encode` and `abi.encodePacked` for arbitrary type lists; decode raw ABI blobs with known or guessed types.
+- **Decode Event Log** — paste a log's topics + data; indexed layouts are taken from your workspace events or inferred for directory signatures.
+- **Decode Raw Transaction** — RLP-encoded tx (signed or unsigned) → typed fields, fee breakdown, and decoded calldata.
+- **Convert Units** — live wei ⇄ gwei ⇄ ether ⇄ hex conversion as you type.
+- **Keccak / Selector / Checksum** — hash text or bytes, compute 4-byte selectors and event topics from signatures, EIP-55 checksum addresses.
+- **Determine Contract Address** — CREATE (deployer + nonce) and CREATE2 (deployer + salt + init code) address math.
+- **Storage Slot Calculator** — mapping/array slot derivation, EIP-1967 / EIP-1822 proxy slots, ERC-7201 namespaced roots.
+- **Ethereum Constants** — zero/dead addresses, Multicall3, Permit2, EntryPoints, max uints, gas costs, famous selectors and topics; Enter copies, or insert straight at the cursor.
+- **Epoch Converter** — timestamps ⇄ dates with Solidity duration literals.
+
+Every result is one keypress from the clipboard, and rich decodes open as markdown reports.
 
 ### Real-time Analysis Engine
 
@@ -154,6 +174,14 @@ Manual commands are also available for immediate execution:
 - **0xTools: Show Deployment Cost Estimate** - View deployment cost breakdown
 - **0xTools: Compare Gas with Branch** - Compare gas usage with another git branch (requires git)
 - **0xTools: Show Runtime Profiler Report** - Compare estimated vs actual gas from forge tests (requires Foundry)
+
+**EVM Toolbox:**
+- **0xTools: EVM Toolbox** - Hub for all the tools below
+- **0xTools: Decode Calldata** - Readable calls from raw calldata, no ABI needed (also in the editor right-click menu)
+- **0xTools: Encode Calldata / ABI Encode / ABI Decode** - Build and unpack ABI payloads
+- **0xTools: Decode Event Log / Decode Raw Transaction** - Unpack logs and RLP transactions
+- **0xTools: Convert Units / Keccak-256 / Epoch Converter** - Live converters and hashing
+- **0xTools: Determine Contract Address / Storage Slot Calculator / Ethereum Constants** - CREATE/CREATE2, slot math, and reference values
 
 **Additional Analysis Tools:**
 - **0xTools: Generate ABI** - Create ABI files from extracted signatures

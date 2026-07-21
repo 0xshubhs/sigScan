@@ -17,11 +17,14 @@ import { GasDecorationManager } from '../features/gas-decorations';
 
 // SelectorHoverProvider is eagerly loaded (used for frequent hover events)
 import { SelectorHoverProvider } from './providers/selector-hover-provider';
-// Deploy & Run sidebar — eagerly loaded so the activity bar item is wired at activation
-import { DeployRunViewProvider } from './providers/deploy-run-provider';
+// Deploy & Run sidebar — type-only here. The provider module statically pulls
+// in ethers + ~100 KB of panel code, so it is require()'d lazily when the view
+// is first revealed (see the shim in activate()).
+import type { DeployRunViewProvider } from './providers/deploy-run-provider';
 import { registerCodeActionProvider } from './providers/code-action-provider';
 import { registerFindingsTree } from './providers/findings-tree-provider';
 import { registerCommandPalette } from './command-palette';
+import { registerEthToolsCommands } from './eth-tools-commands';
 import { getAst } from '../features/ast/solidity-ast';
 import { parseSuppressions, isSuppressed } from '../features/suppressions';
 // Notebook provider — lazy loaded when registering serializer/controller
@@ -215,11 +218,21 @@ export function activate(context: vscode.ExtensionContext) {
     showCollapseAll: true,
   });
 
-  // Register the Deploy & Run sidebar (Activity Bar → 0xTools → Deploy & Run)
-  _deployRunProvider = new DeployRunViewProvider(context.extensionUri, getAnvilManager, context);
+  // Register the Deploy & Run sidebar (Activity Bar → 0xTools → Deploy & Run).
+  // Registered through a shim so the real provider — and the ethers library it
+  // drags in — only loads when the view is actually revealed.
   const deployRunDisposable = vscode.window.registerWebviewViewProvider(
-    DeployRunViewProvider.viewType,
-    _deployRunProvider,
+    'zeroXTools.deployRun', // DeployRunViewProvider.viewType (not imported eagerly)
+    {
+      resolveWebviewView: (view, viewContext, token) => {
+        if (!_deployRunProvider) {
+          const { DeployRunViewProvider: Provider } =
+            require('./providers/deploy-run-provider') as typeof import('./providers/deploy-run-provider');
+          _deployRunProvider = new Provider(context.extensionUri, getAnvilManager, context);
+        }
+        return _deployRunProvider.resolveWebviewView(view, viewContext, token);
+      },
+    },
     { webviewOptions: { retainContextWhenHidden: true } }
   );
 
@@ -229,6 +242,19 @@ export function activate(context: vscode.ExtensionContext) {
   registerFindingsTree(context);
   // Grouped "0xTools: Show All Commands" quick-pick over every registered command.
   registerCommandPalette(context);
+  // EVM Toolbox (decode/encode/convert/hash/…). The wiring module imports only
+  // `vscode`; the toolbox logic (and ethers) loads lazily on first use.
+  registerEthToolsCommands(context, {
+    getScanResult: () => sigScanManager.getLastScanResult(),
+  });
+
+  // Downloaded solc compilers persist in globalStorage instead of ~/.0xtools
+  // (the VSIX no longer bundles the ~9 MB soljson — compilers fetch on demand).
+  {
+    const { SolcManager } =
+      require('../features/SolcManager') as typeof import('../features/SolcManager');
+    SolcManager.setSoljsonCacheDir(path.join(context.globalStorageUri.fsPath, 'solc'));
+  }
 
   // Register commands
   const commands = [

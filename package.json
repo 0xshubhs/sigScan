@@ -407,6 +407,71 @@
         "command": "sigscan.hardhatTest",
         "title": "Hardhat: Run Tests",
         "category": "0xTools"
+      },
+      {
+        "command": "sigscan.evmToolbox",
+        "title": "EVM Toolbox",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.decodeCalldata",
+        "title": "Decode Calldata",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.encodeCalldata",
+        "title": "Encode Calldata",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.abiDecode",
+        "title": "ABI Decode",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.abiEncode",
+        "title": "ABI Encode",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.decodeEventLog",
+        "title": "Decode Event Log",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.decodeRawTx",
+        "title": "Decode Raw Transaction",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.convertUnits",
+        "title": "Convert Units (wei / gwei / ether / hex)",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.keccakHash",
+        "title": "Keccak-256 / Selector / Checksum",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.computeContractAddress",
+        "title": "Determine Contract Address (CREATE / CREATE2)",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.storageSlotCalc",
+        "title": "Storage Slot Calculator",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.ethConstants",
+        "title": "Ethereum Constants",
+        "category": "0xTools"
+      },
+      {
+        "command": "sigscan.epochConvert",
+        "title": "Epoch Converter",
+        "category": "0xTools"
       }
     ],
     "configuration": {
@@ -484,7 +549,7 @@
         },
         "sigscan.realtime.solcIdleMs": {
           "type": "number",
-          "default": 1e4,
+          "default": 10000,
           "minimum": 0,
           "maximum": 60000,
           "description": "Run accurate solc gas estimation after this many milliseconds of no typing (0 = disabled, 10000 = 10 seconds recommended)"
@@ -507,7 +572,12 @@
         "sigscan.logLevel": {
           "type": "string",
           "default": "info",
-          "enum": ["debug", "info", "warn", "error"],
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
           "description": "Log level for 0xTools output channel"
         },
         "sigscan.preferRunner": {
@@ -518,7 +588,16 @@
         "sigscan.defaultChain": {
           "type": "string",
           "default": "ethereum",
-          "enum": ["ethereum", "sepolia", "polygon", "arbitrum", "optimism", "bsc", "base", "avalanche"],
+          "enum": [
+            "ethereum",
+            "sepolia",
+            "polygon",
+            "arbitrum",
+            "optimism",
+            "bsc",
+            "base",
+            "avalanche"
+          ],
           "description": "Default chain for on-chain operations (tx inspect, address lookup, events)"
         },
         "sigscan.rpc.customEndpoints": {
@@ -600,34 +679,50 @@
             "id": "welcome",
             "title": "Welcome to 0xTools",
             "description": "The complete Solidity toolkit. Open a .sol file to see selectors, gas, and findings light up.\n[Browse all commands](command:sigscan.showAllCommands)",
-            "media": { "markdown": "media/walkthrough/welcome.md" }
+            "media": {
+              "markdown": "media/walkthrough/welcome.md"
+            }
           },
           {
             "id": "scan",
             "title": "Scan for signatures",
             "description": "Extract every function selector, event topic, and error selector in your project.\n[Scan project](command:sigscan.scanProject)",
-            "media": { "markdown": "media/walkthrough/scan.md" },
-            "completionEvents": ["onCommand:sigscan.scanProject"]
+            "media": {
+              "markdown": "media/walkthrough/scan.md"
+            },
+            "completionEvents": [
+              "onCommand:sigscan.scanProject"
+            ]
           },
           {
             "id": "gas",
             "title": "See real-time gas",
             "description": "Inline gas annotations appear as you type. Estimate the active contract on demand with Cmd/Ctrl+K G.\n[Estimate gas](command:sigscan.estimateGas)",
-            "media": { "markdown": "media/walkthrough/gas.md" },
-            "completionEvents": ["onCommand:sigscan.estimateGas"]
+            "media": {
+              "markdown": "media/walkthrough/gas.md"
+            },
+            "completionEvents": [
+              "onCommand:sigscan.estimateGas"
+            ]
           },
           {
             "id": "security",
             "title": "Find vulnerabilities",
             "description": "Reentrancy, access control, MEV, unchecked calls and more — surfaced in the Findings view with quick-fixes.\n[Open the Findings view](command:zeroXTools.findings.focus)",
-            "media": { "markdown": "media/walkthrough/security.md" }
+            "media": {
+              "markdown": "media/walkthrough/security.md"
+            }
           },
           {
             "id": "deploy",
             "title": "Deploy & interact",
             "description": "Compile, deploy, call functions, and verify — without leaving the editor. Open the panel with Cmd/Ctrl+K D.\n[Open Deploy & Run](command:sigscan.deployRun.show)",
-            "media": { "markdown": "media/walkthrough/deploy.md" },
-            "completionEvents": ["onCommand:sigscan.deployRun.show"]
+            "media": {
+              "markdown": "media/walkthrough/deploy.md"
+            },
+            "completionEvents": [
+              "onCommand:sigscan.deployRun.show"
+            ]
           }
         ]
       }
@@ -652,6 +747,11 @@
           "submenu": "0xtools.editor",
           "group": "z_commands",
           "when": "editorLangId == solidity"
+        },
+        {
+          "command": "sigscan.decodeCalldata",
+          "when": "editorHasSelection && editorLangId != solidity",
+          "group": "0xtools@9"
         }
       ],
       "0xtools.editor": [
@@ -694,6 +794,11 @@
         {
           "command": "sigscan.generateTests",
           "group": "4_tools@2"
+        },
+        {
+          "command": "sigscan.decodeCalldata",
+          "when": "editorHasSelection",
+          "group": "9_evmtools@1"
         }
       ],
       "commandPalette": [
@@ -752,7 +857,7 @@
     "cli": "node dist/cli/index.js",
     "build": "webpack --mode production",
     "package": "node scripts/package-vsix.js",
-    "package:install": "node scripts/package-vsix.js --install",
+    "package:no-install": "node scripts/package-vsix.js --no-install",
     "dev": "webpack --mode development",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
@@ -765,7 +870,7 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.ts": [
+    "!(website)/**/*.ts": [
       "eslint --fix",
       "prettier --write"
     ]
@@ -800,6 +905,7 @@
     "webpack-cli": "^7.0.3"
   },
   "dependencies": {
+    "@openchainxyz/abi-guesser": "^1.0.2",
     "chokidar": "^5.0.0",
     "commander": "^15.0.0",
     "ethers": "^6.16.0",

@@ -12,12 +12,42 @@
  */
 
 import * as semver from 'semver';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { keccak256 } from 'js-sha3';
 
 // Lazy-loaded solc instance — not imported at top level to allow the extension
 // to work even when the `solc` npm package is not installed.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _solc: any = null;
+
+/**
+ * `require` that escapes the webpack bundle. Downloaded soljson files live on
+ * disk at runtime-determined paths, which webpack's `require` cannot resolve.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const __non_webpack_require__: ((id: string) => any) | undefined;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function nodeRequire(id: string): any {
+  if (typeof __non_webpack_require__ === 'function') {
+    return __non_webpack_require__(id);
+  }
+  // Unbundled contexts (jest / ts-node) only. eval hides the dynamic require
+  // from webpack's static analysis; the bundle always takes the branch above.
+
+  return eval('require')(id);
+}
+
+/**
+ * Where downloaded soljson compilers are cached across sessions. The extension
+ * points this at its globalStorage dir at activation; the CLI default keeps
+ * compilers under the user's home so repeated runs never re-download.
+ */
+let _soljsonCacheDir = path.join(os.homedir(), '.0xtools', 'solc');
+
+/** Cached list.json build metadata: full version tag → expected keccak256. */
+let _releaseHashesPromise: Promise<Map<string, string>> | null = null;
 
 let _solcReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 const SOLC_RELEASE_MS = 60_000; // Release solc after 60s of inactivity
@@ -43,6 +73,49 @@ function getSolc() {
     }
   }
   return _solc;
+}
+
+/** Minimal HTTPS GET → Buffer with redirect-following and a hard timeout. */
+function httpsGetBuffer(url: string, timeoutMs: number, redirectsLeft = 3): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const request = https.get(
+      url,
+      { timeout: timeoutMs },
+      (response: import('http').IncomingMessage) => {
+        const status = response.statusCode ?? 0;
+        if (status >= 300 && status < 400 && response.headers.location) {
+          response.resume();
+          if (redirectsLeft <= 0) {
+            reject(new Error('Too many redirects'));
+            return;
+          }
+          resolve(
+            httpsGetBuffer(
+              new URL(response.headers.location, url).toString(),
+              timeoutMs,
+              redirectsLeft - 1
+            )
+          );
+          return;
+        }
+        if (status !== 200) {
+          response.resume();
+          reject(new Error(`HTTP ${status} for ${url}`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => resolve(Buffer.concat(chunks)));
+        response.on('error', reject);
+      }
+    );
+    request.on('error', reject);
+    request.on('timeout', () => {
+      request.destroy();
+      reject(new Error(`Timed out fetching ${url}`));
+    });
+  });
 }
 
 // Try native solc binary on PATH
@@ -184,40 +257,110 @@ export class SolcManager {
       }
     }
 
-    // Start loading
-    const loadPromise = new Promise<SolcInstance>((resolve, reject) => {
-      debug.log(`Downloading solc ${normalizedVersion}...`);
-
-      const solcModule = getSolc();
-      if (!solcModule) {
-        reject(new Error('solc npm package not available — install it or use native solc'));
-        return;
-      }
-
-      solcModule.loadRemoteVersion(
-        normalizedVersion,
-        (err: Error | null, solcInstance: SolcInstance) => {
-          this.loading.delete(normalizedVersion);
-
-          if (err) {
-            console.error(`❌ Failed to load solc ${normalizedVersion}:`, err.message);
-            reject(new Error(`Failed to load solc ${normalizedVersion}: ${err.message}`));
-            return;
-          }
-
-          debug.log(`Loaded solc ${normalizedVersion}`);
-          // Evict excess cached versions before adding new one
-          this.evictExcess(normalizedVersion);
-          this.cache.set(normalizedVersion, solcInstance);
-          this.touchVersion(normalizedVersion);
-          this.startEvictionTimer();
-          resolve(solcInstance);
-        }
-      );
-    });
+    // Start loading. The compiler is fetched from binaries.soliditylang.org
+    // into a persistent disk cache and wrapped with `solc/wrapper` (which is
+    // bundled by webpack) — so neither the download nor the wrap needs the
+    // full `solc` npm package with its ~9 MB bundled soljson.
+    const loadPromise = this.loadFromDiskOrRemote(normalizedVersion)
+      .then((solcInstance) => {
+        this.loading.delete(normalizedVersion);
+        debug.log(`Loaded solc ${normalizedVersion}`);
+        // Evict excess cached versions before adding new one
+        this.evictExcess(normalizedVersion);
+        this.cache.set(normalizedVersion, solcInstance);
+        this.touchVersion(normalizedVersion);
+        this.startEvictionTimer();
+        return solcInstance;
+      })
+      .catch((error: Error) => {
+        this.loading.delete(normalizedVersion);
+        console.error(`❌ Failed to load solc ${normalizedVersion}:`, error.message);
+        throw new Error(`Failed to load solc ${normalizedVersion}: ${error.message}`);
+      });
 
     this.loading.set(normalizedVersion, loadPromise);
     return loadPromise;
+  }
+
+  /**
+   * Point the soljson disk cache somewhere else (the extension passes its
+   * globalStorage path at activation). Created lazily on first download.
+   */
+  static setSoljsonCacheDir(dir: string): void {
+    _soljsonCacheDir = dir;
+  }
+
+  /** Load a soljson from the disk cache, downloading it first when missing. */
+  private static async loadFromDiskOrRemote(normalizedVersion: string): Promise<SolcInstance> {
+    if (!/^v\d+\.\d+\.\d+\+commit\.[0-9a-f]+$/.test(normalizedVersion)) {
+      throw new Error(`Unrecognized solc version format: ${normalizedVersion}`);
+    }
+    const file = path.join(_soljsonCacheDir, `soljson-${normalizedVersion}.js`);
+    if (!fs.existsSync(file)) {
+      await this.downloadSoljson(normalizedVersion, file);
+    }
+
+    const wrapperModule = require('solc/wrapper'); // small, bundled by webpack
+    const wrap = wrapperModule.default ?? wrapperModule;
+    try {
+      return wrap(nodeRequire(file));
+    } catch (error) {
+      // A corrupt/partial cache entry should not brick this version forever.
+      fs.rmSync(file, { force: true });
+      throw error;
+    }
+  }
+
+  /** Download one soljson build, verify it against list.json, write atomically. */
+  private static async downloadSoljson(
+    normalizedVersion: string,
+    destination: string
+  ): Promise<void> {
+    const url = `https://binaries.soliditylang.org/bin/soljson-${normalizedVersion}.js`;
+    debug.log(`Downloading ${url}`);
+    const body = await httpsGetBuffer(url, 120_000);
+    if (body.length < 1_000_000) {
+      throw new Error(`Downloaded compiler is implausibly small (${body.length} bytes)`);
+    }
+    const expected = await this.getExpectedKeccak(normalizedVersion);
+    if (expected) {
+      const actual = `0x${keccak256(body)}`;
+      if (actual !== expected.toLowerCase()) {
+        throw new Error(
+          `Compiler download failed integrity check (keccak ${actual} ≠ ${expected})`
+        );
+      }
+    }
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    const tmp = `${destination}.download-${process.pid}`;
+    fs.writeFileSync(tmp, body);
+    fs.renameSync(tmp, destination);
+  }
+
+  /** Expected keccak256 for a build, from list.json (null when unavailable/offline). */
+  private static async getExpectedKeccak(normalizedVersion: string): Promise<string | null> {
+    if (!_releaseHashesPromise) {
+      _releaseHashesPromise = httpsGetBuffer(
+        'https://binaries.soliditylang.org/bin/list.json',
+        15_000
+      )
+        .then((buffer) => {
+          const hashes = new Map<string, string>();
+          const json = JSON.parse(buffer.toString('utf8')) as {
+            builds?: Array<{ path?: string; keccak256?: string }>;
+          };
+          for (const build of json.builds ?? []) {
+            if (build.path && build.keccak256) {
+              const version = build.path.replace(/^soljson-/, '').replace(/\.js$/, '');
+              hashes.set(version, build.keccak256);
+            }
+          }
+          return hashes;
+        })
+        .catch(() => new Map<string, string>());
+    }
+    const hashes = await _releaseHashesPromise;
+    return hashes.get(normalizedVersion) ?? null;
   }
 
   /**
@@ -597,23 +740,28 @@ export async function getCompilerForPragma(source: string): Promise<{
   isExact: boolean;
 }> {
   const pragma = parsePragmaFromSource(source);
+  const bundled = SolcManager.getBundled();
 
   if (!pragma) {
-    // No pragma - use bundled
-    const bundled = SolcManager.getBundled();
-    if (!bundled) {
-      throw new Error('No solc compiler available (install solc npm package or native solc)');
+    // No pragma — use bundled when present, otherwise the newest known release.
+    if (bundled) {
+      return {
+        compiler: bundled,
+        version: SolcManager.getBundledVersion(),
+        isExact: true,
+      };
     }
+    const fallbackVersion = SolcManager.getHardcodedVersions()[0];
     return {
-      compiler: bundled,
-      version: SolcManager.getBundledVersion(),
-      isExact: true,
+      compiler: await SolcManager.load(fallbackVersion),
+      version: fallbackVersion,
+      isExact: false,
     };
   }
 
   try {
     const bundledVersion = SolcManager.getBundledVersion();
-    const bundledSemver = bundledVersion.match(/(\d+\.\d+\.\d+)/)?.[1] || '0.8.28';
+    const bundledSemver = (bundled && bundledVersion.match(/(\d+\.\d+\.\d+)/)?.[1]) || '';
 
     // Resolve the target version WITHOUT a network fetch when possible.
     // The bundled compiler and the hardcoded version list cover the common case;
@@ -627,7 +775,10 @@ export async function getCompilerForPragma(source: string): Promise<{
       .trim();
     let targetVersion: string | null = null;
 
-    const offlineCandidates = [bundledSemver, ...SolcManager.getHardcodedVersions()];
+    const offlineCandidates = [
+      ...(bundledSemver ? [bundledSemver] : []),
+      ...SolcManager.getHardcodedVersions(),
+    ];
     const offlineSatisfies = offlineCandidates.some((v) => {
       try {
         return semver.satisfies(v, cleanPragma);
@@ -643,9 +794,9 @@ export async function getCompilerForPragma(source: string): Promise<{
       targetVersion = resolveSolcVersion(pragma, availableVersions);
     }
 
-    if (targetVersion === bundledSemver) {
+    if (bundled && bundledSemver && targetVersion === bundledSemver) {
       return {
-        compiler: SolcManager.getBundled(),
+        compiler: bundled,
         version: bundledVersion,
         isExact: true,
       };
@@ -673,9 +824,11 @@ export async function getCompilerForPragma(source: string): Promise<{
   } catch (error) {
     // Fallback to bundled
     console.warn(`Could not resolve pragma ${pragma}, using bundled:`, error);
-    const bundled = SolcManager.getBundled();
     if (!bundled) {
-      throw new Error('No solc compiler available');
+      throw new Error(
+        `No solc compiler available for pragma ${pragma} — the download from binaries.soliditylang.org failed ` +
+          `(offline?) and no bundled/native solc is installed. Original error: ${(error as Error).message}`
+      );
     }
     return {
       compiler: bundled,
