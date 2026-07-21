@@ -1,4 +1,5 @@
 /* eslint-disable @next/next/no-img-element */
+import { ModeToggle } from "@/components/mode-toggle";
 
 const VERSION = "0.0.5";
 const VSIX_PATH = `/downloads/0xtools-${VERSION}.vsix`;
@@ -9,7 +10,7 @@ const GITHUB = "https://github.com/0xtoools/0xtools";
 
 function Strip({
   className,
-  stroke = "#0B0E11",
+  stroke = "currentColor",
   lit = "#14C08A",
 }: {
   className?: string;
@@ -64,7 +65,7 @@ function Ticker() {
     </span>
   );
   return (
-    <div className="overflow-hidden border-b-2 border-ink bg-dark py-2 font-mono text-xs">
+    <div className="overflow-hidden border-b-2 border-edge bg-dark py-2 font-mono text-xs">
       <div className="flex w-max animate-marquee">
         {row}
         {row}
@@ -77,17 +78,23 @@ function Ticker() {
 
 function Nav() {
   return (
-    <nav className="border-b-2 border-ink bg-paper">
+    <nav className="border-b-2 border-edge bg-page">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
         <a href="#" className="flex items-center gap-3">
           <Strip className="h-10 w-10" />
           <img
             src="/brand/0xtools-wordmark.svg"
             alt="0xTools"
-            className="h-6 w-auto"
+            className="h-6 w-auto dark:hidden"
+          />
+          <img
+            src="/brand/0xtools-wordmark-paper.svg"
+            alt=""
+            className="hidden h-6 w-auto dark:block"
           />
         </a>
         <div className="flex items-center gap-3 font-mono text-sm">
+          <ModeToggle />
           <a
             href="#features"
             className="hidden border-b-2 border-transparent px-1 hover:border-accent sm:block"
@@ -111,7 +118,7 @@ function Nav() {
           <a
             href={VSIX_PATH}
             download
-            className="border-2 border-ink bg-accent px-4 py-2 font-semibold text-ink shadow-brut-sm transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+            className="border-2 border-edge bg-accent px-4 py-2 font-semibold text-ink shadow-brut-sm transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
           >
             GET .VSIX
           </a>
@@ -137,7 +144,7 @@ function Line({ n, children }: { n: number; children: React.ReactNode }) {
 function EditorMock() {
   return (
     <div className="relative">
-      <div className="border-2 border-ink bg-panel shadow-brut-lg">
+      <div className="border-2 border-edge bg-panel shadow-brut-lg">
         {/* title bar */}
         <div className="flex items-center justify-between border-b-2 border-ink bg-dark px-4 py-2.5">
           <div className="flex items-center gap-2">
@@ -196,7 +203,7 @@ function EditorMock() {
         </pre>
       </div>
       {/* hover card */}
-      <div className="absolute -bottom-7 -right-3 rotate-[2deg] border-2 border-ink bg-paper px-4 py-3 font-mono text-xs shadow-brut sm:-right-6">
+      <div className="absolute -bottom-7 -right-3 rotate-[2deg] border-2 border-ink bg-paper px-4 py-3 font-mono text-xs text-ink shadow-brut sm:-right-6">
         <div className="mb-1 flex items-center gap-2">
           <Strip className="h-4 w-4" />
           <span className="font-semibold">withdraw(uint256)</span>
@@ -211,10 +218,10 @@ function EditorMock() {
 
 function Hero() {
   return (
-    <header className="border-b-2 border-ink">
+    <header className="border-b-2 border-edge">
       <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-16 lg:grid-cols-2 lg:py-24 [&>*]:min-w-0">
         <div>
-          <div className="mb-6 inline-block -rotate-2 border-2 border-ink bg-amber px-3 py-1 font-mono text-xs font-semibold shadow-brut-sm">
+          <div className="mb-6 inline-block -rotate-2 border-2 border-ink bg-amber px-3 py-1 font-mono text-xs font-semibold text-ink shadow-brut-sm">
             NOT ON THE MARKETPLACE YET — VSIX SHIPS FROM HERE
           </div>
           <h1 className="text-5xl font-bold leading-[1.02] tracking-tight sm:text-6xl lg:text-7xl">
@@ -222,7 +229,7 @@ function Hero() {
             <span className="bg-accent px-2 text-ink shadow-brut-sm">EVM</span>{" "}
             without leaving your editor.
           </h1>
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink/70">
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-body/70">
             0xTools decodes function selectors, event topics and error selectors
             — and annotates gas inline — right inside VS Code. Plus security
             audits, one-click Anvil, and a full EVM toolbox.
@@ -231,7 +238,7 @@ function Hero() {
             <a
               href={VSIX_PATH}
               download
-              className="border-2 border-ink bg-accent px-6 py-4 font-mono text-sm font-semibold text-ink shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
+              className="border-2 border-edge bg-accent px-6 py-4 font-mono text-sm font-semibold text-ink shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
             >
               ↓ DOWNLOAD .VSIX · v{VERSION} · {VSIX_SIZE}
             </a>
@@ -239,7 +246,7 @@ function Hero() {
               href={GITHUB}
               target="_blank"
               rel="noreferrer"
-              className="border-2 border-ink bg-paper px-6 py-4 font-mono text-sm font-semibold shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
+              className="border-2 border-edge bg-surface px-6 py-4 font-mono text-sm font-semibold shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
             >
               STAR ON GITHUB ↗
             </a>
@@ -265,7 +272,7 @@ const STATS = [
 
 function Stats() {
   return (
-    <div className="border-b-2 border-ink bg-dark">
+    <div className="border-b-2 border-edge bg-dark dark:bg-panel">
       <div className="mx-auto grid max-w-6xl grid-cols-2 sm:grid-cols-4">
         {STATS.map(([big, small]) => (
           <div key={small} className="px-5 py-6 text-center">
@@ -323,29 +330,29 @@ const FEATURES: [string, string, string, string][] = [
 
 function Features() {
   return (
-    <section id="features" className="border-b-2 border-ink">
+    <section id="features" className="border-b-2 border-edge">
       <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
         <div className="mb-3 font-mono text-xs tracking-[0.2em] text-muted">
           01 / WHAT IT DOES
         </div>
         <h2 className="mb-12 max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl">
           The Solidity toolkit that lives{" "}
-          <span className="bg-amber px-2 shadow-brut-sm">in the editor.</span>
+          <span className="bg-amber px-2 text-ink shadow-brut-sm">in the editor.</span>
         </h2>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map(([num, tag, title, body]) => (
             <div
               key={num}
-              className="border-2 border-ink bg-white p-6 shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
+              className="border-2 border-edge bg-surface p-6 shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
             >
               <div className="mb-4 flex items-center justify-between">
-                <span className="border-2 border-ink bg-accent-tint px-2 py-0.5 font-mono text-[11px] font-semibold text-accent-deep">
+                <span className="border-2 border-edge bg-accent-tint px-2 py-0.5 font-mono text-[11px] font-semibold text-accent-deep dark:bg-accent/10 dark:text-accent">
                   {tag}
                 </span>
                 <span className="font-mono text-xs text-muted">{num}</span>
               </div>
               <h3 className="mb-2 text-lg font-bold">{title}</h3>
-              <p className="text-sm leading-relaxed text-ink/70">{body}</p>
+              <p className="text-sm leading-relaxed text-body/70">{body}</p>
             </div>
           ))}
         </div>
@@ -358,7 +365,7 @@ function Features() {
 
 function Install() {
   return (
-    <section id="install" className="border-b-2 border-ink bg-accent">
+    <section id="install" className="border-b-2 border-edge bg-accent text-ink">
       <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
         <div className="mb-3 font-mono text-xs tracking-[0.2em] text-ink/60">
           02 / INSTALL

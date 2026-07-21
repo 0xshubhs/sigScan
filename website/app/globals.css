@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Theme-flipping surfaces: page bg, body text, card surface, and the "edge"
+   color used by every neo-brutal border and hard shadow (ink on light,
+   paper on dark). */
+:root {
+  --page: #f4f4f1;
+  --body: #0b0e11;
+  --surface: #ffffff;
+  --edge: #0b0e11;
+}
+.dark {
+  --page: #0c0f12;
+  --body: #f4f4f1;
+  --surface: #17191e;
+  --edge: #f4f4f1;
+}
+
 @theme {
   --color-paper: #f4f4f1;
   --color-ink: #0b0e11;
@@ -15,10 +33,17 @@
 
   --font-sans: var(--font-grotesk), system-ui, sans-serif;
   --font-mono: var(--font-plex), ui-monospace, monospace;
+}
 
-  --shadow-brut: 6px 6px 0 0 #0b0e11;
-  --shadow-brut-sm: 3px 3px 0 0 #0b0e11;
-  --shadow-brut-lg: 10px 10px 0 0 #0b0e11;
+@theme inline {
+  --color-page: var(--page);
+  --color-body: var(--body);
+  --color-surface: var(--surface);
+  --color-edge: var(--edge);
+
+  --shadow-brut: 6px 6px 0 0 var(--edge);
+  --shadow-brut-sm: 3px 3px 0 0 var(--edge);
+  --shadow-brut-lg: 10px 10px 0 0 var(--edge);
   --shadow-brut-accent: 6px 6px 0 0 #14c08a;
 }
 
@@ -32,8 +57,8 @@ html {
 }
 
 body {
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--page);
+  color: var(--body);
 }
 
 @keyframes marquee {
