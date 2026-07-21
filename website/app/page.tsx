@@ -5,7 +5,7 @@ import { Reveal } from "@/components/reveal";
 
 const VERSION = "0.0.5";
 const VSIX_PATH = `/downloads/0xtools-${VERSION}.vsix`;
-const VSIX_SIZE = "640 KB";
+const VSIX_SIZE = "1.0 MB";
 const GITHUB = "https://github.com/0xtoools/0xtools";
 
 /* ---------- brand mark: the Selector Strip (24 grid · 4 cells · one lit) ---------- */
@@ -207,7 +207,7 @@ const STATS = [
   ["101", "COMMANDS"],
   ["25+", "SECURITY MODULES"],
   ["3-TIER", "GAS ENGINE"],
-  ["640 KB", "WHOLE VSIX"],
+  ["1.0 MB", "WHOLE VSIX"],
 ];
 
 function Stats() {
@@ -414,7 +414,9 @@ function Arsenal() {
           </div>
           <h2 className="mb-4 max-w-2xl text-4xl font-bold tracking-tight text-paper sm:text-5xl">
             101 commands.{" "}
-            <span className="bg-accent px-2 text-ink shadow-brut-sm">One 640 KB VSIX.</span>
+            <span className="bg-accent px-2 text-ink shadow-brut-sm">
+              One {VSIX_SIZE} VSIX.
+            </span>
           </h2>
           <p className="mb-12 font-mono text-xs text-muted">
             nothing to hide — every chip links to its source file ↗
@@ -450,6 +452,138 @@ function Arsenal() {
   );
 }
 
+/* ---------- AI agents ---------- */
+
+const MCP_TOOLS = [
+  "audit_solidity",
+  "scan_signatures",
+  "lookup_selector",
+  "compute_selector",
+  "decode_calldata",
+  "encode_calldata",
+  "abi_encode_params",
+  "decode_raw_transaction",
+  "keccak256",
+  "convert_eth_units",
+  "compute_contract_address",
+  "storage_slot",
+  "checksum_address",
+  "eth_reference",
+];
+
+function AiAgents() {
+  return (
+    <section className="border-b-2 border-edge">
+      <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
+        <Reveal>
+          <div className="mb-3 font-mono text-xs tracking-[0.2em] text-muted">
+            03 / BUILT FOR AI AGENTS
+          </div>
+          <h2 className="mb-4 max-w-3xl text-4xl font-bold tracking-tight sm:text-5xl">
+            AI writes the contract.{" "}
+            <span className="bg-accent px-2 text-ink shadow-brut-sm">
+              0xTools keeps it honest.
+            </span>
+          </h2>
+          <p className="mb-12 max-w-2xl text-body/70">
+            Agents hallucinate selectors, gas numbers and security judgments.
+            0xTools hands them deterministic ground truth instead — as an MCP
+            server for Claude Code / Cursor, and as native Copilot agent tools
+            inside VS Code. Every AI call is logged and flashed in the status
+            bar; one setting turns it all off.
+          </p>
+        </Reveal>
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* agent transcript */}
+          <Reveal>
+            <div className="border-2 border-edge bg-panel font-mono text-[12.5px] leading-6 text-paper shadow-brut">
+              <div className="border-b-2 border-ink bg-dark px-4 py-2 text-[11px] text-muted">
+                claude — agent session
+              </div>
+              <div className="space-y-3 p-4">
+                <p className="text-paper/85">
+                  <span className="text-muted">&gt;</span> write a withdraw function for the
+                  vault and make sure it&apos;s safe
+                </p>
+                <p className="text-muted">
+                  ⏺ Writing Vault.withdraw()…{" "}
+                  <span className="text-paper/60">then verifying with 0xTools</span>
+                </p>
+                <div className="border border-accent/40 bg-accent/5 px-3 py-2">
+                  <p className="text-accent">⚒ audit_solidity(source: Vault.sol)</p>
+                  <p className="text-amber">
+                    ⚠ high · reentrancy · L7 — external call before state change
+                  </p>
+                </div>
+                <p className="text-paper/85">
+                  ⏺ Caught it — moving the balance write before the call
+                  (checks-effects-interactions), re-auditing…{" "}
+                  <span className="text-accent">✓ 0 high findings</span>
+                </p>
+                <div className="border border-paper/20 px-3 py-2 text-[11.5px]">
+                  <p className="text-accent">⚒ compute_selector(&quot;withdraw(uint256)&quot;)</p>
+                  <p className="text-paper/70">
+                    → <span className="text-accent">0x2e1a7d4d</span> · quoted exactly, not
+                    from memory
+                  </p>
+                </div>
+              </div>
+            </div>
+          </Reveal>
+          {/* hook it up */}
+          <Reveal delay={0.1}>
+            <div className="flex h-full flex-col gap-5">
+              <div className="border-2 border-edge bg-surface p-5 shadow-brut">
+                <div className="mb-2 font-mono text-[11px] font-semibold tracking-widest text-accent-deep">
+                  MCP SERVER — CLAUDE CODE, CURSOR, ANY CLIENT
+                </div>
+                <pre className="whitespace-pre-wrap break-all border-2 border-ink bg-dark p-3 font-mono text-xs text-accent">
+                  <code>claude mcp add 0xtools -- node ./dist/cli/index.js mcp</code>
+                </pre>
+                <p className="mt-3 text-sm leading-relaxed text-body/70">
+                  14 tools over stdio. An agent skill ships in{" "}
+                  <a
+                    href={`${GITHUB}/blob/main/skills/0xtools/SKILL.md`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="border-b border-accent text-accent-deep"
+                  >
+                    skills/0xtools
+                  </a>{" "}
+                  that teaches Claude when to call them.
+                </p>
+              </div>
+              <div className="border-2 border-edge bg-surface p-5 shadow-brut">
+                <div className="mb-2 font-mono text-[11px] font-semibold tracking-widest text-accent-deep">
+                  COPILOT AGENT MODE — BUILT INTO THE VSIX
+                </div>
+                <p className="text-sm leading-relaxed text-body/70">
+                  8 language-model tools (<code className="font-mono">#auditSolidity</code>,{" "}
+                  <code className="font-mono">#computeSelector</code>…) register on install.
+                  A status-bar strip lights on every AI call, the &ldquo;0xTools AI&rdquo;
+                  output channel logs it, and{" "}
+                  <code className="font-mono">sigscan.ai.enableTools</code> is the kill
+                  switch.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {MCP_TOOLS.map((t) => (
+                  <span
+                    key={t}
+                    className="border border-edge/40 px-1.5 py-0.5 font-mono text-[10.5px] text-muted"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ---------- install ---------- */
 
 function Install() {
@@ -458,7 +592,7 @@ function Install() {
       <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
         <Reveal>
           <div className="mb-3 font-mono text-xs tracking-[0.2em] text-ink/60">
-            03 / INSTALL
+            04 / INSTALL
           </div>
           <h2 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
             Three steps. No marketplace.
@@ -562,6 +696,7 @@ export default function Home() {
       <Stats />
       <Features />
       <Arsenal />
+      <AiAgents />
       <Install />
       <Footer />
     </main>

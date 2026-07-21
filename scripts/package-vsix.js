@@ -52,14 +52,15 @@ function publishToWebsite() {
   fs.copyFileSync(vsixPath, path.join(downloadsDir, vsixName));
 
   const pagePath = path.join(repoRoot, 'website', 'app', 'page.tsx');
-  const sizeKB = `${Math.round(fs.statSync(vsixPath).size / 1024)} KB`;
+  const kb = fs.statSync(vsixPath).size / 1024;
+  const size = kb < 1000 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`;
   let page = fs.readFileSync(pagePath, 'utf8');
   page = page
     .replace(/const VERSION = "[^"]*";/, `const VERSION = "${pkg.version}";`)
-    .replace(/const VSIX_SIZE = "[^"]*";/, `const VSIX_SIZE = "${sizeKB}";`)
-    .replace(/\["\d+ KB", "WHOLE VSIX"\]/, `["${sizeKB}", "WHOLE VSIX"]`);
+    .replace(/const VSIX_SIZE = "[^"]*";/, `const VSIX_SIZE = "${size}";`)
+    .replace(/\["[^"]+", "WHOLE VSIX"\]/, `["${size}", "WHOLE VSIX"]`);
   fs.writeFileSync(pagePath, page);
-  log(`Published to website/public/downloads/${vsixName} (page.tsx → v${pkg.version}, ${sizeKB})`);
+  log(`Published to website/public/downloads/${vsixName} (page.tsx → v${pkg.version}, ${size})`);
 }
 
 function main() {

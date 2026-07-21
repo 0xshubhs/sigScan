@@ -248,6 +248,13 @@ export function activate(context: vscode.ExtensionContext) {
     getScanResult: () => sigScanManager.getLastScanResult(),
   });
 
+  // AI agent surface: register the language-model tools (Copilot agent mode).
+  // The wiring is light; the tool registry (and ethers) loads on first call.
+  {
+    const { registerAiTools } = require('./ai-lm-tools') as typeof import('./ai-lm-tools');
+    registerAiTools(context);
+  }
+
   // Downloaded solc compilers persist in globalStorage instead of ~/.0xtools
   // (the VSIX no longer bundles the ~9 MB soljson — compilers fetch on demand).
   {

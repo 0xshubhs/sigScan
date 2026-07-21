@@ -59,4 +59,5 @@ FEATURES-INVENTORY.md
 # inside the extension
 website/**
 brand/**
+skills/**
 *.vsix

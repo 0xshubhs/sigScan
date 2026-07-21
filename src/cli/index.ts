@@ -7,6 +7,7 @@ import { SignatureExporter } from '../core/exporter';
 import { FileWatcher } from '../core/watcher';
 import { ExportOptions } from '../types';
 import { registerAuditCommand } from './audit-command';
+import { registerMcpCommand } from './mcp-command';
 
 /** Find the subproject that owns a file: the one whose root is the longest matching prefix. */
 function findOwningSubProject(subProjects: SubProject[], filePath: string): SubProject | undefined {
@@ -291,5 +292,6 @@ program
   });
 
 registerAuditCommand(program);
+registerMcpCommand(program);
 
 program.parse();
