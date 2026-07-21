@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{background:#F4F4F1}
+    a{color:#0B0E11;text-decoration:none;border-bottom:1px solid #cfcfca}
+    a:hover{color:#0f9d72;border-color:#0f9d72}
+    ::selection{background:#14C08A;color:#06120D}
+  </style>
+</helmet>
+<div style="font-family:'Space Grotesk',system-ui,sans-serif;color:#0B0E11;background:#F4F4F1;padding-bottom:8px">
+
+  <!-- ============ TOP BAR ============ -->
+  <div style="max-width:1160px;margin:0 auto;padding:0 40px">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 0;border-bottom:1px solid #E6E5E0;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.06em;color:#8A8F96">
+      <span style="color:#0B0E11">0xTools <span style="color:#b6bac0">·</span> BRAND &amp; LOGO SYSTEM</span>
+      <span>v1.0 &nbsp;·&nbsp; JUL 2026</span>
+    </div>
+  </div>
+
+  <!-- ============ HERO ============ -->
+  <header style="max-width:1160px;margin:0 auto;padding:64px 40px 56px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.16em;color:#8A8F96;text-transform:uppercase;margin-bottom:34px">Solidity · EVM · selector decoding · inline gas</div>
+    <div style="display:flex;align-items:center;gap:30px;flex-wrap:wrap">
+      <dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="78px,78px" style="width:78px;height:78px;flex:none"></dc-import>
+      <dc-import name="Wordmark" tone="ink" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="312px,63px" style="width:312px;height:63px;flex:none"></dc-import>
+    </div>
+    <p style="max-width:620px;margin:38px 0 0;font-size:19px;line-height:1.55;color:#3c4147;text-wrap:pretty">A complete logo system for a Solidity contract-analysis tool that decodes function selectors, event topics and error selectors — and annotates gas inline — right inside VS Code. Built flat, monochrome-first, and legible from a 16px activity-bar icon up to a marquee.</p>
+  </header>
+
+  <!-- ============ 01 · ICON DIRECTIONS ============ -->
+  <section style="max-width:1160px;margin:0 auto;padding:40px 40px 8px;border-top:1px solid #E6E5E0">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8A8F96"><span style="color:#0B0E11;font-weight:600">01</span> &nbsp;/&nbsp; Icon directions</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#a2a7ad">3 explored · each must hold at 16×16</div>
+    </div>
+    <h2 style="font-size:31px;font-weight:600;letter-spacing:-.01em;margin:10px 0 30px;max-width:720px;text-wrap:balance">Three ways to draw a contract inspector.</h2>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+
+      <!-- CARD A -->
+      <div style="border:1px solid #E6E5E0;border-radius:14px;background:#fff;overflow:hidden;display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:1fr 1fr">
+          <div style="background:#F6F6F3;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center"><dc-import name="Icon" mark="a" variant="color" accent="{{ accent }}" hint-size="82px,82px" style="width:46%;height:46%"></dc-import></div>
+          <div style="background:#0C0F12;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center"><dc-import name="Icon" mark="a" variant="inverse" accent="{{ accent }}" hint-size="82px,82px" style="width:46%;height:46%"></dc-import></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border-top:1px solid #EFEEEA">
+          <div style="display:flex;align-items:center;gap:14px;background:#17191E;border-radius:9px;padding:9px 14px">
+            <dc-import name="Icon" mark="a" variant="monoInverse" accent="{{ accent }}" hint-size="32px,32px" style="width:32px;height:32px"></dc-import>
+            <dc-import name="Icon" mark="a" variant="monoInverse" accent="{{ accent }}" hint-size="24px,24px" style="width:24px;height:24px"></dc-import>
+            <dc-import name="Icon" mark="a" variant="monoInverse" accent="{{ accent }}" hint-size="16px,16px" style="width:16px;height:16px"></dc-import>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.35;color:#9aa0a6;letter-spacing:.04em">32·24·16 PX<br>MONOCHROME</div>
+        </div>
+        <div style="padding:4px 20px 22px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:#0B0E11;border:1px solid #d8d7d2;border-radius:5px;padding:1px 6px">A</span><span style="font-weight:600;font-size:15px">Hex Monogram</span></div>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#5c6167;text-wrap:pretty">The <code style="font-family:'IBM Plex Mono',monospace">0x</code> prefix as a monogram — a byte-register ring crossed by ×. Most literal to the name.</p>
+        </div>
+      </div>
+
+      <!-- CARD B -->
+      <div style="border:1px solid #14C08A;border-radius:14px;background:#fff;overflow:hidden;display:flex;flex-direction:column;position:relative">
+        <div style="position:absolute;top:12px;right:12px;z-index:2;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#0f9d72;background:#e7f8f1;border:1px solid #b6e8d5;border-radius:20px;padding:3px 10px">SELECTED</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr">
+          <div style="background:#F6F6F3;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="82px,82px" style="width:46%;height:46%"></dc-import></div>
+          <div style="background:#0C0F12;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center"><dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="82px,82px" style="width:46%;height:46%"></dc-import></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border-top:1px solid #EFEEEA">
+          <div style="display:flex;align-items:center;gap:14px;background:#17191E;border-radius:9px;padding:9px 14px">
+            <dc-import name="Icon" mark="b" variant="monoInverse" accent="{{ accent }}" hint-size="32px,32px" style="width:32px;height:32px"></dc-import>
+            <dc-import name="Icon" mark="b" variant="monoInverse" accent="{{ accent }}" hint-size="24px,24px" style="width:24px;height:24px"></dc-import>
+            <dc-import name="Icon" mark="b" variant="monoInverse" accent="{{ accent }}" hint-size="16px,16px" style="width:16px;height:16px"></dc-import>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.35;color:#9aa0a6;letter-spacing:.04em">32·24·16 PX<br>MONOCHROME</div>
+        </div>
+        <div style="padding:4px 20px 22px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:#fff;background:#0f9d72;border-radius:5px;padding:1px 6px">B</span><span style="font-weight:600;font-size:15px">Selector Strip</span></div>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#5c6167;text-wrap:pretty">A 4-byte selector as a row of bytes; the lit cell is the one under inspection. Most data-forward.</p>
+        </div>
+      </div>
+
+      <!-- CARD C -->
+      <div style="border:1px solid #E6E5E0;border-radius:14px;background:#fff;overflow:hidden;display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:1fr 1fr">
+          <div style="background:#F6F6F3;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center"><dc-import name="Icon" mark="c" variant="color" accent="{{ accent }}" hint-size="82px,82px" style="width:46%;height:46%"></dc-import></div>
+          <div style="background:#0C0F12;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center"><dc-import name="Icon" mark="c" variant="inverse" accent="{{ accent }}" hint-size="82px,82px" style="width:46%;height:46%"></dc-import></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;padding:16px 20px;border-top:1px solid #EFEEEA">
+          <div style="display:flex;align-items:center;gap:14px;background:#17191E;border-radius:9px;padding:9px 14px">
+            <dc-import name="Icon" mark="c" variant="monoInverse" accent="{{ accent }}" hint-size="32px,32px" style="width:32px;height:32px"></dc-import>
+            <dc-import name="Icon" mark="c" variant="monoInverse" accent="{{ accent }}" hint-size="24px,24px" style="width:24px;height:24px"></dc-import>
+            <dc-import name="Icon" mark="c" variant="monoInverse" accent="{{ accent }}" hint-size="16px,16px" style="width:16px;height:16px"></dc-import>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.35;color:#9aa0a6;letter-spacing:.04em">32·24·16 PX<br>MONOCHROME</div>
+        </div>
+        <div style="padding:4px 20px 22px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:#0B0E11;border:1px solid #d8d7d2;border-radius:5px;padding:1px 6px">C</span><span style="font-weight:600;font-size:15px">Scan Reticle</span></div>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#5c6167;text-wrap:pretty">A reticle locking onto a byte — inspection over code, selector as target. Most tool-like.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ 02 · SELECTED MARK ============ -->
+  <section style="max-width:1160px;margin:56px auto 0;padding:40px 40px 8px;border-top:1px solid #E6E5E0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8A8F96;margin-bottom:10px"><span style="color:#0B0E11;font-weight:600">02</span> &nbsp;/&nbsp; Selected direction</div>
+    <div style="display:grid;grid-template-columns:1.05fr 1fr;gap:48px;align-items:center;margin-bottom:44px">
+      <div>
+        <h2 style="font-size:31px;font-weight:600;letter-spacing:-.01em;margin:6px 0 18px">Direction B — the Selector Strip.</h2>
+        <p style="font-size:16px;line-height:1.6;color:#3c4147;margin:0 0 16px;text-wrap:pretty">Four bytes in a row, one lit — the most literal picture of the job: read a 4-byte selector and light the one under your cursor. That lit cell doubles as the inline gas annotation — unmistakably hex/EVM, with no coin and no diamond.</p>
+        <p style="font-size:16px;line-height:1.6;color:#3c4147;margin:0;text-wrap:pretty">And it reads as data, not a badge. The byte strip is specific to selectors — where a bare <code style="font-family:'IBM Plex Mono',monospace">0x</code> monogram <b style="color:#0B0E11;font-weight:600">(A)</b> collides with the well-known 0x Protocol mark, and the reticle <b style="color:#0B0E11;font-weight:600">(C)</b> can read as a camera. Keep the lit cell and the silhouette holds to a 16px activity-bar icon.</p>
+      </div>
+      <div style="background:#0C0F12;border-radius:16px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center">
+        <dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="150px,150px" style="width:150px;height:150px"></dc-import>
+      </div>
+    </div>
+
+    <!-- variants row -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px">
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:26px;display:flex;flex-direction:column;align-items:center;gap:18px">
+        <dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="72px,72px" style="width:72px;height:72px"></dc-import>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.06em">COLOR / LIGHT</span>
+      </div>
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:26px;display:flex;flex-direction:column;align-items:center;gap:18px">
+        <dc-import name="Icon" mark="b" variant="mono" accent="{{ accent }}" hint-size="72px,72px" style="width:72px;height:72px"></dc-import>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.06em">MONO / LIGHT</span>
+      </div>
+      <div style="border:1px solid #1c2127;border-radius:12px;background:#0C0F12;padding:26px;display:flex;flex-direction:column;align-items:center;gap:18px">
+        <dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="72px,72px" style="width:72px;height:72px"></dc-import>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7f868d;letter-spacing:.06em">COLOR / DARK</span>
+      </div>
+      <div style="border:1px solid #1c2127;border-radius:12px;background:#0C0F12;padding:26px;display:flex;flex-direction:column;align-items:center;gap:18px">
+        <dc-import name="Icon" mark="b" variant="monoInverse" accent="{{ accent }}" hint-size="72px,72px" style="width:72px;height:72px"></dc-import>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7f868d;letter-spacing:.06em">MONO / DARK</span>
+      </div>
+    </div>
+
+    <!-- construction + size ladder -->
+    <div style="display:grid;grid-template-columns:340px 1fr;gap:16px;margin-top:16px">
+      <!-- construction -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:24px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.08em;margin-bottom:16px">CONSTRUCTION · 24 GRID</div>
+        <svg viewBox="-1 -1 26 26" width="100%" style="display:block">
+          <g style="display:{{ guidesDisp }}">
+            <rect x="0" y="0" width="24" height="24" fill="none" stroke="#e9e8e3"></rect>
+            <g stroke="#eeede9" stroke-width="0.5">
+              <line x1="4" y1="0" x2="4" y2="24"></line><line x1="8" y1="0" x2="8" y2="24"></line><line x1="12" y1="0" x2="12" y2="24"></line><line x1="16" y1="0" x2="16" y2="24"></line><line x1="20" y1="0" x2="20" y2="24"></line>
+              <line x1="0" y1="4" x2="24" y2="4"></line><line x1="0" y1="8" x2="24" y2="8"></line><line x1="0" y1="12" x2="24" y2="12"></line><line x1="0" y1="16" x2="24" y2="16"></line><line x1="0" y1="20" x2="24" y2="20"></line>
+            </g>
+            <rect x="2" y="2" width="20" height="20" fill="none" stroke="#14C08A" stroke-width="0.4" stroke-dasharray="1.4 1.4" opacity="0.7"></rect>
+          </g>
+          <g>
+            <rect x="2.65" y="6.5" width="3.4" height="11" rx="1.1" fill="none" stroke="#0B0E11" stroke-width="1.7"></rect><rect x="7.75" y="6.5" width="3.4" height="11" rx="1.1" fill="{{ accent }}"></rect><rect x="12.85" y="6.5" width="3.4" height="11" rx="1.1" fill="none" stroke="#0B0E11" stroke-width="1.7"></rect><rect x="17.95" y="6.5" width="3.4" height="11" rx="1.1" fill="none" stroke="#0B0E11" stroke-width="1.7"></rect>
+          </g>
+          
+        </svg>
+        <p style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.6;color:#9aa0a6;margin:16px 0 0;letter-spacing:.02em">2 px safe area · 1.7 stroke<br>4 cells 3.4×11 · one lit</p>
+      </div>
+      <!-- size ladder -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:24px;display:flex;flex-direction:column;justify-content:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.08em;margin-bottom:22px">SIZE LADDER · 96 → 16 PX</div>
+        <div style="display:flex;align-items:flex-end;gap:32px;flex-wrap:wrap;margin-bottom:24px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="96px,96px" style="width:96px;height:96px"></dc-import><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a2a7ad">96</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="48px,48px" style="width:48px;height:48px"></dc-import><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a2a7ad">48</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="32px,32px" style="width:32px;height:32px"></dc-import><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a2a7ad">32</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="24px,24px" style="width:24px;height:24px"></dc-import><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a2a7ad">24</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="16px,16px" style="width:16px;height:16px"></dc-import><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a2a7ad">16</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px;background:#17191E;border-radius:10px;padding:16px 22px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#7f868d;letter-spacing:.08em;width:90px">VS CODE<br>ACTIVITY BAR</div>
+          <div style="display:flex;align-items:center;gap:26px">
+            <dc-import name="Icon" mark="b" variant="monoInverse" accent="{{ accent }}" hint-size="24px,24px" style="width:24px;height:24px"></dc-import>
+            <dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="24px,24px" style="width:24px;height:24px"></dc-import>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#7f868d;letter-spacing:.04em">inactive · active</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 · WORDMARK ============ -->
+  <section style="max-width:1160px;margin:56px auto 0;padding:40px 40px 8px;border-top:1px solid #E6E5E0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8A8F96;margin-bottom:10px"><span style="color:#0B0E11;font-weight:600">03</span> &nbsp;/&nbsp; Wordmark</div>
+    <h2 style="font-size:31px;font-weight:600;letter-spacing:-.01em;margin:6px 0 30px;max-width:720px;text-wrap:balance">A hex prefix, then a product name.</h2>
+
+    <div style="border:1px solid #E6E5E0;border-radius:14px;overflow:hidden;margin-bottom:16px">
+      <div style="background:#fff;padding:56px 40px;display:flex;justify-content:center">
+        <dc-import name="Wordmark" tone="ink" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="392px,79px" style="width:392px;height:79px"></dc-import>
+      </div>
+      <div style="background:#0C0F12;padding:56px 40px;display:flex;justify-content:center;border-top:1px solid #1c2127">
+        <dc-import name="Wordmark" tone="paper" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="392px,79px" style="width:392px;height:79px"></dc-import>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- typeface -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:26px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.08em;margin-bottom:20px">TYPEFACES · OUTLINED IN MASTERS</div>
+        <div style="display:flex;gap:14px;margin-bottom:18px">
+          <div style="flex:1;border:1px solid #EFEEEA;border-radius:9px;padding:16px 18px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:34px;line-height:1;color:#0B0E11">0x</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;margin-top:12px;line-height:1.5">IBM Plex Mono<br>Medium · dotted zero</div>
+          </div>
+          <div style="flex:1;border:1px solid #EFEEEA;border-radius:9px;padding:16px 18px">
+            <div style="font-family:'Space Grotesk';font-weight:500;font-size:34px;line-height:1;color:#0B0E11">Tools</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;margin-top:12px;line-height:1.5">Space Grotesk<br>Medium · geometric</div>
+          </div>
+        </div>
+        <p style="font-size:13px;line-height:1.55;color:#5c6167;margin:0;text-wrap:pretty">Matching cap heights (700 vs 698 units) let the two faces sit on one line without nudging. Both are open-source and free to ship.</p>
+      </div>
+      <!-- decision -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:26px;display:flex;flex-direction:column">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.08em;margin-bottom:16px">DECISION · IS “0x” DIFFERENTIATED?</div>
+        <p style="font-size:15px;line-height:1.6;color:#3c4147;margin:0 0 18px;text-wrap:pretty"><b style="color:#0B0E11;font-weight:600">Yes — by typeface, not colour.</b> The mono prefix + dotted zero reads as a literal hex prefix and survives in one ink, so it holds on a monochrome activity bar and in print. Colour-only differentiation would vanish the moment the logo goes single-ink.</p>
+        <div style="margin-top:auto;border:1px dashed #d8d7d2;border-radius:9px;padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <dc-import name="Wordmark" tone="ink" prefix-style="unified" accent="{{ accent }}" hint-size="180px,36px" style="width:180px;height:36px;flex:none"></dc-import>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a2a7ad;text-align:right;line-height:1.5;letter-spacing:.03em">UNIFIED ALT<br>not chosen</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 · LOCKUPS ============ -->
+  <section style="max-width:1160px;margin:56px auto 0;padding:40px 40px 8px;border-top:1px solid #E6E5E0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8A8F96;margin-bottom:10px"><span style="color:#0B0E11;font-weight:600">04</span> &nbsp;/&nbsp; Lockups</div>
+    <h2 style="font-size:31px;font-weight:600;letter-spacing:-.01em;margin:6px 0 30px;max-width:720px;text-wrap:balance">Mark and wordmark, locked to a ratio.</h2>
+
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px">
+      <!-- horizontal -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;overflow:hidden">
+        <div style="padding:48px 40px;display:flex;justify-content:center;position:relative">
+          <div style="display:inline-flex;align-items:center;gap:22px;outline:1px dashed #deded8;outline-offset:26px;border-radius:1px">
+            <dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="54px,54px" style="width:54px;height:54px;flex:none"></dc-import>
+            <dc-import name="Wordmark" tone="ink" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="198px,40px" style="width:198px;height:40px;flex:none"></dc-import>
+          </div>
+        </div>
+        <div style="background:#0C0F12;padding:48px 40px;display:flex;justify-content:center;border-top:1px solid #EFEEEA">
+          <div style="display:inline-flex;align-items:center;gap:22px">
+            <dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="54px,54px" style="width:54px;height:54px;flex:none"></dc-import>
+            <dc-import name="Wordmark" tone="paper" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="198px,40px" style="width:198px;height:40px;flex:none"></dc-import>
+          </div>
+        </div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#8A8F96;letter-spacing:.04em;padding:14px 20px;border-top:1px solid #EFEEEA;line-height:1.5">HORIZONTAL · gap = 0.4 × mark height · align on cap-height midline · min width 132 px</div>
+      </div>
+      <!-- stacked -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;overflow:hidden">
+        <div style="padding:40px;display:flex;justify-content:center">
+          <div style="display:inline-flex;flex-direction:column;align-items:center;gap:18px;outline:1px dashed #deded8;outline-offset:24px;border-radius:1px">
+            <dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="66px,66px" style="width:66px;height:66px"></dc-import>
+            <dc-import name="Wordmark" tone="ink" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="139px,28px" style="width:139px;height:28px"></dc-import>
+          </div>
+        </div>
+        <div style="background:#0C0F12;padding:40px;display:flex;justify-content:center;border-top:1px solid #EFEEEA">
+          <div style="display:inline-flex;flex-direction:column;align-items:center;gap:18px">
+            <dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="66px,66px" style="width:66px;height:66px"></dc-import>
+            <dc-import name="Wordmark" tone="paper" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="139px,28px" style="width:139px;height:28px"></dc-import>
+          </div>
+        </div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#8A8F96;letter-spacing:.04em;padding:14px 20px;border-top:1px solid #EFEEEA;line-height:1.5">STACKED · gap = 0.3 × mark height · centered · for square spaces</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 · CLEAR SPACE + MIN SIZE ============ -->
+  <section style="max-width:1160px;margin:56px auto 0;padding:40px 40px 8px;border-top:1px solid #E6E5E0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8A8F96;margin-bottom:10px"><span style="color:#0B0E11;font-weight:600">05</span> &nbsp;/&nbsp; Clear space &amp; minimum size</div>
+    <h2 style="font-size:31px;font-weight:600;letter-spacing:-.01em;margin:6px 0 30px;max-width:720px;text-wrap:balance">Give it air. Don't starve it.</h2>
+
+    <div style="display:grid;grid-template-columns:1fr 1.15fr;gap:16px">
+      <!-- clear space -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:30px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.08em;margin-bottom:22px">CLEAR SPACE</div>
+        <div style="display:flex;justify-content:center">
+          <div style="position:relative;padding:36px">
+            <div style="position:absolute;inset:0;border:1px dashed #cdccc6;border-radius:2px;display:{{ guidesDisp }}"></div>
+            <div style="position:absolute;left:0;top:12px;bottom:12px;width:36px;border-right:1px solid #e7e6e1;display:{{ guidesDisp }}"></div>
+            <div style="position:absolute;right:0;top:12px;bottom:12px;width:36px;border-left:1px solid #e7e6e1;display:{{ guidesDisp }}"></div>
+            <div style="position:absolute;top:0;left:12px;right:12px;height:36px;border-bottom:1px solid #e7e6e1;display:{{ guidesDisp }}"></div>
+            <div style="position:absolute;bottom:0;left:12px;right:12px;height:36px;border-top:1px solid #e7e6e1;display:{{ guidesDisp }}"></div>
+            <div style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-family:'IBM Plex Mono',monospace;font-size:12px;color:#0f9d72;display:{{ guidesDisp }}">¼</div>
+            <dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="144px,144px" style="width:144px;height:144px;display:block"></dc-import>
+          </div>
+        </div>
+        <p style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.6;color:#9aa0a6;margin:24px 0 0;letter-spacing:.02em">Clear space = ¼ of the icon height on every side. Nothing crowds the strip.</p>
+      </div>
+      <!-- min sizes -->
+      <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;padding:30px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;letter-spacing:.08em;margin-bottom:26px">MINIMUM LEGIBLE SIZE · SHOWN ACTUAL</div>
+        <div style="display:flex;flex-direction:column;gap:26px">
+          <div style="display:flex;align-items:center;gap:20px;padding-bottom:24px;border-bottom:1px solid #EFEEEA">
+            <div style="width:150px;display:flex;justify-content:flex-start"><dc-import name="Wordmark" tone="ink" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="96px,20px" style="width:96px;height:20px"></dc-import></div>
+            <div><div style="font-weight:600;font-size:14px">Wordmark</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;margin-top:3px">min 96 px wide</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:20px;padding-bottom:24px;border-bottom:1px solid #EFEEEA">
+            <div style="width:150px;display:flex;justify-content:flex-start"><div style="display:inline-flex;align-items:center;gap:8px"><dc-import name="Icon" mark="b" variant="color" accent="{{ accent }}" hint-size="22px,22px" style="width:22px;height:22px;flex:none"></dc-import><dc-import name="Wordmark" tone="ink" prefix-style="{{ prefixStyle }}" accent="{{ accent }}" hint-size="104px,21px" style="width:104px;height:21px;flex:none"></dc-import></div></div>
+            <div><div style="font-weight:600;font-size:14px">Horizontal lockup</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;margin-top:3px">min 132 px wide</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:20px">
+            <div style="width:150px;display:flex;justify-content:flex-start"><div style="display:inline-flex;align-items:center;gap:12px;background:#17191E;border-radius:8px;padding:8px 12px"><dc-import name="Icon" mark="b" variant="monoInverse" accent="{{ accent }}" hint-size="16px,16px" style="width:16px;height:16px"></dc-import><dc-import name="Icon" mark="b" variant="inverse" accent="{{ accent }}" hint-size="16px,16px" style="width:16px;height:16px"></dc-import></div></div>
+            <div><div style="font-weight:600;font-size:14px">Activity-bar icon</div><div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8A8F96;margin-top:3px">min 16 px · monochrome</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FILES ============ -->
+  <section style="max-width:1160px;margin:56px auto 0;padding:40px 40px 8px;border-top:1px solid #E6E5E0">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8A8F96;margin-bottom:10px"><span style="color:#0B0E11;font-weight:600">06</span> &nbsp;/&nbsp; Master files</div>
+    <h2 style="font-size:31px;font-weight:600;letter-spacing:-.01em;margin:6px 0 26px;max-width:720px">Flat SVG · type outlined · no font needed.</h2>
+    <div style="border:1px solid #E6E5E0;border-radius:12px;background:#fff;overflow:hidden;font-family:'IBM Plex Mono',monospace;font-size:12.5px">
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-icon.svg</span><span style="color:#a2a7ad">mark · color</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-icon-mono.svg</span><span style="color:#a2a7ad">mark · single ink (ship to activity bar)</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-icon-inverse.svg</span><span style="color:#a2a7ad">mark · for dark</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-explore-a-monogram.svg</span><span style="color:#a2a7ad">direction A</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-explore-b-selector.svg</span><span style="color:#a2a7ad">direction B</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-explore-c-reticle.svg</span><span style="color:#a2a7ad">direction C</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-wordmark.svg</span><span style="color:#a2a7ad">wordmark · ink / paper</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;border-bottom:1px solid #F0EFEB;color:#0B0E11"><span>svg/0xtools-lockup-horizontal.svg</span><span style="color:#a2a7ad">+ inverse</span></div>
+      <div data-row style="display:grid;grid-template-columns:1fr auto;gap:16px;padding:13px 22px;color:#0B0E11"><span>svg/0xtools-lockup-stacked.svg</span><span style="color:#a2a7ad">+ inverse</span></div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer style="max-width:1160px;margin:56px auto 0;padding:26px 40px 40px;border-top:1px solid #E6E5E0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.05em;color:#a2a7ad">
+    <span>0xTools — logo system · flat SVG throughout</span>
+    <span>no gradients · no shadows · light + dark</span>
+  </footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;accentColor&quot;: {&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#14C08A&quot;,&quot;options&quot;:[&quot;#14C08A&quot;,&quot;#2BD4A8&quot;,&quot;#3DA9FC&quot;,&quot;#F5A524&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Brand&quot;},
+  &quot;prefixStyle&quot;: {&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;mono&quot;,&quot;unified&quot;,&quot;accent&quot;],&quot;default&quot;:&quot;mono&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},
+  &quot;showGuides&quot;: {&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Spec&quot;}
+}">
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accentColor || '#14C08A';
+    const prefixStyle = this.props.prefixStyle || 'mono';
+    const showGuides = this.props.showGuides !== false;
+    return { accent, prefixStyle, guidesDisp: showGuides ? 'block' : 'none' };
+  }
+}
+</script>
+</body>
+</html>

@@ -22,3 +22,5 @@ releases/*.vsix
 package.lock.json
 yarn.lock
 pnpm-lock.yaml
+# accidental in-place vsix extractions next to the served .vsix
+website/public/downloads/*/
