@@ -63,6 +63,12 @@ function publishToWebsite() {
   log(`Published to website/public/downloads/${vsixName} (page.tsx → v${pkg.version}, ${size})`);
 }
 
+// Dev-only manifest fields that must NOT ship inside the vsix. VS Code never
+// reads them, but marketplace scanners do — a `postinstall` hook referencing a
+// script that isn't in the package is a classic supply-chain-malware signature
+// and gets the upload rejected as "suspicious content".
+const DEV_ONLY_FIELDS = ['scripts', 'devDependencies', 'dependencies', 'lint-staged', 'bin'];
+
 function main() {
   const doInstall = !process.argv.includes('--no-install');
 
@@ -70,14 +76,28 @@ function main() {
   log('Cleaning dist/');
   fs.rmSync(path.join(repoRoot, 'dist'), { recursive: true, force: true });
 
-  // 2. Package with vsce. Its prepublish step runs `npm run compile`
-  //    (fresh webpack build). `--no-dependencies` => no node_modules included.
-  log(`Packaging ${vsixName} (vsce --no-dependencies)`);
+  // 2. Compile ourselves (normally vsce's prepublish hook would, but we strip
+  //    `scripts` from the manifest before packaging).
+  log('Compiling (webpack production)');
+  run('npm', ['run', 'compile'], { cwd: repoRoot });
+
+  // 3. Package with vsce against a sanitized manifest: swap package.json for a
+  //    runtime-only copy, package, then restore — the repo keeps its dev fields.
+  log(`Packaging ${vsixName} (vsce --no-dependencies, sanitized manifest)`);
   if (!fs.existsSync(vsceBin)) {
     throw new Error(`vsce not found at ${vsceBin} — run \`npm install\` first.`);
   }
   fs.rmSync(vsixPath, { force: true });
-  run(vsceBin, ['package', '--no-dependencies', '-o', vsixName], { cwd: repoRoot });
+  const manifestPath = path.join(repoRoot, 'package.json');
+  const originalManifest = fs.readFileSync(manifestPath, 'utf8');
+  const sanitized = JSON.parse(originalManifest);
+  for (const field of DEV_ONLY_FIELDS) delete sanitized[field];
+  try {
+    fs.writeFileSync(manifestPath, JSON.stringify(sanitized, null, 2) + '\n');
+    run(vsceBin, ['package', '--no-dependencies', '-o', vsixName], { cwd: repoRoot });
+  } finally {
+    fs.writeFileSync(manifestPath, originalManifest);
+  }
 
   // 3. Sanity checks: the bundle must be present; the 9 MB soljson must NOT be.
   const listing = execFileSync('unzip', ['-l', vsixPath], { encoding: 'utf8' });
@@ -89,6 +109,14 @@ function main() {
   }
   if (/node_modules/.test(listing)) {
     throw new Error('node_modules leaked into the vsix — all runtime deps must be webpack-bundled');
+  }
+  const shippedManifest = JSON.parse(
+    execFileSync('unzip', ['-p', vsixPath, 'extension/package.json'], { encoding: 'utf8' })
+  );
+  for (const field of DEV_ONLY_FIELDS) {
+    if (shippedManifest[field] !== undefined) {
+      throw new Error(`dev-only field "${field}" leaked into the shipped manifest`);
+    }
   }
   const sizeMB = (fs.statSync(vsixPath).size / 1024 / 1024).toFixed(1);
   log(`Built ${vsixName} (${sizeMB} MB, solc downloads on demand) ✓`);
