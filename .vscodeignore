@@ -21,19 +21,11 @@ eslint.config.js
 *.ts
 **/*.ts
 **/*.map
-bun.lock
-future.md
 tsconfig.webview.json
 .husky/**
 .gitignore
 .git/**
-ARCHITECTURE.md
-Claude.md
-Features.md
-Implementation.md
-forge-gas-example.md
-install
-install-dev.sh
+CLAUDE.md
 CHANGELOG.md
 CONTRIBUTING.md
 
@@ -51,10 +43,6 @@ node_modules/**
 # universal vsix; the extension falls back to forge/solc when it is absent.
 bin/**
 
-# Docs and inventories that don't belong in the install
-# (media/walkthrough/ stays — it backs the contributed Get Started walkthrough)
-FEATURES-INVENTORY.md
-
 # Landing-page website and brand master files live in the repo but never ship
 # inside the extension
 website/**
@@ -62,8 +50,6 @@ brand/**
 skills/**
 *.vsix
 
-# Stray dev files that add nothing at runtime (keep the package minimal for
-# marketplace review: only icon.png is referenced by the manifest)
-icon.svg
+# Dev configs that add nothing at runtime
 .prettierignore
 .versionrc.json

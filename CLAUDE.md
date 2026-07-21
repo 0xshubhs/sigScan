@@ -5,10 +5,10 @@ Solidity smart contract analysis tool — VS Code extension + CLI. Extracts func
 ## Quick Start
 
 ```bash
-pnpm install                    # Install deps
-pnpm run compile                # Build (webpack, production)
+npm install                    # Install deps
+npm run compile                # Build (webpack, production)
 cd runner && cargo build        # Build Rust runner (optional)
-pnpm test                       # Run tests (jest)
+npm test                       # Run tests (jest)
 npx tsc --noEmit                # Type-check only
 ```
 

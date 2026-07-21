@@ -16,9 +16,6 @@ temp/
 # Example project signatures (generated for testing)
 examples/signatures/
 
-# Don't ignore releases directory - we want to track built extensions
-!releases/
-releases/*.vsix
 package.lock.json
 yarn.lock
 pnpm-lock.yaml
