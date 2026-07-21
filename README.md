@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/visual-studio-marketplace/v/0xshubhs.0xtools?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/0xshubhs.0xtools?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/0xshubhs.0xtools?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/0xshubhs/0xtools/pr-validation.yml?branch=main&style=flat-square)](https://github.com/0xshubhs/0xtools/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/0xtoools/0xtools/pr-validation.yml?branch=main&style=flat-square)](https://github.com/0xtoools/0xtools/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
 A professional VS Code extension and CLI tool for automatically scanning and generating method signatures from Solidity smart contracts in Foundry and Hardhat projects.
@@ -610,7 +610,7 @@ Create a `.sigscanrc.json` in your project root:
 
 ```bash
 # Clone the repository
-git clone https://github.com/0xshubhs/0xtools.git
+git clone https://github.com/0xtoools/0xtools.git
 cd 0xtools
 
 # Install dependencies
@@ -702,9 +702,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Links
 
 - [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
-- [GitHub Repository](https://github.com/0xshubhs/0xtools)
-- [Issue Tracker](https://github.com/0xshubhs/0xtools/issues)
-- [Changelog](https://github.com/0xshubhs/0xtools/releases)
+- [GitHub Repository](https://github.com/0xtoools/0xtools)
+- [Issue Tracker](https://github.com/0xtoools/0xtools/issues)
+- [Changelog](https://github.com/0xtoools/0xtools/releases)
 
 ---
 

@@ -919,12 +919,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/0xshubhs/0xtools.git"
+    "url": "https://github.com/0xtoools/0xtools.git"
   },
   "bugs": {
-    "url": "https://github.com/0xshubhs/0xtools/issues"
+    "url": "https://github.com/0xtoools/0xtools/issues"
   },
-  "homepage": "https://github.com/0xshubhs/0xtools#readme",
+  "homepage": "https://github.com/0xtoools/0xtools#readme",
   "author": {
     "name": "0xshubhs",
     "url": "https://github.com/0xshubhs"

@@ -3,7 +3,7 @@
 const VERSION = "0.0.5";
 const VSIX_PATH = `/downloads/0xtools-${VERSION}.vsix`;
 const VSIX_SIZE = "640 KB";
-const GITHUB = "https://github.com/0xshubhs/0xtools";
+const GITHUB = "https://github.com/0xtoools/0xtools";
 
 /* ---------- brand mark: the Selector Strip (24 grid · 4 cells · one lit) ---------- */
 
