@@ -1,5 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
+import { EditorDemo } from "@/components/editor-demo";
 import { ModeToggle } from "@/components/mode-toggle";
+import { Reveal } from "@/components/reveal";
 
 const VERSION = "0.0.5";
 const VSIX_PATH = `/downloads/0xtools-${VERSION}.vsix`;
@@ -130,132 +132,56 @@ function Nav() {
 
 /* ---------- hero ---------- */
 
-function Line({ n, children }: { n: number; children: React.ReactNode }) {
-  return (
-    <span className="block">
-      <span className="mr-4 inline-block w-4 select-none text-right text-muted/50">
-        {n}
-      </span>
-      {children}
-    </span>
-  );
-}
-
-function EditorMock() {
-  return (
-    <div className="relative">
-      <div className="border-2 border-edge bg-panel shadow-brut-lg">
-        {/* title bar */}
-        <div className="flex items-center justify-between border-b-2 border-ink bg-dark px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full border border-paper/30 bg-[#ff5f57]" />
-            <span className="h-3 w-3 rounded-full border border-paper/30 bg-amber" />
-            <span className="h-3 w-3 rounded-full border border-paper/30 bg-accent" />
-          </div>
-          <span className="font-mono text-xs text-muted">Vault.sol — VS Code</span>
-          <Strip className="h-5 w-5" stroke="#F4F4F1" />
-        </div>
-        {/* code */}
-        <pre className="overflow-x-auto p-5 font-mono text-[13px] leading-7 text-paper/90">
-          <code>
-            <Line n={1}>
-              <span className="text-muted">{"// SPDX-License-Identifier: MIT"}</span>
-            </Line>
-            <Line n={2}>
-              <span className="text-blue">pragma</span> solidity ^0.8.24;
-            </Line>
-            <Line n={3}> </Line>
-            <Line n={4}>
-              <span className="text-blue">contract</span>{" "}
-              <span className="text-amber">Vault</span> {"{"}
-            </Line>
-            <Line n={5}>
-              {"  "}
-              <span className="text-blue">mapping</span>(address {"=>"} uint256){" "}
-              <span className="text-blue">public</span> balances;
-            </Line>
-            <Line n={6}> </Line>
-            <Line n={7}>
-              {"  "}
-              <span className="text-blue">function</span>{" "}
-              <span className="text-accent">deposit</span>(){" "}
-              <span className="text-blue">external payable</span> {"{"}
-              <span className="ml-4 border border-accent/40 bg-accent/10 px-1.5 text-[11px] text-accent">
-                ⛽ 43,674 gas
-              </span>
-            </Line>
-            <Line n={8}>{"    balances[msg.sender] += msg.value;"}</Line>
-            <Line n={9}>{"  }"}</Line>
-            <Line n={10}> </Line>
-            <Line n={11}>
-              {"  "}
-              <span className="text-blue">function</span>{" "}
-              <span className="text-accent">withdraw</span>(uint256){" "}
-              <span className="text-blue">external</span> {"{"}
-              <span className="ml-4 border border-amber/40 bg-amber/10 px-1.5 text-[11px] text-amber">
-                ⛽ 30,421 gas
-              </span>
-            </Line>
-            <Line n={12}>
-              {"    "}...<span className="animate-blink text-paper">▌</span>
-            </Line>
-          </code>
-        </pre>
-      </div>
-      {/* hover card */}
-      <div className="absolute -bottom-7 -right-3 rotate-[2deg] border-2 border-ink bg-paper px-4 py-3 font-mono text-xs text-ink shadow-brut sm:-right-6">
-        <div className="mb-1 flex items-center gap-2">
-          <Strip className="h-4 w-4" />
-          <span className="font-semibold">withdraw(uint256)</span>
-        </div>
-        <div className="text-muted">
-          selector <span className="text-accent-deep">0x2e1a7d4d</span> · 4byte ✓
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Hero() {
   return (
     <header className="border-b-2 border-edge">
       <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-16 lg:grid-cols-2 lg:py-24 [&>*]:min-w-0">
         <div>
-          <div className="mb-6 inline-block -rotate-2 border-2 border-ink bg-amber px-3 py-1 font-mono text-xs font-semibold text-ink shadow-brut-sm">
-            NOT ON THE MARKETPLACE YET — VSIX SHIPS FROM HERE
-          </div>
-          <h1 className="text-5xl font-bold leading-[1.02] tracking-tight sm:text-6xl lg:text-7xl">
-            Read the{" "}
-            <span className="bg-accent px-2 text-ink shadow-brut-sm">EVM</span>{" "}
-            without leaving your editor.
-          </h1>
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-body/70">
-            0xTools decodes function selectors, event topics and error selectors
-            — and annotates gas inline — right inside VS Code. Plus security
-            audits, one-click Anvil, and a full EVM toolbox.
-          </p>
-          <div className="mt-9 flex flex-wrap items-center gap-4">
-            <a
-              href={VSIX_PATH}
-              download
-              className="border-2 border-edge bg-accent px-6 py-4 font-mono text-sm font-semibold text-ink shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
-            >
-              ↓ DOWNLOAD .VSIX · v{VERSION} · {VSIX_SIZE}
-            </a>
-            <a
-              href={GITHUB}
-              target="_blank"
-              rel="noreferrer"
-              className="border-2 border-edge bg-surface px-6 py-4 font-mono text-sm font-semibold shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
-            >
-              STAR ON GITHUB ↗
-            </a>
-          </div>
-          <p className="mt-5 font-mono text-xs text-muted">
-            MIT licensed · Foundry + Hardhat · works offline
-          </p>
+          <Reveal delay={0}>
+            <div className="mb-6 inline-block -rotate-2 border-2 border-ink bg-amber px-3 py-1 font-mono text-xs font-semibold text-ink shadow-brut-sm">
+              NOT ON THE MARKETPLACE YET — VSIX SHIPS FROM HERE
+            </div>
+          </Reveal>
+          <Reveal delay={0.06}>
+            <h1 className="text-5xl font-bold leading-[1.02] tracking-tight sm:text-6xl lg:text-7xl">
+              Read the{" "}
+              <span className="bg-accent px-2 text-ink shadow-brut-sm">EVM</span>{" "}
+              without leaving your editor.
+            </h1>
+          </Reveal>
+          <Reveal delay={0.14}>
+            <p className="mt-6 max-w-xl text-lg leading-relaxed text-body/70">
+              0xTools decodes function selectors, event topics and error
+              selectors — and annotates gas inline — right inside VS Code. Plus
+              security audits, one-click Anvil, and a full EVM toolbox.
+            </p>
+          </Reveal>
+          <Reveal delay={0.22}>
+            <div className="mt-9 flex flex-wrap items-center gap-4">
+              <a
+                href={VSIX_PATH}
+                download
+                className="border-2 border-edge bg-accent px-6 py-4 font-mono text-sm font-semibold text-ink shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
+              >
+                ↓ DOWNLOAD .VSIX · v{VERSION} · {VSIX_SIZE}
+              </a>
+              <a
+                href={GITHUB}
+                target="_blank"
+                rel="noreferrer"
+                className="border-2 border-edge bg-surface px-6 py-4 font-mono text-sm font-semibold shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
+              >
+                STAR ON GITHUB ↗
+              </a>
+            </div>
+            <p className="mt-5 font-mono text-xs text-muted">
+              MIT licensed · Foundry + Hardhat · works offline
+            </p>
+          </Reveal>
         </div>
-        <EditorMock />
+        <Reveal x={28} y={0} delay={0.15}>
+          <EditorDemo />
+        </Reveal>
       </div>
     </header>
   );
@@ -274,13 +200,13 @@ function Stats() {
   return (
     <div className="border-b-2 border-edge bg-dark dark:bg-panel">
       <div className="mx-auto grid max-w-6xl grid-cols-2 sm:grid-cols-4">
-        {STATS.map(([big, small]) => (
-          <div key={small} className="px-5 py-6 text-center">
+        {STATS.map(([big, small], i) => (
+          <Reveal key={small} delay={i * 0.07} y={16} className="px-5 py-6 text-center">
             <div className="text-2xl font-bold text-accent sm:text-3xl">{big}</div>
             <div className="mt-1 font-mono text-[11px] tracking-widest text-muted">
               {small}
             </div>
-          </div>
+          </Reveal>
         ))}
       </div>
     </div>
@@ -332,17 +258,20 @@ function Features() {
   return (
     <section id="features" className="border-b-2 border-edge">
       <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
-        <div className="mb-3 font-mono text-xs tracking-[0.2em] text-muted">
-          01 / WHAT IT DOES
-        </div>
-        <h2 className="mb-12 max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl">
-          The Solidity toolkit that lives{" "}
-          <span className="bg-amber px-2 text-ink shadow-brut-sm">in the editor.</span>
-        </h2>
+        <Reveal>
+          <div className="mb-3 font-mono text-xs tracking-[0.2em] text-muted">
+            01 / WHAT IT DOES
+          </div>
+          <h2 className="mb-12 max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl">
+            The Solidity toolkit that lives{" "}
+            <span className="bg-amber px-2 text-ink shadow-brut-sm">in the editor.</span>
+          </h2>
+        </Reveal>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map(([num, tag, title, body]) => (
-            <div
+          {FEATURES.map(([num, tag, title, body], i) => (
+            <Reveal
               key={num}
+              delay={(i % 3) * 0.08}
               className="border-2 border-edge bg-surface p-6 shadow-brut transition-all hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-none"
             >
               <div className="mb-4 flex items-center justify-between">
@@ -353,7 +282,7 @@ function Features() {
               </div>
               <h3 className="mb-2 text-lg font-bold">{title}</h3>
               <p className="text-sm leading-relaxed text-body/70">{body}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </div>
@@ -367,18 +296,20 @@ function Install() {
   return (
     <section id="install" className="border-b-2 border-edge bg-accent text-ink">
       <div className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
-        <div className="mb-3 font-mono text-xs tracking-[0.2em] text-ink/60">
-          02 / INSTALL
-        </div>
-        <h2 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
-          Three steps. No marketplace.
-        </h2>
-        <p className="mb-12 max-w-xl text-ink/70">
-          We ship the VSIX directly while the marketplace listing is in the
-          works. Same extension, zero middlemen.
-        </p>
+        <Reveal>
+          <div className="mb-3 font-mono text-xs tracking-[0.2em] text-ink/60">
+            02 / INSTALL
+          </div>
+          <h2 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
+            Three steps. No marketplace.
+          </h2>
+          <p className="mb-12 max-w-xl text-ink/70">
+            We ship the VSIX directly while the marketplace listing is in the
+            works. Same extension, zero middlemen.
+          </p>
+        </Reveal>
         <div className="grid gap-6 lg:grid-cols-3">
-          <div className="border-2 border-ink bg-paper p-6 shadow-brut">
+          <Reveal className="border-2 border-ink bg-paper p-6 shadow-brut">
             <div className="mb-3 inline-block border-2 border-ink bg-ink px-3 py-1 font-mono text-sm font-bold text-paper">
               STEP 1
             </div>
@@ -390,8 +321,8 @@ function Install() {
             >
               ↓ 0xtools-{VERSION}.vsix
             </a>
-          </div>
-          <div className="border-2 border-ink bg-paper p-6 shadow-brut">
+          </Reveal>
+          <Reveal delay={0.08} className="border-2 border-ink bg-paper p-6 shadow-brut">
             <div className="mb-3 inline-block border-2 border-ink bg-ink px-3 py-1 font-mono text-sm font-bold text-paper">
               STEP 2
             </div>
@@ -402,8 +333,8 @@ function Install() {
             <p className="mt-3 font-mono text-[11px] leading-relaxed text-muted">
               or: Extensions panel → ··· menu → “Install from VSIX…”
             </p>
-          </div>
-          <div className="border-2 border-ink bg-paper p-6 shadow-brut">
+          </Reveal>
+          <Reveal delay={0.16} className="border-2 border-ink bg-paper p-6 shadow-brut">
             <div className="mb-3 inline-block border-2 border-ink bg-ink px-3 py-1 font-mono text-sm font-bold text-paper">
               STEP 3
             </div>
@@ -413,7 +344,7 @@ function Install() {
               <Strip className="inline h-4 w-4 align-text-bottom" /> activity-bar
               dashboard light up automatically.
             </p>
-          </div>
+          </Reveal>
         </div>
       </div>
     </section>
