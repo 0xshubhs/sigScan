@@ -1,8 +1,5 @@
 # 0xTools - Solidity Developer Toolkit
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/0xshubhs.0xtools?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/0xshubhs.0xtools?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
-[![Rating](https://img.shields.io/visual-studio-marketplace/r/0xshubhs.0xtools?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=0xshubhs.0xtools)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/0xtoools/0xtools/pr-validation.yml?branch=main&style=flat-square)](https://github.com/0xtoools/0xtools/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 

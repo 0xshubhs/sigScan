@@ -33,10 +33,11 @@ function nodeRequire(id: string): any {
   if (typeof __non_webpack_require__ === 'function') {
     return __non_webpack_require__(id);
   }
-  // Unbundled contexts (jest / ts-node) only. eval hides the dynamic require
-  // from webpack's static analysis; the bundle always takes the branch above.
-
-  return eval('require')(id);
+  // Unbundled contexts (jest / ts-node) only. createRequire gives a dynamic
+  // require webpack's static analysis leaves alone — never eval: marketplace
+  // malware scanners flag any eval in the shipped bundle.
+  const { createRequire } = require('module') as typeof import('module');
+  return createRequire(__filename)(id);
 }
 
 /**
