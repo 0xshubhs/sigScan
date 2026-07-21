@@ -61,3 +61,9 @@ website/**
 brand/**
 skills/**
 *.vsix
+
+# Stray dev files that add nothing at runtime (keep the package minimal for
+# marketplace review: only icon.png is referenced by the manifest)
+icon.svg
+.prettierignore
+.versionrc.json

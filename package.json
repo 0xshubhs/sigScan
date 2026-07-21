@@ -2,7 +2,7 @@
   "name": "0xtools",
   "displayName": "0xTools - Solidity Developer Toolkit",
   "description": "The ultimate Solidity development toolkit — gas analysis, security audits, on-chain inspection, Foundry/Hardhat integration, and more",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "0xshubhs",
   "icon": "icon.png",
   "engines": {
@@ -481,13 +481,23 @@
         "toolReferenceName": "auditSolidity",
         "canBeReferencedInPrompt": true,
         "icon": "$(shield)",
-        "tags": ["solidity", "security", "0xtools"],
+        "tags": [
+          "solidity",
+          "security",
+          "0xtools"
+        ],
         "modelDescription": "Run 0xTools' deterministic security analyzers (reentrancy, unchecked calls, access control, missing events, natspec, dangerous patterns, DeFi risks, MEV) over Solidity code. Pass `source` (code) or `path` (file/project). Returns findings with file, line, severity, message.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "source": { "type": "string", "description": "Solidity source code to audit" },
-            "path": { "type": "string", "description": "Absolute path to a .sol file or project directory" }
+            "source": {
+              "type": "string",
+              "description": "Solidity source code to audit"
+            },
+            "path": {
+              "type": "string",
+              "description": "Absolute path to a .sol file or project directory"
+            }
           }
         }
       },
@@ -497,14 +507,23 @@
         "toolReferenceName": "scanSignatures",
         "canBeReferencedInPrompt": true,
         "icon": "$(symbol-method)",
-        "tags": ["solidity", "selectors", "0xtools"],
+        "tags": [
+          "solidity",
+          "selectors",
+          "0xtools"
+        ],
         "modelDescription": "Scan a Solidity project or file and return every contract's function/event/error signatures with exact 4-byte selectors and 32-byte topics.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "path": { "type": "string", "description": "Absolute path to a .sol file or project directory" }
+            "path": {
+              "type": "string",
+              "description": "Absolute path to a .sol file or project directory"
+            }
           },
-          "required": ["path"]
+          "required": [
+            "path"
+          ]
         }
       },
       {
@@ -513,14 +532,23 @@
         "toolReferenceName": "computeSelector",
         "canBeReferencedInPrompt": true,
         "icon": "$(symbol-key)",
-        "tags": ["solidity", "selectors", "0xtools"],
+        "tags": [
+          "solidity",
+          "selectors",
+          "0xtools"
+        ],
         "modelDescription": "Compute the exact 4-byte selector and event topic0 for a canonical signature like transfer(address,uint256). Never guess selectors — call this.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "signature": { "type": "string", "description": "Canonical signature, e.g. transfer(address,uint256)" }
+            "signature": {
+              "type": "string",
+              "description": "Canonical signature, e.g. transfer(address,uint256)"
+            }
           },
-          "required": ["signature"]
+          "required": [
+            "signature"
+          ]
         }
       },
       {
@@ -529,14 +557,23 @@
         "toolReferenceName": "lookupSelector",
         "canBeReferencedInPrompt": true,
         "icon": "$(search)",
-        "tags": ["solidity", "selectors", "0xtools"],
+        "tags": [
+          "solidity",
+          "selectors",
+          "0xtools"
+        ],
         "modelDescription": "Resolve an unknown 4-byte selector (e.g. 0xa9059cbb) to known text signatures via the cached 4byte.directory.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "selector": { "type": "string", "description": "4-byte selector, e.g. 0xa9059cbb" }
+            "selector": {
+              "type": "string",
+              "description": "4-byte selector, e.g. 0xa9059cbb"
+            }
           },
-          "required": ["selector"]
+          "required": [
+            "selector"
+          ]
         }
       },
       {
@@ -545,14 +582,23 @@
         "toolReferenceName": "decodeCalldata",
         "canBeReferencedInPrompt": true,
         "icon": "$(file-binary)",
-        "tags": ["evm", "calldata", "0xtools"],
+        "tags": [
+          "evm",
+          "calldata",
+          "0xtools"
+        ],
         "modelDescription": "Decode raw EVM calldata into function name and typed argument values, using workspace signatures and the 4byte directory.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "calldata": { "type": "string", "description": "0x-prefixed calldata blob" }
+            "calldata": {
+              "type": "string",
+              "description": "0x-prefixed calldata blob"
+            }
           },
-          "required": ["calldata"]
+          "required": [
+            "calldata"
+          ]
         }
       },
       {
@@ -561,15 +607,27 @@
         "toolReferenceName": "encodeCalldata",
         "canBeReferencedInPrompt": true,
         "icon": "$(file-code)",
-        "tags": ["evm", "calldata", "0xtools"],
+        "tags": [
+          "evm",
+          "calldata",
+          "0xtools"
+        ],
         "modelDescription": "ABI-encode a function call from a human signature and comma-separated args. Returns selector + calldata hex.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "signature": { "type": "string", "description": "Function signature, e.g. transfer(address,uint256)" },
-            "args": { "type": "string", "description": "Comma-separated argument values" }
+            "signature": {
+              "type": "string",
+              "description": "Function signature, e.g. transfer(address,uint256)"
+            },
+            "args": {
+              "type": "string",
+              "description": "Comma-separated argument values"
+            }
           },
-          "required": ["signature"]
+          "required": [
+            "signature"
+          ]
         }
       },
       {
@@ -578,15 +636,29 @@
         "toolReferenceName": "keccak256",
         "canBeReferencedInPrompt": true,
         "icon": "$(key)",
-        "tags": ["evm", "hash", "0xtools"],
+        "tags": [
+          "evm",
+          "hash",
+          "0xtools"
+        ],
         "modelDescription": "Keccak-256 hash of UTF-8 text (mode utf8) or a 0x hex byte string (mode hex). Deterministic — never guess hashes.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "input": { "type": "string" },
-            "mode": { "type": "string", "enum": ["utf8", "hex"] }
+            "input": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "utf8",
+                "hex"
+              ]
+            }
           },
-          "required": ["input"]
+          "required": [
+            "input"
+          ]
         }
       },
       {
@@ -595,14 +667,23 @@
         "toolReferenceName": "convertEthUnits",
         "canBeReferencedInPrompt": true,
         "icon": "$(arrow-swap)",
-        "tags": ["evm", "units", "0xtools"],
+        "tags": [
+          "evm",
+          "units",
+          "0xtools"
+        ],
         "modelDescription": "Convert amounts between wei/gwei/ether and all named units. Input like '1.5 ether' or '21000 gwei'. Returns the full conversion table.",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "amount": { "type": "string", "description": "e.g. '1.5 ether' or a bare wei value" }
+            "amount": {
+              "type": "string",
+              "description": "e.g. '1.5 ether' or a bare wei value"
+            }
           },
-          "required": ["amount"]
+          "required": [
+            "amount"
+          ]
         }
       }
     ],
@@ -1078,5 +1159,6 @@
       "href": "https://opensource.org/licenses/MIT",
       "description": "MIT License"
     }
-  ]
+  ],
+  "pricing": "Free"
 }
