@@ -306,99 +306,100 @@ function Features() {
 
 /* ---------- arsenal: everything inside ---------- */
 
-const ARSENAL: [string, string[]][] = [
+/* each entry: [label, repo path] — the chip links straight to the source */
+const ARSENAL: [string, [string, string][]][] = [
   [
     "GAS",
     [
-      "inline gas annotations",
-      "gas optimizer",
-      "gas snapshots",
-      "compare with branch",
-      "deployment cost",
-      "runtime profiler",
-      "live gas prices",
-      "contract size",
-      "complexity analysis",
+      ["inline gas annotations", "src/features/gas-decorations.ts"],
+      ["gas optimizer", "src/features/gas-optimizer.ts"],
+      ["gas snapshots", "src/features/gas-snapshot.ts"],
+      ["compare with branch", "src/features/regression.ts"],
+      ["deployment cost", "src/features/gas.ts"],
+      ["runtime profiler", "src/features/profiler.ts"],
+      ["live gas prices", "src/features/gas-pricing.ts"],
+      ["contract size", "src/features/size.ts"],
+      ["complexity analysis", "src/features/complexity.ts"],
     ],
   ],
   [
     "DECODE & SELECTORS",
     [
-      "selector hover decode",
-      "4-byte lookup",
-      "collision detection",
-      "event topic decode",
-      "error selector decode",
-      "calldata decoder",
-      "raw tx decoder",
-      "event log decoder",
-      "signature database",
-      "ABI export",
+      ["selector hover decode", "src/extension/providers/selector-hover-provider.ts"],
+      ["4-byte lookup", "src/features/four-byte-lookup.ts"],
+      ["collision detection", "src/features/collision-detector.ts"],
+      ["event topic decode", "src/features/event-decoder.ts"],
+      ["error selector decode", "src/core/parser.ts"],
+      ["calldata decoder", "src/features/eth-tools/decoder.ts"],
+      ["raw tx decoder", "src/features/remix-port/tx-format.ts"],
+      ["event log decoder", "src/features/remix-port/events-decoder.ts"],
+      ["signature database", "src/features/database.ts"],
+      ["ABI export", "src/core/exporter.ts"],
     ],
   ],
   [
     "SECURITY",
     [
-      "reentrancy",
-      "unchecked calls",
-      "access control",
-      "missing events",
-      "natspec check",
-      "ERC-20/721/1155/4626 compliance",
-      "dangerous patterns",
-      "DeFi risk patterns",
-      "MEV analysis",
-      "invariant detection",
-      "upgrade compatibility",
-      "storage layout",
-      "call graph",
-      "custom error suggestions",
-      "Slither",
-      "Mythril",
+      ["reentrancy", "src/features/reentrancy-detector.ts"],
+      ["unchecked calls", "src/features/unchecked-calls.ts"],
+      ["access control", "src/features/access-control.ts"],
+      ["missing events", "src/features/event-checker.ts"],
+      ["natspec check", "src/features/natspec-checker.ts"],
+      ["ERC-20/721/1155/4626 compliance", "src/features/interface-check.ts"],
+      ["dangerous patterns", "src/features/dangerous-patterns.ts"],
+      ["DeFi risk patterns", "src/features/defi-risks.ts"],
+      ["MEV analysis", "src/features/mev-analyzer.ts"],
+      ["invariant detection", "src/features/invariant-detector.ts"],
+      ["upgrade compatibility", "src/features/upgrade-analyzer.ts"],
+      ["storage layout", "src/features/storage-layout.ts"],
+      ["call graph", "src/features/call-graph.ts"],
+      ["custom error suggestions", "src/features/custom-error-suggestions.ts"],
+      ["Slither", "src/features/slither-integration.ts"],
+      ["Mythril", "src/features/mythril-integration.ts"],
     ],
   ],
   [
     "DEPLOY & RUN",
     [
-      "one-click Anvil",
-      "deploy dashboard",
-      "Foundry keystores",
-      "forge script runner",
-      "test CodeLens",
-      "build diagnostics",
-      "contract playground",
-      "interactive notebooks",
-      "fork simulator",
-      "Tenderly simulation",
-      "Etherscan verify",
-      "Cast",
-      "Hardhat support",
+      ["one-click Anvil", "src/features/anvil-manager.ts"],
+      ["deploy dashboard", "src/extension/providers/deploy-run-provider.ts"],
+      ["Foundry keystores", "src/features/keystore-discovery.ts"],
+      ["forge script runner", "src/features/forge-script-runner.ts"],
+      ["test CodeLens", "src/features/forge-test-runner.ts"],
+      ["build diagnostics", "src/features/build-diagnostics.ts"],
+      ["contract playground", "src/extension/providers/playground.ts"],
+      ["interactive notebooks", "src/extension/providers/notebook-provider.ts"],
+      ["fork simulator", "src/features/fork-simulator.ts"],
+      ["Tenderly simulation", "src/features/tenderly-integration.ts"],
+      ["Etherscan verify", "src/features/source-verifier.ts"],
+      ["Cast", "src/features/cast-integration.ts"],
+      ["Hardhat support", "src/features/hardhat-integration.ts"],
     ],
   ],
   [
     "EVM TOOLBOX",
     [
-      "ABI encode/decode",
-      "calldata encode/decode",
-      "unit converter",
-      "keccak-256",
-      "storage slot calc",
-      "CREATE2 address",
-      "epoch converter",
-      "ETH constants",
-      "address inspector",
+      ["ABI encode/decode", "src/features/eth-tools/encoder.ts"],
+      ["calldata encode/decode", "src/features/eth-tools/decoder.ts"],
+      ["unit converter", "src/features/eth-tools/units.ts"],
+      ["keccak-256", "src/features/eth-tools/hash.ts"],
+      ["storage slot calc", "src/features/eth-tools/slots.ts"],
+      ["CREATE2 address", "src/features/eth-tools/address.ts"],
+      ["epoch converter", "src/features/eth-tools/epoch.ts"],
+      ["ETH constants", "src/features/eth-tools/constants.ts"],
+      ["address inspector", "src/features/address-inspector.ts"],
     ],
   ],
   [
     "EDITOR",
     [
-      "Solidity snippets",
-      "quick fixes",
-      "contract flattener",
-      "chain explorer",
-      "remappings",
-      "multi-version solc (download on demand)",
-      "real-time file watcher",
+      ["Solidity snippets", "src/features/snippet-provider.ts"],
+      ["quick fixes", "src/extension/providers/code-action-provider.ts"],
+      ["contract flattener", "src/features/contract-flattener.ts"],
+      ["chain explorer", "src/features/chain-explorer.ts"],
+      ["remappings", "src/features/remappings.ts"],
+      ["multi-version solc (download on demand)", "src/features/SolcManager.ts"],
+      ["real-time file watcher", "src/core/watcher.ts"],
     ],
   ],
 ];
@@ -411,10 +412,13 @@ function Arsenal() {
           <div className="mb-3 font-mono text-xs tracking-[0.2em] text-muted">
             02 / EVERYTHING INSIDE
           </div>
-          <h2 className="mb-12 max-w-2xl text-4xl font-bold tracking-tight text-paper sm:text-5xl">
+          <h2 className="mb-4 max-w-2xl text-4xl font-bold tracking-tight text-paper sm:text-5xl">
             101 commands.{" "}
             <span className="bg-accent px-2 text-ink shadow-brut-sm">One 640 KB VSIX.</span>
           </h2>
+          <p className="mb-12 font-mono text-xs text-muted">
+            nothing to hide — every chip links to its source file ↗
+          </p>
         </Reveal>
         <div className="grid gap-5 md:grid-cols-2">
           {ARSENAL.map(([group, items], i) => (
@@ -424,13 +428,17 @@ function Arsenal() {
                   {group}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {items.map((it) => (
-                    <span
-                      key={it}
-                      className="border border-paper/25 px-2 py-1 font-mono text-[11px] text-paper/80 transition-colors hover:border-accent hover:text-accent"
+                  {items.map(([label, path]) => (
+                    <a
+                      key={label}
+                      href={`${GITHUB}/blob/main/${path}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={path}
+                      className="border border-paper/25 px-2 py-1 font-mono text-[11px] text-paper/80 transition-colors hover:border-accent hover:bg-accent/10 hover:text-accent"
                     >
-                      {it}
-                    </span>
+                      {label}
+                    </a>
                   ))}
                 </div>
               </div>

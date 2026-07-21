@@ -170,50 +170,81 @@ const N = CARDS.length;
 export function FeatureDeck() {
   const reduce = useReducedMotion();
   const [front, setFront] = useState(0);
+  const [dragging, setDragging] = useState(false);
 
+  // auto-advance; the `front` dep restarts the hold timer after any manual
+  // shuffle so a fresh card always gets its full time on top
   useEffect(() => {
-    if (reduce) return;
+    if (dragging) return;
     const t = setInterval(() => setFront((f) => (f + 1) % N), HOLD_MS);
     return () => clearInterval(t);
-  }, [reduce]);
+  }, [front, dragging]);
+
+  const advance = () => setFront((f) => (f + 1) % N);
 
   return (
     <div className="relative mr-4 mt-6 h-[350px] sm:h-[380px]" aria-label="0xTools feature demos">
       {CARDS.map((card, i) => {
         const pos = (i - front + N) % N; // 0 = front
+        const isFront = pos === 0;
         const shown = pos <= 2;
         return (
           <motion.div
             key={card.key}
             initial={false}
             animate={{
-              x: pos * 16,
-              y: pos * -14,
-              rotate: pos === 0 ? -1 : pos === 1 ? 1.5 : 3,
-              scale: 1 - pos * 0.04,
-              opacity: shown ? 1 : 0,
+              x: reduce ? 0 : pos * 16,
+              y: reduce ? 0 : pos * -14,
+              rotate: reduce ? 0 : pos === 0 ? -1 : pos === 1 ? 1.5 : 3,
+              scale: reduce ? 1 : 1 - pos * 0.04,
+              opacity: reduce ? (isFront ? 1 : 0) : shown ? 1 : 0,
             }}
-            transition={SPRING}
+            transition={reduce ? { duration: 0.3 } : SPRING}
             style={{ zIndex: N - pos }}
-            className="absolute inset-0"
+            drag={isFront && !reduce}
+            dragSnapToOrigin
+            dragElastic={0.6}
+            onDragStart={() => setDragging(true)}
+            onDragEnd={(_, info) => {
+              setDragging(false);
+              if (
+                Math.abs(info.offset.x) > 90 ||
+                Math.abs(info.velocity.x) > 500 ||
+                Math.abs(info.offset.y) > 90
+              ) {
+                advance();
+              }
+            }}
+            onTap={() => {
+              if (isFront && !dragging) advance();
+            }}
+            className={`absolute inset-0 ${
+              isFront ? "cursor-grab active:cursor-grabbing" : "pointer-events-none"
+            }`}
           >
             {card.node}
           </motion.div>
         );
       })}
-      {/* deck progress */}
+      {/* deck progress — clickable */}
       <div className="absolute -bottom-8 left-0 z-50 flex items-center gap-1.5">
         {CARDS.map((c, i) => (
-          <motion.span
+          <motion.button
             key={c.key}
+            type="button"
+            aria-label={`Show card ${i + 1}`}
+            onClick={() => setFront(i)}
             animate={{
               backgroundColor: i === front ? "#14c08a" : "rgba(138,143,150,0.35)",
-              width: i === front ? 22 : 8,
+              width: i === front ? 22 : 10,
             }}
             transition={{ duration: 0.3 }}
-            className="h-2 border border-edge/40"
+            className="h-2.5 cursor-pointer border border-edge/40"
           />
         ))}
+      </div>
+      <div className="absolute -bottom-8 right-0 z-50 font-mono text-[10px] text-muted">
+        drag / tap to shuffle
       </div>
     </div>
   );
