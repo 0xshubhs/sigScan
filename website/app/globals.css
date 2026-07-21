@@ -61,6 +61,22 @@ body {
   color: var(--body);
 }
 
+/* faint construction-grid backdrop for the hero (edge-colored, theme-aware) */
+.hero-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--edge) 6%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--edge) 6%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 36px 36px;
+}
+
 @keyframes marquee {
   from {
     transform: translateX(0);

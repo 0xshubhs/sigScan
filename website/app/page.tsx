@@ -1,5 +1,5 @@
 /* eslint-disable @next/next/no-img-element */
-import { EditorDemo } from "@/components/editor-demo";
+import { FeatureDeck } from "@/components/feature-deck";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Reveal } from "@/components/reveal";
 
@@ -134,19 +134,22 @@ function Nav() {
 
 function Hero() {
   return (
-    <header className="border-b-2 border-edge">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-16 lg:grid-cols-2 lg:py-24 [&>*]:min-w-0">
+    <header className="hero-grid border-b-2 border-edge">
+      <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-16 lg:grid-cols-2 lg:py-24 [&>*]:min-w-0">
         <div>
           <Reveal delay={0}>
-            <div className="mb-6 inline-block -rotate-2 border-2 border-ink bg-amber px-3 py-1 font-mono text-xs font-semibold text-ink shadow-brut-sm">
-              NOT ON THE MARKETPLACE YET — VSIX SHIPS FROM HERE
+            <div className="mb-5 font-mono text-xs tracking-[0.18em] text-muted">
+              SOLIDITY · EVM · SELECTOR DECODING · INLINE GAS
             </div>
           </Reveal>
           <Reveal delay={0.06}>
-            <h1 className="text-5xl font-bold leading-[1.02] tracking-tight sm:text-6xl lg:text-7xl">
+            <h1 className="text-5xl font-bold leading-[1.04] tracking-tight sm:text-6xl lg:text-7xl">
               Read the{" "}
               <span className="bg-accent px-2 text-ink shadow-brut-sm">EVM</span>{" "}
-              without leaving your editor.
+              without leaving{" "}
+              <span className="underline decoration-accent decoration-[6px] underline-offset-8">
+                your editor.
+              </span>
             </h1>
           </Reveal>
           <Reveal delay={0.14}>
@@ -174,13 +177,24 @@ function Hero() {
                 STAR ON GITHUB ↗
               </a>
             </div>
-            <p className="mt-5 font-mono text-xs text-muted">
-              MIT licensed · Foundry + Hardhat · works offline
-            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              {["MIT LICENSED", "FOUNDRY + HARDHAT", "WORKS OFFLINE", "101 COMMANDS"].map(
+                (t) => (
+                  <span key={t} className="border border-edge/40 px-2 py-1 text-muted">
+                    {t}
+                  </span>
+                ),
+              )}
+            </div>
           </Reveal>
         </div>
         <Reveal x={28} y={0} delay={0.15}>
-          <EditorDemo />
+          <div className="relative">
+            <div className="absolute -top-4 left-4 z-[60] -rotate-3 border-2 border-ink bg-amber px-3 py-1 font-mono text-[11px] font-semibold text-ink shadow-brut-sm">
+              NOT ON THE MARKETPLACE YET — VSIX SHIPS FROM HERE
+            </div>
+            <FeatureDeck />
+          </div>
         </Reveal>
       </div>
     </header>
