@@ -26,14 +26,15 @@ module.exports = (_env, argv) => {
       // solc is ~9 MB of WASM; keep it external — loaded from node_modules at runtime.
       // SolcManager.ts already lazy-loads it via require('solc'), so this is safe.
       solc: 'commonjs solc',
-      // ws is pulled in by ethers' WebSocket provider — we only use HTTP RPC so this
-      // path is never hit, but webpack still tries to bundle it. Mark external.
-      ws: 'commonjs ws',
     },
     resolve: {
       extensions: ['.ts', '.js'],
       fallback: {
         fsevents: false,
+        // ws (pulled in by ethers' WebSocket provider) probes for these native
+        // speed-ups inside a try/catch and works fine without them.
+        bufferutil: false,
+        'utf-8-validate': false,
       },
     },
     module: {
